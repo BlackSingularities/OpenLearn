@@ -1,0 +1,1067 @@
+/* Style scen tekstowych (kind: 'page') – polski, angielski, konfiguracja elektronowa. */
+
+.stage-page {
+  color: var(--text);
+}
+.poem,
+.tense,
+.cond,
+.timeline,
+.config {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 28px 28px 24px;
+  box-shadow: 0 20px 50px -30px rgba(0, 0, 0, 0.35);
+}
+.poem-source {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 18px;
+}
+.poem-info {
+  margin: 18px 0 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* ---------- Wersyfikacja ---------- */
+.verse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px 10px;
+  font-family: var(--font-serif);
+  font-size: clamp(18px, 2.2vw, 24px);
+  padding: 12px 0;
+}
+.word {
+  display: inline-flex;
+}
+.word.split {
+  gap: 4px;
+}
+.syl {
+  position: relative;
+  display: inline-block;
+  border-radius: 8px;
+  padding: 2px 1px;
+  border: 1px solid transparent;
+}
+.syl.boxed {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  padding: 2px 7px;
+}
+.syl sup {
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.syl.stressed {
+  text-decoration: underline;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 6px;
+  text-decoration-color: #ef4444;
+  font-weight: 700;
+}
+.caesura {
+  color: var(--accent);
+  font-weight: 700;
+  font-family: var(--font);
+  transform-origin: bottom;
+}
+.count {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 16px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  min-width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.stressed-dot {
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  background: #ef4444;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.caesura-mark {
+  color: var(--accent);
+}
+.beat-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 14px 0;
+}
+.beat {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-family: var(--font-serif);
+  font-size: 19px;
+}
+.beat.on {
+  background: var(--accent);
+  color: #fff;
+}
+.beat-mark {
+  font-family: var(--font);
+  font-size: 12px;
+  opacity: 0.75;
+}
+.rhyme-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.rhyme-lines {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.rhyme-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--font-serif);
+  font-size: clamp(15px, 1.9vw, 21px);
+  white-space: pre-wrap;
+}
+.rhyme-end {
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background-image: linear-gradient(color-mix(in srgb, var(--g) 30%, transparent), color-mix(in srgb, var(--g) 30%, transparent));
+  background-repeat: no-repeat;
+  background-position: left center;
+}
+.rhyme-arcs {
+  flex: none;
+}
+
+/* ---------- Środki stylistyczne ---------- */
+.fig-text {
+  font-family: var(--font-serif);
+  font-size: clamp(17px, 2vw, 22px);
+  line-height: 1.9;
+}
+.fig-mark {
+  font: inherit;
+  border: none;
+  padding: 0 3px;
+  margin: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  color: inherit;
+  background-color: transparent;
+  background-image: linear-gradient(color-mix(in srgb, var(--fig) 28%, transparent), color-mix(in srgb, var(--fig) 28%, transparent));
+  background-repeat: no-repeat;
+  background-position: left center;
+}
+.fig-mark:disabled {
+  cursor: default;
+}
+.fig-mark.on {
+  text-decoration: underline;
+  text-decoration-color: var(--fig);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+}
+.fig-mark.active {
+  outline: 2px solid var(--fig);
+}
+.fig-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.fig-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fig) 16%, transparent);
+  color: color-mix(in srgb, var(--fig) 70%, var(--text));
+}
+.fig-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fig);
+}
+.fig-card {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--fig) 45%, transparent);
+  background: color-mix(in srgb, var(--fig) 8%, var(--surface));
+}
+.fig-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.fig-card p {
+  margin: 6px 0 0;
+}
+
+/* ---------- Oś czasu epok ---------- */
+.timeline-svg {
+  width: 100%;
+  height: auto;
+  color: var(--text);
+  overflow: visible;
+}
+.epoch-card {
+  margin-top: 8px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ep) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ep) 40%, transparent);
+}
+.epoch-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+}
+.epoch-card h3 {
+  font-size: 26px;
+  color: color-mix(in srgb, var(--ep) 75%, var(--text));
+}
+.epoch-dates {
+  color: var(--muted);
+  font-size: 14px;
+}
+.epoch-idea {
+  font-size: 17px;
+  font-style: italic;
+  margin: 12px 0 16px;
+}
+.epoch-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+.epoch-cols h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.epoch-cols ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.epoch-cols li {
+  margin: 3px 0;
+}
+
+/* ---------- Konfiguracja elektronowa ---------- */
+.config-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+.element-tile {
+  width: 96px;
+  height: 104px;
+  flex: none;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.element-tile .z {
+  position: absolute;
+  top: 6px;
+  left: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.element-tile .sym {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1;
+}
+.element-tile .nm {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.config-text {
+  font-family: var(--font-display);
+  font-size: clamp(18px, 2.4vw, 26px);
+  font-weight: 700;
+}
+.config-note {
+  margin-top: 8px;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+}
+.energy {
+  display: flex;
+  gap: 12px;
+}
+.energy-axis {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.level {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.level-name {
+  width: 30px;
+  font-weight: 700;
+  font-family: var(--font-display);
+}
+.cells {
+  display: flex;
+  gap: 4px;
+}
+.cell {
+  width: 38px;
+  height: 38px;
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 20px;
+  font-weight: 700;
+  background: var(--surface-2);
+}
+.spin.up {
+  color: var(--accent);
+}
+.spin.down {
+  color: #ef4444;
+}
+
+/* ---------- Czasy angielskie ---------- */
+.tense-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.tense-head h3 {
+  font-size: 26px;
+}
+.form-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.form-chip {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  font-weight: 600;
+}
+.tense-svg {
+  width: 100%;
+  height: auto;
+  color: var(--text);
+  margin: 8px 0;
+}
+.tense-use {
+  font-size: 16px;
+  margin: 0 0 14px;
+}
+.examples {
+  display: grid;
+  gap: 10px;
+}
+.example {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.example .en {
+  font-size: 18px;
+  font-weight: 500;
+}
+.example .pl {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.verb {
+  padding: 0 4px;
+  border-radius: 5px;
+  background-image: linear-gradient(color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--accent) 30%, transparent));
+  background-repeat: no-repeat;
+  background-position: left center;
+}
+.signals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.signal {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-style: italic;
+}
+
+/* ---------- Zdania warunkowe ---------- */
+.cond h3 {
+  font-size: 26px;
+  margin-bottom: 18px;
+}
+.cond-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: clamp(20px, 2.6vw, 30px);
+  font-weight: 500;
+}
+.clause {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--cl) 10%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--cl) 45%, transparent);
+}
+.tok {
+  display: inline-block;
+}
+.tok.v {
+  color: var(--cl);
+  font-weight: 700;
+}
+.cond-forms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 8px;
+}
+.cond-forms > span:not(.plus) {
+  display: inline-flex;
+  flex-direction: column;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cl) 12%, transparent);
+}
+.cond-forms small {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.cond-forms b {
+  color: var(--cl);
+  font-family: var(--font-mono);
+}
+.cond-forms .plus {
+  font-size: 22px;
+  color: var(--muted);
+}
+.cond-pl {
+  color: var(--muted);
+  font-style: italic;
+  margin: 6px 0 18px;
+}
+.meters {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+.meter-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.meter-track {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22b07d, #eab308, #ef4444);
+}
+.meter-knob {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 3px solid var(--text);
+}
+.meter-time {
+  font-size: 14px;
+}
+.cond-note {
+  margin: 14px 0 0;
+  font-size: 15px;
+}
+
+
+/* ---------- Półwersy (łamanie na średniówce) ---------- */
+.hemi {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px 10px;
+}
+
+/* ---------- Stopy metryczne ---------- */
+.feet-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 26px;
+}
+.feet-head h3 {
+  font-size: 28px;
+}
+.feet-sign {
+  font-size: 26px;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  font-weight: 700;
+}
+.feet-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-top: 18px;
+}
+.foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 2px dashed var(--line);
+}
+.foot-syl {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.foot-syl.stress {
+  width: 56px;
+  height: 56px;
+  font-size: 16px;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--accent) 30%, var(--surface));
+  color: var(--text);
+}
+.foot-syl.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 20px -6px var(--accent);
+}
+
+/* ---------- Składnia ---------- */
+.sentence-line {
+  font-family: var(--font-serif);
+  font-size: clamp(19px, 2.4vw, 26px);
+  line-height: 2;
+  margin-bottom: 10px;
+}
+.part {
+  margin-right: 0.35em;
+  text-underline-offset: 7px;
+  text-decoration-thickness: 2px;
+}
+.u-podmiot {
+  text-decoration: underline solid var(--pc);
+}
+.u-orzeczenie {
+  text-decoration: underline double var(--pc);
+}
+.u-przydawka {
+  text-decoration: underline wavy var(--pc);
+}
+.u-dopelnienie {
+  text-decoration: underline dashed var(--pc);
+}
+.u-okolicznik {
+  text-decoration: underline dotted var(--pc);
+  text-decoration-thickness: 3px;
+}
+.tree-svg {
+  width: 100%;
+  height: auto;
+  color: var(--text);
+  font-family: var(--font);
+  margin: 6px 0;
+}
+.parts-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+.parts-legend span {
+  display: flex;
+  flex-direction: column;
+}
+.parts-legend b {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  align-self: flex-start;
+}
+.parts-legend small {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.clause-a {
+  background: color-mix(in srgb, #3d8bff 14%, transparent);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.clause-b {
+  background: color-mix(in srgb, #22b07d 14%, transparent);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.conj {
+  color: var(--accent);
+}
+
+/* ---------- Zdania „morfujące” (angielski) ---------- */
+.morph {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: clamp(20px, 2.6vw, 30px);
+  font-weight: 500;
+  min-height: 60px;
+  align-items: center;
+}
+.morph-tok {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 10px;
+}
+.morph-tok.has-role {
+  background: color-mix(in srgb, var(--rc) 16%, transparent);
+  color: color-mix(in srgb, var(--rc) 75%, var(--text));
+  font-weight: 650;
+}
+.role-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.role-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.role-legend span::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--rc);
+}
+.voice-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.voice-switch span {
+  position: relative;
+  z-index: 1;
+  padding: 6px 18px;
+  text-align: center;
+  color: var(--muted);
+  transition: color 0.2s;
+}
+.voice-switch span.on {
+  color: #fff;
+}
+.voice-knob {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: calc(50% - 4px);
+  margin-left: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.speech {
+  padding: 14px 16px;
+  border-radius: 18px;
+  transition: background 0.3s, border-color 0.3s;
+  border: 2px solid transparent;
+}
+.speech.bubble {
+  background: var(--surface-2);
+  border-color: var(--line);
+  border-bottom-left-radius: 4px;
+}
+.shift-table {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 6px;
+  margin-top: 16px;
+}
+.shift-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 14px;
+}
+.shift-row.on {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  font-weight: 700;
+}
+.shift-arrow {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+
+/* ---------- Epoki: wykres Gantta, wahadło, karta ---------- */
+.gantt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+.gantt-axis,
+.gantt-row {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.gantt-axis {
+  height: 26px;
+}
+.gantt-row {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 3px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.gantt-row:hover {
+  background: var(--surface-2);
+}
+.gantt-row.on {
+  background: color-mix(in srgb, var(--ep) 14%, transparent);
+}
+.gantt-label {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gantt-row.on .gantt-label {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--ep) 70%, var(--text));
+}
+.lbl-short {
+  display: none;
+}
+.gantt-track {
+  position: relative;
+  display: block;
+  height: 24px;
+}
+.gantt-axis .gantt-track {
+  height: 26px;
+}
+.gantt-tick {
+  position: absolute;
+  bottom: 2px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.gantt-grid {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--line);
+  opacity: 0.6;
+}
+.gantt-bar {
+  position: absolute;
+  top: 4px;
+  height: 16px;
+  border-radius: 6px;
+  background: var(--ep);
+  transform-origin: left center;
+  box-shadow: 0 2px 8px -3px var(--ep);
+}
+.gantt-bar.half {
+  top: 2px;
+  height: 9px;
+}
+.gantt-bar.pl {
+  top: 13px;
+  height: 9px;
+  background: repeating-linear-gradient(-45deg, var(--ep), var(--ep) 4px, color-mix(in srgb, var(--ep) 55%, transparent) 4px, color-mix(in srgb, var(--ep) 55%, transparent) 8px);
+}
+.gantt-row.on .gantt-bar {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ep);
+}
+.gantt-legend {
+  display: flex;
+  gap: 18px;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.gantt-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  height: 8px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--muted);
+}
+.gantt-legend .lg-pl::before {
+  background: repeating-linear-gradient(-45deg, var(--muted), var(--muted) 3px, transparent 3px, transparent 6px);
+}
+.swing-svg {
+  width: 100%;
+  height: auto;
+  color: var(--text);
+  font-family: var(--font);
+  margin-bottom: 14px;
+}
+.epoch-card header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.epoch-title {
+  flex: 1;
+  min-width: 0;
+}
+.epoch-nav {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--ep) 45%, transparent);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.epoch-nav:hover {
+  background: color-mix(in srgb, var(--ep) 18%, var(--surface));
+}
+.epoch-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 16px;
+}
+.epoch-keys span {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ep) 20%, transparent);
+  color: color-mix(in srgb, var(--ep) 65%, var(--text));
+}
+
+@media (max-width: 900px) {
+  /* SVG w kartach jest pomniejszone ok. 2,5×, więc napisy w jednostkach SVG muszą być większe */
+  .tense-svg text {
+    font-size: 28px;
+  }
+  .gantt-axis,
+  .gantt-row {
+    grid-template-columns: 78px 1fr;
+    gap: 8px;
+  }
+  .lbl-full {
+    display: none;
+  }
+  .lbl-short {
+    display: inline;
+  }
+  .gantt-label {
+    font-size: 12px;
+  }
+  .gantt-tick {
+    font-size: 10px;
+  }
+  .gantt-tick:nth-child(2),
+  .gantt-tick:nth-child(3),
+  .gantt-tick:nth-child(5),
+  .gantt-tick:nth-child(7) {
+    display: none;
+  }
+  .epoch-card {
+    padding: 16px 14px;
+  }
+  .epoch-card h3 {
+    font-size: 21px;
+  }
+  .rhyme-arcs {
+    width: 56px;
+  }
+  .config-head {
+    gap: 14px;
+  }
+  .element-tile {
+    width: 78px;
+    height: 86px;
+  }
+  .cell {
+    width: 32px;
+    height: 32px;
+    font-size: 17px;
+  }
+  .clause {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .hemi {
+    gap: 4px 6px;
+  }
+  .verse {
+    gap: 6px 8px;
+  }
+  .foot-syl {
+    width: 36px;
+    height: 36px;
+  }
+  .foot-syl.stress {
+    width: 44px;
+    height: 44px;
+  }
+  .feet-row {
+    gap: 8px;
+  }
+  .foot {
+    padding: 6px;
+    gap: 4px;
+  }
+  .tree-svg text {
+    font-size: 18px;
+  }
+  .tree-svg .node-label {
+    font-size: 18px;
+  }
+  .morph {
+    gap: 6px;
+  }
+  .morph-tok {
+    padding: 3px 7px;
+  }
+  .poem,
+  .tense,
+  .cond,
+  .timeline,
+  .config {
+    padding: 20px 16px;
+  }
+}
