@@ -10,6 +10,7 @@ import { FollowPlane, WingLab, isSliceMode, labPose, makeWingLabSteps, newDirect
 import { ENGINE_PART_OFFSET, ax } from './engineModel';
 import { C_PITCH, C_ROLL, C_YAW, LATERAL_EXP_OPTIONS, LAYOUT_OPTIONS, lateralView, TailHomeCockpit, TailLab, YAW_MODE_OPTIONS, ctlScene, lateralLook, type CtlMode } from './tailLab';
 import { GEAR_SPOTS, GearLab, makeGearSteps, useGearDriver, type GearMode } from './gearLab';
+import { APU_SPOTS, ApuLab, ApuModel, makeApuSteps, useApuDriver, type ApuMode } from './apuLab';
 
 /* ======================= sceny ======================= */
 
@@ -84,7 +85,8 @@ function PlaneScene({ params }: SceneProps) {
   const gearMode0: GearMode | null =
     typeof params.gear === 'string' && params.gear ? (params.gear as GearMode) : params.lab === 'spoiler' && params.use === 'ground' ? 'landing' : null;
   const landTab = gearMode0 === 'shock' || gearMode0 === 'brakes' || gearMode0 === 'landing';
-  direct.active = Boolean(ctl) || landTab;
+  // zawracanie na pasie (sterowanie na ziemi) też obraca samolot wprost – wokół środka zakrętu
+  direct.active = Boolean(ctl) || landTab || gearMode0 === 'steer';
   usePoseDriver(pose, tgt, direct);
   // strona główna skrzydła: podpisy i elementy skrzydła są klikalne, jak w zbliżeniu konstrukcji
   const wingHome = focus === 'wing' && !lab;
@@ -92,6 +94,9 @@ function PlaneScene({ params }: SceneProps) {
   // zakładki podwozia: chowanie w locie, pozostałe na ziemi; podwozie sterowane wspólnym stanem
   const gearMode = gearMode0;
   const gearDrv = useGearDriver(gearMode, params, direct);
+  // moduł APU: wspólna symulacja dla wszystkich zakładek (strona główna – APU pracuje)
+  const apuMode: ApuMode | null = typeof params.apu === 'string' && params.apu ? (params.apu as ApuMode) : null;
+  const apuSim = useApuDriver(apuMode, params);
   const phase: PlanePhase = cs ? (cs.flight ? 'flight' : 'ground') : gearMode === 'retract' ? 'flight' : gearMode ? 'ground' : lab === 'spoiler' && params.use === 'ground' ? 'ground' : lab || engineOn ? 'flight' : 'ground';
   // strona główna usterzenia: lotki skrzydeł też biorą udział w sterowaniu – wyróżnione kolorem osi przechylania
   const tailHome = focus === 'tail' && !ctl;
@@ -126,7 +131,7 @@ function PlaneScene({ params }: SceneProps) {
           mech={landTab ? { flap: 32, fowler: 1, slat: 1 } : tgt.mech}
           interactive={!lab && !ctl}
           // odnośniki do innych modułów tylko na stronie głównej modułu – w zakładkach podwozia (i innych) ich nie ma
-          links={!gearMode}
+          links={!gearMode && (!apuMode || apuMode === 'home')}
           partLabels={!lab && !ctl}
           // na wycinkach skrzydła bez owiewek prowadnic klap – czysty przekrój profilu
           wingPick={wingHome ? { selected: wsel, onSelect: setWsel } : tailHome ? { selected: tsel, onSelect: setTsel } : undefined}
@@ -141,6 +146,7 @@ function PlaneScene({ params }: SceneProps) {
           enginePower={gearMode ? gearDrv.power : undefined}
           gearPick={gearHome ? { selected: gsel, onSelect: setGsel } : undefined}
         />
+        {apuMode && <ApuModel sim={apuSim} mode={apuMode} />}
       </FollowPlane>
       {lab && <WingLab mode={lab} params={params} pose={pose} />}
       {ctl && <TailLab mode={ctl} params={params} pose={pose} direct={direct} />}
@@ -148,6 +154,7 @@ function PlaneScene({ params }: SceneProps) {
       {tailHome && <TailInfo sel={tsel} />}
       {gearHome && <GearInfo sel={gsel} />}
       {gearMode && <GearLab mode={gearMode} params={params} live={gearDrv.live} pose={pose} />}
+      {apuMode && <ApuLab mode={apuMode} sim={apuSim} />}
       {engineOn && eng.info}
     </>
   );
@@ -698,25 +705,31 @@ const fuselageModule: PartModule = {
   ],
 };
 
-/** APU – osobny moduł; na razie tylko plansza wprowadzająca (zakładki w przygotowaniu). */
+/** APU – budowa, rozruch, przepływ, zasilanie samolotu oraz wyłączanie i zabezpieczenia (wspólna symulacja w apuLab). */
 const apuModule: PartModule = {
   id: 'apu',
   title: 'APU',
-  summary: 'Pomocnicza jednostka napędowa w stożku ogonowym – w przygotowaniu',
+  summary: 'Pomocnicza turbina w stożku ogonowym: budowa, rozruch z panelu górnego, przepływ, prąd i powietrze, wyłączanie i pożar',
   steps: [
     plane({
       title: 'APU w stożku ogonowym',
-      camera: [52, 5, 13],
-      target: [35, 1.4, 0],
+      spot: APU_SPOTS[0],
+      camera: [37.6, 1.9, 5.6],
+      target: [34.0, 1.05, 0.1],
+      preset: { focus: 'apu', apu: 'home' },
       body: (
         <>
           <p>
-            <b>APU</b> (Auxiliary Power Unit) to mała turbina gazowa zamknięta w stożku ogonowym, za grodzią ogniową. Na ziemi zasila samolot prądem i sprężonym powietrzem – do klimatyzacji kabiny i rozruchu silników – bez podłączania go do instalacji lotniska. W razie awarii może też pracować w locie.
+            <b>APU</b> (Auxiliary Power Unit) to mała turbina gazowa – w A350 jest to Honeywell HGT1700 – zamknięta w stożku ogonowym, za <b>grodzią ogniową</b>. Zdjęliśmy pokrywę serwisową w lewej burcie: widać APU od środka, z przeciętymi obudowami.
           </p>
-          <p>Na końcu kadłuba widać jej wylot. Zakładki o budowie i pracy APU są w przygotowaniu.</p>
+          <p>
+            Na ziemi APU zastępuje zasilanie z lotniska: <b>prądnica</b> daje prąd do 150 kVA, a <b>sprężarka obciążeniowa</b> – sprężone powietrze do klimatyzacji i rozruchu silników. W razie potrzeby APU pracuje też w locie (prądnica daje wtedy co najmniej 100 kVA).
+          </p>
+          <p>Kliknij podpisy części. Numery na modelu prowadzą do zakładek: rozruch z przycisków panelu górnego, przepływ przez turbinę, zasilanie samolotu, wyłączanie i pożar.</p>
         </>
       ),
     }),
+    ...makeApuSteps(plane),
   ],
 };
 

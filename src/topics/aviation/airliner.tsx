@@ -685,7 +685,15 @@ const fusNormal = (x: number, th: number) => {
   // zawsze na zewnątrz (dla obu burt)
   return n.dot(new THREE.Vector3(0, p.y - fusSec(x).yc, p.z)) < 0 ? n.multiplyScalar(-1) : n;
 };
-const FUS_X = [...new Set([...refine([-33.4 - PF, -33.2 - PF, -32.6 - PF, -31.9 - PF, -29 - PF, -27 - PF, -24.5 - PF, -22.5, 6 + PA, 15, 22 + PA, 30 + PA, 33 + PA, 33.4 + PA], 0.45), ...refine([-31.8 - PF, -29.4 - PF], 0.05), ...refine([-29.3 - PF, -27.5 - PF], 0.08)])].sort((a, b) => a - b);
+/**
+ * Zdjęta pokrywa serwisowa APU w lewej burcie stożka ogonowego (moduł APU): x od – do, kąt θ od grzbietu.
+ * Przez nią widać przedział APU za grodzią ogniową.
+ */
+export const APU_HATCH = { x0: 32.4, x1: 35.9, th0: 0.3, th1: 2.05 };
+const APU_CUT = (x: number, th: number) => x > APU_HATCH.x0 && x < APU_HATCH.x1 && th > APU_HATCH.th0 && th < APU_HATCH.th1;
+/** Przekrój kadłuba w x (środek yc, półwysokość h, półszerokość w) – do rozmieszczenia wyposażenia w stożku ogonowym. */
+export const fuselageSection = (x: number) => fusSec(x);
+const FUS_X = [...new Set([...refine([-33.4 - PF, -33.2 - PF, -32.6 - PF, -31.9 - PF, -29 - PF, -27 - PF, -24.5 - PF, -22.5, 6 + PA, 15, 22 + PA, 30 + PA, APU_HATCH.x0, APU_HATCH.x1, 33 + PA, 33.4 + PA], 0.45), ...refine([-31.8 - PF, -29.4 - PF], 0.05), ...refine([-29.3 - PF, -27.5 - PF], 0.08)])].sort((a, b) => a - b);
 const FUS_TH = [...new Set([...refine([-Math.PI, -0.35, 0, 1.32, Math.PI], 0.05), ...refine([-0.75, 0.75], 0.016), ...refine([Math.PI - 0.45, Math.PI], 0.015), ...refine([-Math.PI, -Math.PI + 0.45], 0.015)])].sort((a, b) => a - b);
 
 /* ---------- brzuch: owiewka centropłata i wnęki podwozia ---------- */
@@ -1007,7 +1015,7 @@ function Lbl({ pos, children, color = '#e2e8f0', sub = false, link = false, occl
 }
 
 /** Kadłub: poszycie, owiewka centropłata, okna, drzwi, kokpit; w trybie „kadłub” – przekrój z wnętrzem. */
-function Fuselage({ open }: { open: boolean }) {
+function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
   const g = useMemo(() => cached('fuselage', () => {
     // otwory w poszyciu: szyby kokpitu i wnęka koła przedniego (zamknięte drzwi wnęki leżą równo z poszyciem)
     const ckHole = (x: number, th: number) => COCKPIT(x, th) || (Math.cos(th) < -0.5 && inNoseBay(x, fusPt(x, th)[2]));
@@ -1016,6 +1024,9 @@ function Fuselage({ open }: { open: boolean }) {
     const cutG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => FUS_CUT(x, th) || ckHole(x, th));
     const cut = cutG.getIndex()!.clone();
     cutG.dispose();
+    const apuG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => APU_CUT(x, th) || ckHole(x, th));
+    const apuCut = apuG.getIndex()!.clone();
+    apuG.dispose();
     // szyby kokpitu w 3D: czarna ramka na poszyciu, ścianki wnęki i szkło cofnięte o ok. 4 cm
     const densify = (P: P2[], k = 4): P2[] =>
       P.flatMap((p, i) => {
@@ -1314,9 +1325,9 @@ function Fuselage({ open }: { open: boolean }) {
     }
     // zawór wylotowy ciśnienia w kabinie: prostokątna klapka na spodzie tylnej części kadłuba (prawa strona)
     const outflow = [flat(15.2 + PA, -(Math.PI - 0.5), [0.55, 0.012, 0.4])];
-    return { shell, full, cut, cockpit, ckWall, ckFrame, ckTub, ckBoxes, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: new THREE.CircleGeometry(1, 28), frame: new THREE.RingGeometry(1.0, 1.28, 28) };
+    return { shell, full, cut, apuCut, cockpit, ckWall, ckFrame, ckTub, ckBoxes, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: new THREE.CircleGeometry(1, 28), frame: new THREE.RingGeometry(1.0, 1.28, 28) };
   }), []);
-  const shell = useShared(g.shell, open ? g.cut : g.full);
+  const shell = useShared(g.shell, open ? g.cut : apu ? g.apuCut : g.full);
   const unit = cached('unit-box', () => new THREE.BoxGeometry(1, 1, 1));
   return (
     <group>
@@ -3736,7 +3747,7 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
         <Lightformer intensity={0.45} position={[0, -30, 0]} rotation-x={Math.PI / 2} scale={[120, 120, 1]} color="#64748b" />
       </Environment>}
       {show('ground') && <Ground />}
-      {show('fuselage') && part('fuselage', <Fuselage open={focus === 'fuselage'} />)}
+      {show('fuselage') && part('fuselage', <Fuselage open={focus === 'fuselage'} apu={focus === 'apu'} />)}
       {show('tail') && part('tail', <Tail animate={focus === 'tail' && animate} surfaces={surfaces} open={focus === 'tail'} fin={morph ? morph.fin : 1} />)}
       {/* światła logo: w górnej powierzchni statecznika poziomego przy kadłubie, świecą na statecznik pionowy */}
       {show('tail') &&

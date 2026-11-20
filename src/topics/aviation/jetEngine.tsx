@@ -13,7 +13,7 @@ import { ACC_TH, BEARINGS, COMB_HOLES, COWL3, Flame, VSV_TH, accP, vbvOf, vsvOf,
 import { isaRho } from './wingFlow';
 import { EngineOnPlane } from './airliner';
 import { useSceneHidden } from '../../lib/topicNav';
-import { AIRBUS, CockpitDock, Ecam, type EcamEngine } from '../../components/cockpit';
+import { AIRBUS, CockpitDock, ControlStack, Ecam, EngStartPanel, ThrustLevers, leverFromThrust, type EcamEngine } from '../../components/cockpit';
 
 /** Parametry silnika do strony ENG: Trent XWB ma trzy wały – model liczy N1 i wał WP (tu N3), N2 leży pomiędzy. */
 function ecamEng(o: { n1: number; n2: number; ff: number; oilP?: number; oilT?: number; oilQ?: number; vib?: number }): EcamEngine {
@@ -209,6 +209,8 @@ export function useEngineOverview(params: Params, base = 1.98) {
   const ffKg = (ff * 1000) / 2;
   const ecam = (
     <CockpitDock>
+      {/* dźwignie ciągu idą za suwakiem ciągu */}
+      <ThrustLevers pos={[leverFromThrust(thr), leverFromThrust(thr)]} athr={thr > 0.6 && thr <= 0.85} />
       <Ecam
         thrMode={thr > 0.85 ? ['TOGA', 100] : thr > 0.6 ? ['CLB', 98] : ['IDLE', thr * 100]}
         n1={[n1, n1]}
@@ -1872,6 +1874,8 @@ function ReverserScene({ params }: SceneProps) {
       <EngineOnPlane clickable={['bypass', 'nozzle']} elementLabels={['rev']} n1={70} n2={88} fanScale={fs} cut reverser={{ type, deploy: d }} fuelFlow={2100} flow={d > 0.1 ? 'plain' : 'plain'} labels={false} selected={sel} onSelect={setSel} />
       {/* ECAM: przy otwieraniu odwracacza na wskaźnikach N1 pojawia się REV – bursztynowy w ruchu, zielony po pełnym otwarciu */}
       <CockpitDock>
+        {/* dźwignie w zakresie odwracacza: im bardziej otwarty, tym bliżej MAX REV */}
+        <ThrustLevers pos={[-d, -d]} />
         <Ecam
           thrMode={null}
           n1={[70, 70]}
@@ -2100,6 +2104,11 @@ function StartInner({ run, sc, speed }: { run: boolean; sc: StartScenario; speed
         EGT {fmt(s.egt, 0)} °C
       </Tag>
       <CockpitDock>
+        {/* pulpit: tryb IGN/START i ENG MASTER 1 – FAULT po przerwanym rozruchu; dźwignie ciągu na biegu jałowym */}
+        <ControlStack>
+          <EngStartPanel mode={run ? 'IGN/START' : 'NORM'} masters={[run, true]} faults={[run && (sc === 'hot' ? t > 21 : sc === 'hung' ? t > 34 : sc === 'wet' ? t > 22 : false), false]} />
+          <ThrustLevers pos={[0, 0]} size={80} />
+        </ControlStack>
         <Ecam
           thrMode={null}
           n1={[s.n1, 21]}

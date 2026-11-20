@@ -12,7 +12,7 @@ import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Control, Params, Step } from '../../lib/types';
 import { InfoPortal, fmt } from '../../lib/plot';
-import { CockpitDock, Ecam, Nd, Pfd } from '../../components/cockpit';
+import { CockpitDock, ControlStack, Ecam, FlapLever, Nd, Pfd, SpeedBrakeLever, ThrustLevers } from '../../components/cockpit';
 import { TrailMesh, Trails } from '../../lib/streaks';
 import { useSpeedFmt } from '../../components/ui';
 import { Arrow3D } from '../../lib/three';
@@ -1119,6 +1119,11 @@ function FlapsOverlay({ params, pose, wide = false }: { params: Params; pose: Po
         </MaybeFace>
       </FollowPlane>
       <CockpitDock>
+        {/* dźwignia klap i dźwignie ciągu przestawiają się same razem z wybraną konfiguracją */}
+        <ControlStack>
+          <FlapLever conf={FLAP_ECAM[String(params.cfg ?? 'clean')].conf as '0' | '1+F' | '3' | 'FULL'} />
+          <ThrustLevers pos={FLAP_ECAM[String(params.cfg ?? 'clean')].thr[0] === 'FLEX' ? [1.5, 1.5] : [1, 1]} athr={FLAP_ECAM[String(params.cfg ?? 'clean')].thr[0] !== 'FLEX'} size={90} />
+        </ControlStack>
         <Ecam
           thrMode={FLAP_ECAM[String(params.cfg ?? 'clean')].thr}
           n1={[FLAP_ECAM[String(params.cfg ?? 'clean')].thr[1] * 0.95, FLAP_ECAM[String(params.cfg ?? 'clean')].thr[1] * 0.95]}
@@ -1736,6 +1741,11 @@ function SpoilerOverlay({ params, pose }: { params: Params; pose: PoseState }) {
     {!landing && <EngineStreams />}
     {!landing && (
     <CockpitDock>
+      {/* w locie pilot wychyla spojlery dźwignią hamulców aerodynamicznych; przy przechylaniu działają same (z lotkami) */}
+      <ControlStack>
+        <SpeedBrakeLever pos={use === 'air' ? su.spoiler / 0.87 : 0} deployed={Math.max(dep[1], dep[-1]) / 0.87} />
+        <ThrustLevers pos={use === 'roll' ? [1, 1] : [0, 0]} athr={use === 'roll'} size={90} />
+      </ControlStack>
       <Ecam
         thrMode={use === 'roll' ? ['CLB', 90] : null}
         n1={use === 'roll' ? [79, 79] : [21, 21]}

@@ -3,10 +3,10 @@
  * pod nim wybrana strona SD (ENG, WHEEL, F/CTL, FUEL, CRUISE), na dole stały pasek: TAT/SAT/ISA, czas lotu i zegar, masa,
  * środek ciężkości i paliwo. Tak jak w samolocie: jasne kolory na czarnym tle, liczby zielone, opisy białe/błękitne.
  */
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { AIRBUS, cockpitFont } from './common';
 
-export type EcamPage = 'ENG' | 'WHEEL' | 'FCTL' | 'CRUISE' | 'FUEL';
+export type EcamPage = 'ENG' | 'WHEEL' | 'FCTL' | 'CRUISE' | 'FUEL' | 'APU';
 type Pair = [number, number];
 
 export interface EcamEngine {
@@ -58,7 +58,24 @@ export interface EcamProps {
   fuel?: { l: number; c: number; r: number; lMax: number; cMax: number; rMax: number; fu?: Pair };
   /** Strona CRUISE: przepływ i zużycie paliwa, ciśnienie w kabinie, temperatury stref. */
   cruise?: { ff: Pair; fu: Pair; deltaP: number; cabAlt: number; cabVs: number; ldgElev?: number; temps?: [number, number, number] };
+  /**
+   * Strona APU: obroty N (%), EGT (°C) z czerwoną granicą, prądnica (włączona, obciążenie %, napięcie, częstotliwość),
+   * upust powietrza (zawór, ciśnienie PSI), klapa wlotu, AVAIL i ostrzeżenia (niski poziom oleju, niskie ciśnienie paliwa).
+   */
+  apu?: {
+    n: number;
+    egt: number;
+    egtLimit: number;
+    avail: boolean;
+    flapOpen: boolean;
+    gen: { on: boolean; load: number; v: number; hz: number };
+    bleed: { open: boolean; psi: number };
+    fuelUsed?: number;
+    lowOil?: boolean;
+    fault?: string | null;
+  };
   /** Dolny pasek. */
+  /** time – ignorowany: zegar zawsze pokazuje bieżący czas. */
   footer?: { tat: number; sat: number; isa: number; flt?: string; time?: string; gw?: number; gwcg?: number; fob?: number };
   width?: number;
 }
@@ -155,6 +172,135 @@ function EgtDial({ cx, cy, v, limit }: { cx: number; cy: number; v: number; limi
       <T x={cx} y={cy + 19} c={hot ? AIRBUS.red : AIRBUS.green} s={13} a="middle">
         {f0(v)}
       </T>
+    </g>
+  );
+}
+
+/**
+ * Strona APU (jak w Airbusie): u góry prądnica APU (obciążenie, napięcie, częstotliwość) i upust powietrza (ciśnienie,
+ * zawór – kreska w osi przewodu: otwarty, w poprzek: zamknięty), pośrodku napis AVAIL, niżej wskaźniki N i EGT,
+ * na dole stan klapy wlotu i ostrzeżenia.
+ */
+function PageApu({ a }: { a: NonNullable<EcamProps['apu']> }) {
+  const y0 = SEP;
+  const dial = (cx: number, cy: number, v: number, max: number, red: number, label: string, unit: string, txt: string) => {
+    const r = 32;
+    const A0 = 160;
+    const A1 = 380;
+    const ang = (x: number) => A0 + ((A1 - A0) * Math.max(0, Math.min(max, x))) / max;
+    const [nx, ny] = arcPt(cx, cy, r - 4, ang(v));
+    const hot = v >= red;
+    const ticks = label === 'N' ? [0, 50, 100] : [0, 500, 1000];
+    return (
+      <g>
+        <path d={arcPath(cx, cy, r, A0, ang(red))} fill="none" stroke={AIRBUS.white} strokeWidth={2} />
+        <path d={arcPath(cx, cy, r, ang(red), A1)} fill="none" stroke={AIRBUS.red} strokeWidth={3.2} />
+        {ticks.map((t) => {
+          const [p, q] = arcPt(cx, cy, r, ang(t));
+          const [p2, q2] = arcPt(cx, cy, r - 6, ang(t));
+          const [lx, ly] = arcPt(cx, cy, r - 14, ang(t));
+          return (
+            <g key={t}>
+              <line x1={p} y1={q} x2={p2} y2={q2} stroke={AIRBUS.white} strokeWidth={1.4} />
+              <T x={lx} y={ly + 3} s={8} a="middle">
+                {label === 'N' ? t / 10 : t / 100}
+              </T>
+            </g>
+          );
+        })}
+        <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={hot ? AIRBUS.red : AIRBUS.green} strokeWidth={2.4} strokeLinecap="round" />
+        <T x={cx - 52} y={cy - 18} s={12}>
+          {label}
+        </T>
+        <T x={cx - 52} y={cy - 6} c={AIRBUS.cyan} s={9}>
+          {unit}
+        </T>
+        <rect x={cx + 4} y={cy + 6} width={44} height={17} fill="none" stroke={AIRBUS.white} strokeWidth={1} />
+        <T x={cx + 45} y={cy + 19} c={hot ? AIRBUS.red : AIRBUS.green} s={13} a="end">
+          {txt}
+        </T>
+      </g>
+    );
+  };
+  const g = a.gen;
+  const genCol = g.on ? AIRBUS.green : AIRBUS.white;
+  return (
+    <g>
+      <T x={180} y={y0 + 16} s={13} a="middle" w={700}>
+        APU
+      </T>
+      {/* prądnica */}
+      <rect x={20} y={y0 + 24} width={112} height={62} fill="none" stroke={g.on ? AIRBUS.white : AIRBUS.amber} strokeWidth={1.2} />
+      <T x={76} y={y0 + 38} c={g.on ? AIRBUS.white : AIRBUS.amber} s={11} a="middle">
+        APU GEN
+      </T>
+      {(
+        [
+          [g.on ? f0(g.load) : 'XX', '%'],
+          [g.on ? f0(g.v) : 'XX', 'V'],
+          [g.on ? f0(g.hz) : 'XX', 'HZ'],
+        ] as const
+      ).map(([v, u], i) => (
+        <g key={u}>
+          <T x={98} y={y0 + 54 + i * 13} c={genCol} s={12} a="end">
+            {v}
+          </T>
+          <T x={104} y={y0 + 54 + i * 13} c={AIRBUS.cyan} s={9}>
+            {u}
+          </T>
+        </g>
+      ))}
+      {/* upust powietrza */}
+      <T x={262} y={y0 + 38} s={11} a="middle">
+        APU BLEED
+      </T>
+      <rect x={232} y={y0 + 44} width={60} height={18} fill="none" stroke={AIRBUS.white} strokeWidth={1} />
+      <T x={276} y={y0 + 57} c={AIRBUS.green} s={12} a="end">
+        {a.n > 5 ? f0(a.bleed.psi) : 'XX'}
+      </T>
+      <T x={280} y={y0 + 57} c={AIRBUS.cyan} s={9}>
+        PSI
+      </T>
+      <line x1={262} x2={262} y1={y0 + 62} y2={y0 + 74} stroke={AIRBUS.green} strokeWidth={1.6} />
+      <circle cx={262} cy={y0 + 84} r={10} fill="none" stroke={AIRBUS.green} strokeWidth={1.6} />
+      <line x1={a.bleed.open ? 262 : 252} x2={a.bleed.open ? 262 : 272} y1={a.bleed.open ? y0 + 74 : y0 + 84} y2={a.bleed.open ? y0 + 94 : y0 + 84} stroke={AIRBUS.green} strokeWidth={1.8} />
+      {a.bleed.open && <line x1={262} x2={262} y1={y0 + 94} y2={y0 + 104} stroke={AIRBUS.green} strokeWidth={1.6} />}
+      {a.avail && (
+        <T x={180} y={y0 + 66} c={AIRBUS.green} s={14} a="middle" w={700}>
+          AVAIL
+        </T>
+      )}
+      {dial(96, y0 + 140, a.n, 120, 107, 'N', '%', a.n > 0.5 ? f0(a.n) : 'XX')}
+      {dial(96, y0 + 206, a.egt, 1200, a.egtLimit, 'EGT', '°C', a.n > 0.5 || a.egt > 40 ? f0(a.egt) : 'XX')}
+      <T x={206} y={y0 + 140} s={10}>
+        FLAP
+      </T>
+      <T x={250} y={y0 + 140} c={AIRBUS.green} s={11}>
+        {a.flapOpen ? 'OPEN' : 'CLOSED'}
+      </T>
+      {a.fuelUsed !== undefined && (
+        <g>
+          <T x={206} y={y0 + 160} s={10}>
+            FUEL USED
+          </T>
+          <T x={326} y={y0 + 174} c={AIRBUS.green} s={12} a="end">
+            {f0(a.fuelUsed)}
+          </T>
+          <T x={330} y={y0 + 174} c={AIRBUS.cyan} s={9}>
+            KG
+          </T>
+        </g>
+      )}
+      {a.lowOil && (
+        <T x={206} y={y0 + 196} c={AIRBUS.amber} s={11}>
+          LOW OIL PR
+        </T>
+      )}
+      {a.fault && (
+        <T x={206} y={y0 + 214} c={AIRBUS.amber} s={11}>
+          {a.fault}
+        </T>
+      )}
     </g>
   );
 }
@@ -563,8 +709,20 @@ function PageCruise({ c }: { c: NonNullable<EcamProps['cruise']> }) {
   );
 }
 
-export function Ecam({ thrMode = ['CLB', 98], thr: thrIn, n1, rev, egt, egtLimit = 1000, memo, warning, page = 'ENG', eng, wheel, fctl, fuel, cruise, footer, width = 300 }: EcamProps) {
+/** Bieżący czas (GG:MM:SS), odświeżany co sekundę – zegar w dolnym pasku ECAM zawsze chodzi. */
+function useClock() {
+  const fmt = () => new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const [t, setT] = useState(fmt);
+  useEffect(() => {
+    const id = window.setInterval(() => setT(fmt()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return t;
+}
+
+export function Ecam({ thrMode = ['CLB', 98], thr: thrIn, n1, rev, egt, egtLimit = 1000, memo, warning, page = 'ENG', eng, wheel, fctl, fuel, cruise, apu, footer, width = 300 }: EcamProps) {
   const ft = footer ?? { tat: -36, sat: -66, isa: -3 };
+  const clock = useClock();
   // pasek alarmu: tytuł + polecenia (po 13 px), wsuwa się pod EWD i przesuwa resztę ekranu w dół
   const band = warning ? 26 + warning.lines.length * 13 : 0;
   const HH = H + band;
@@ -647,6 +805,7 @@ export function Ecam({ thrMode = ['CLB', 98], thr: thrIn, n1, rev, egt, egtLimit
       {page === 'FCTL' && fctl && <PageFctl f={fctl} />}
       {page === 'CRUISE' && cruise && <PageCruise c={cruise} />}
       {page === 'FUEL' && fuel && <PageFuel f={fuel} />}
+      {page === 'APU' && apu && <PageApu a={apu} />}
       {/* ---- dolny pasek ---- */}
       <g stroke={AIRBUS.white} strokeWidth={1} fill="none">
         <rect x={6} y={FOOT} width={112} height={54} />
@@ -679,7 +838,7 @@ export function Ecam({ thrMode = ['CLB', 98], thr: thrIn, n1, rev, egt, egtLimit
         {ft.flt ?? '00:00'}
       </T>
       <T x={180} y={FOOT + 42} c={AIRBUS.green} s={15} a="middle">
-        {ft.time ?? '12:00:00'}
+        {clock}
       </T>
       {(
         [

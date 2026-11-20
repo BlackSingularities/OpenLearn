@@ -4,3 +4,4 @@ export { Nd, type NdProps } from './Nd';
 export { Ecam, thrFromN1, type EcamProps, type EcamPage, type EcamEngine } from './Ecam';
 export { CockpitDock } from './Dock';
 export { AIRBUS, cockpitFont } from './common';
+export { AutoBrakeKnob, ControlStack, EngStartPanel, FlapLever, GearLever, PanelBox, Pushbutton, SpeedBrakeLever, ThrustLevers, Tiller, leverFromThrust, type PbLight } from './Controls';

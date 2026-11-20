@@ -25,7 +25,8 @@ export interface NdProps {
 
 const W = 360;
 const H = 330;
-const RANGES = [5, 10, 20, 40, 80, 160, 320];
+/** Zasięgi (NM) – od małych, „lotniskowych” (kołowanie, zakręty na ziemi), do przelotowych. */
+const RANGES = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 40, 80, 160, 320];
 
 export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadiusNm = 0, range, target, width = 300 }: NdProps) {
   const cx = 180;
@@ -81,7 +82,7 @@ export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadius
           <g key={f}>
             <path d={`M${cx - R * f},${cy} A${R * f},${R * f} 0 0 1 ${cx + R * f},${cy}`} fill="none" stroke={AIRBUS.white} strokeWidth={1} strokeDasharray="4 5" opacity={0.75} />
             <text x={cx - R * f * 0.72 - 6} y={cy - R * f * 0.7 + 10} fill={AIRBUS.cyan} fontSize={10} textAnchor="end">
-              {Math.round(rng * f * 10) / 10}
+              {rng * f < 1 ? Math.round(rng * f * 100) / 100 : Math.round(rng * f * 10) / 10}
             </text>
           </g>
         ))}

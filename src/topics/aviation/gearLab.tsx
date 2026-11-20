@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import type { Params, Step } from '../../lib/types';
 import { InfoPortal, fmt } from '../../lib/plot';
 import { useSpeed } from '../../components/ui';
-import { CockpitDock, Ecam, Pfd } from '../../components/cockpit';
+import { AutoBrakeKnob, CockpitDock, ControlStack, Ecam, GearLever, Nd, Pfd, SpeedBrakeLever, ThrustLevers, Tiller } from '../../components/cockpit';
 import { CASCADE_BAND } from './engineModel';
 import { ENG_K, GEAR_STROKE, MAIN_WHEEL_INDEX, MLG, NOSE_X, engineOrigin, newGearDrive, wingSurface, type GearDrive } from './airliner';
 import { EngineStreams, FollowPlane, PathStreaks, SpoilerFlow, type DirectPose, type PoseState } from './wingLab';
@@ -65,15 +65,58 @@ const BRAKE_HC = 110 * 1100;
 /** Rozstaw osi: od koła przedniego do środka wózków głównych (m). */
 const WHEELBASE = MLG.x - NOSE_X;
 const TIP: V3 = [9.8, 0, 32.4]; // końcówka skrzydła (położenie przybliżone)
-/** Promienie zakrętu przy skręcie koła przedniego δ: środek obrotu na linii wózków, ślad koła przedniego, końcówka skrzydła. */
+/**
+ * Środek zakrętu leży na przedłużeniu osi, które nie skręcają: przednia i środkowa oś wózka (tylna skręca),
+ * czyli ok. 0,75 m przed środkiem wózka.
+ */
+const TURN_X = MLG.x - 0.75;
+/** Promienie zakrętu przy skręcie koła przedniego δ: środek obrotu (odległość od osi kadłuba), ślad koła przedniego, końcówka skrzydła. */
 export function turnRadii(deltaDeg: number) {
   const d = (Math.abs(deltaDeg) * Math.PI) / 180;
   if (d < 0.02) return null;
-  const rc = WHEELBASE / Math.tan(d);
-  return { rc, nose: Math.hypot(WHEELBASE, rc), tip: Math.hypot(TIP[0] - MLG.x, rc + TIP[2]) };
+  const wb = TURN_X - NOSE_X;
+  const rc = wb / Math.tan(d);
+  return { rc, nose: Math.hypot(wb, rc), tip: Math.hypot(TIP[0] - TURN_X, rc + TIP[2]) };
 }
 /** Skręt tylnej osi wózków (rad) dla skrętu koła przedniego (°): w przeciwną stronę, dopiero przy ciasnych zakrętach. */
 const rearOf = (deltaDeg: number) => -Math.sign(deltaDeg) * Math.min(1, Math.max(0, (Math.abs(deltaDeg) - 15) / 40)) * ((8 * Math.PI) / 180);
+
+/**
+ * Zawracanie o 180° na pasie (w lewo): koło przednie skręca o kąt z tillera, samolot obraca się wokół środka zakrętu
+ * leżącego na linii wózków głównych. Fazy: 0 – postój na początku, 1 – pilot skręca tillerem, 2 – zawracanie,
+ * 3 – koło wraca prosto i samolot stoi (potem od nowa).
+ */
+type TurnState = { ph: number; tp: number; yaw: number; cz: number; acc: number; tracks: { nose: V3[]; mainL: V3[]; mainR: V3[]; tip: V3[] } };
+const newTurn = (): TurnState => ({ ph: 0, tp: 0, yaw: 0, cz: 0, acc: 0, tracks: { nose: [], mainL: [], mainR: [], tip: [] } });
+/** Kurs 0–359°. */
+const wrapDeg = (d: number) => ((d % 360) + 360) % 360;
+/** Prędkość koła przedniego w zakręcie (m/s, ok. 5 kt) i przyspieszenie czasu animacji. */
+const TURN_V = 2.6;
+const TURN_K = 3;
+/** Zewnętrzne koło wózka (z, m), połowa szerokości opony i wymagany zapas od krawędzi nawierzchni (ICAO, kod E). */
+const MAIN_OUT = MLG.z + 0.63;
+const TYRE_HALF = 0.25;
+const EDGE_CLR = 4.5;
+/** Punkty samolotu, których ślad rysujemy: koło przednie, zewnętrzne koła obu wózków i końcówka prawego skrzydła. */
+const TRACK_PTS: Record<'nose' | 'mainL' | 'mainR' | 'tip', [number, number]> = { nose: [NOSE_X, 0], mainL: [MLG.x, MAIN_OUT], mainR: [MLG.x, -MAIN_OUT], tip: [TIP[0], -TIP[2]] };
+/** Poziom płyty (jak RW_Y niżej – tu potrzebny wcześniej). */
+const PAD_Y = -6.13;
+/** Punkt samolotu (x, z) po obrocie o odchylenie yaw (rad) wokół środka zakrętu (TURN_X, cz) – na płycie. */
+const turnWorld = (x: number, z: number, cz: number, yaw: number): V3 => {
+  const dx = x - TURN_X;
+  const dz = z - cz;
+  return [TURN_X + dx * Math.cos(yaw) + dz * Math.sin(yaw), PAD_Y + 0.03, cz - dx * Math.sin(yaw) + dz * Math.cos(yaw)];
+};
+/**
+ * Ile miejsca w poprzek pasa zajmują koła przy zawracaniu o 180° kątem δ: skrajne położenia (z) – prawe zewnętrzne
+ * koło na początku i najdalszy punkt śladu koła przedniego albo lewego wózka po drugiej stronie.
+ */
+export function uTurnSpan(deltaDeg: number) {
+  const tr = turnRadii(deltaDeg)!;
+  const zMin = -MAIN_OUT - TYRE_HALF;
+  const zMax = Math.max(tr.rc + tr.nose, 2 * tr.rc + MAIN_OUT) + TYRE_HALF;
+  return { ...tr, zMin, zMax, need: zMax - zMin + 2 * EDGE_CLR };
+}
 
 /* ======================= napęd podwozia ======================= */
 
@@ -111,6 +154,8 @@ type Live = {
   spl: number;
   /** Przechylenie samolotu przy przyziemieniu (°, dodatnie – lewe skrzydło w dół). */
   bank: number;
+  /** Zawracanie na pasie: faza, czas w fazie (s), odchylenie samolotu, środek zakrętu (z, m) i ślady kół. */
+  turn: TurnState;
 };
 const DEG = Math.PI / 180;
 /** Skok amortyzatora przedniego (m). */
@@ -131,7 +176,7 @@ const BOGIE_RATE = 0.4;
 /** Stan podwozia dla wybranej zakładki; zwraca napęd dla modelu i bieżące wartości do ramek. */
 export function useGearDriver(mode: GearMode | null, params: Params, direct?: DirectPose) {
   const drive = useMemo(newGearDrive, []);
-  const live = useRef<Live>({ L: 1, s: GEAR_STROKE, p: 0, v: 0, dist: 0, temp: Array(12).fill(30), r: 0, t: 0, a: 0, stop: 0, n1: 21, rev: 0, deg: 0, u: 0, h: 0, sink: 0, pitch: 0, lift: 0, landing: false, spinV: 0, noseV: 0, wV: Array(12).fill(0), wTouch: Array(12).fill(-1), spl: 0, bank: 0 });
+  const live = useRef<Live>({ L: 1, s: GEAR_STROKE, p: 0, v: 0, dist: 0, temp: Array(12).fill(30), r: 0, t: 0, a: 0, stop: 0, n1: 21, rev: 0, deg: 0, u: 0, h: 0, sink: 0, pitch: 0, lift: 0, landing: false, spinV: 0, noseV: 0, wV: Array(12).fill(0), wTouch: Array(12).fill(-1), spl: 0, bank: 0, turn: newTurn() });
   /** Stan silników dla modelu (ten sam obiekt co klatkę – silnik sam go odczytuje). */
   const power = useMemo(() => ({ n1: 21, rev: 0 }), []);
   /** Wychylenia powierzchni sterowych dla modelu skrzydła (spojlery w czasie dobiegu). */
@@ -378,11 +423,45 @@ export function useGearDriver(mode: GearMode | null, params: Params, direct?: Di
       drive.retract = 0;
       return;
     } else if (mode === 'steer') {
-      // animacja: koło przednie powoli skręca w lewo i w prawo (do ok. 55°); bez niej – kąt z suwaka
-      const deg = params.sweep !== false ? 55 * Math.sin(lv.t * 0.35) : Number(params.tiller ?? 40);
+      // zawracanie o 180° na pasie, w kółko: tiller → zakręt wokół środka na linii wózków → koło prosto → od nowa
+      const tiller = Math.max(20, Math.min(70, Number(params.tiller ?? 70)));
+      const T = lv.turn ?? (lv.turn = newTurn());
+      const ds = dt * TURN_K;
+      T.tp += ds;
+      let deg = lv.deg;
+      if (T.ph === 0) {
+        deg += (0 - deg) * Math.min(1, ds * 3);
+        T.yaw = 0;
+        T.cz = turnRadii(tiller)!.rc;
+        if (T.tp > 2) Object.assign(T, { ph: 1, tp: 0, tracks: { nose: [], mainL: [], mainR: [], tip: [] } });
+      } else if (T.ph === 1) {
+        // tiller: koło przednie skręca ok. 20°/s
+        deg = Math.min(tiller, deg + 20 * ds);
+        if (deg >= tiller) Object.assign(T, { ph: 2, tp: 0 });
+      } else if (T.ph === 2) {
+        deg = tiller;
+        const tr = turnRadii(deg)!;
+        const w = TURN_V / tr.nose;
+        T.yaw = Math.min(Math.PI, T.yaw + w * ds);
+        drive.spin += w * tr.rc * ds;
+        drive.noseSpin = (drive.noseSpin ?? 0) + TURN_V * ds;
+        T.acc += ds;
+        if (T.acc > 0.25 || T.yaw >= Math.PI) {
+          T.acc = 0;
+          (Object.keys(TRACK_PTS) as (keyof typeof TRACK_PTS)[]).forEach((k) => T.tracks[k].push(turnWorld(TRACK_PTS[k][0], TRACK_PTS[k][1], T.cz, T.yaw)));
+        }
+        if (T.yaw >= Math.PI) Object.assign(T, { ph: 3, tp: 0 });
+      } else {
+        deg += (0 - deg) * Math.min(1, ds * 1.5);
+        if (T.tp > 7) Object.assign(T, { ph: 0, tp: 0, yaw: 0 });
+      }
       lv.deg = deg;
       steer = (deg * Math.PI) / 180;
       rear = rearOf(deg);
+      if (direct) {
+        Object.assign(direct, { pivot: [TURN_X, PAD_Y, T.cz] as V3, lift: 0, bank: 0, yaw: (T.yaw * 180) / Math.PI, alpha: 0 });
+        Object.assign(direct.surf, { aileron: 0, elevator: 0, rudder: 0, spoiler: 0 });
+      }
     }
     if (mode !== 'shock' && mode !== 'retract') {
       drive.extend += (extend - drive.extend) * k;
@@ -392,8 +471,6 @@ export function useGearDriver(mode: GearMode | null, params: Params, direct?: Di
     drive.steer += (steer - drive.steer) * k;
     drive.rear += (rear - drive.rear) * k;
     drive.heat += (0 - drive.heat) * k * 0.2;
-    // koła przy skręcie toczą się powoli (samolot kołuje)
-    if (mode === 'steer') drive.spin += 2.5 * dt;
   });
   return { drive, live, power, surf };
 }
@@ -541,8 +618,28 @@ export function GearLab({ mode, params, live, pose }: { mode: GearMode; params: 
   const phase = landingPhase(lv.t, lv.v);
   const fma: [string, string, string, string, string] =
     lv.u < 0 ? (lv.t < LANDING.tFlare ? ['SPEED', 'LAND', '', '', '1FD2\nA/THR'] : ['RETARD', 'FLARE', '', '', '1FD2\nA/THR']) : ['', 'ROLL OUT', '', '', '1FD2'];
+  /*
+   * Kontrolki pulpitu przy lądowaniu – przestawiają się same, zgodnie z przebiegiem: dźwignie ciągu w CL (autothrottle)
+   * aż do „RETARD” (bieg jałowy), po przyziemieniu w zakres odwracacza (MAX REV, poniżej ok. 70 kt – IDLE REV), po
+   * schowaniu odwracaczy znowu IDLE; hamulce aerodynamiczne uzbrojone (ARMED) – spojlery wysuwają się same; autobrake
+   * z wybranym ustawieniem, DECEL po osiągnięciu zadanego opóźnienia; podwozie wypuszczone.
+   */
+  const thrPos = !lv.landing ? 0 : lv.u < 0 && lv.t < LANDING.tTD - 2.2 ? 1 : lv.rev > 0.02 ? -lv.rev * (lv.v > 36 ? 1 : 0.35) : 0;
+  const controls = (
+    <ControlStack>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <ThrustLevers pos={[thrPos, thrPos]} athr={lv.landing && lv.u < 0 && lv.t < LANDING.tTD - 2.2} size={96} />
+        <SpeedBrakeLever pos={0} armed={!(lv.landing && lv.u > 0 && lv.v <= 8)} deployed={lv.spl / 0.87} size={96} />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <AutoBrakeKnob sel={(ab.name === 'LO' ? 'LO' : ab.name) as '2' | '3' | 'HI' | 'LO'} active={lv.landing && lv.u > LANDING.brakeAt && lv.v > 0.5} decel={lv.landing && lv.u > 0 && lv.v > 0.5 && lv.a >= 0.8 * ab.a} />
+        <GearLever lever="down" state="down" size={82} />
+      </div>
+    </ControlStack>
+  );
   const landingDock = lv.landing ? (
     <CockpitDock>
+      {controls}
       <Pfd pitch={lv.pitch} bank={-lv.bank} ias={lv.v * 1.944} iasTarget={LANDING.vApp * 1.944} alt={lv.h * 3.281} ra={lv.h * 3.281} vs={-lv.sink * 196.85} heading={0} track={0} baro={1013} fd={null} fma={fma} width={260} />
       <Ecam thrMode={null} n1={[lv.n1, lv.n1]} rev={[lv.rev, lv.rev]} egt={[420 + 3.2 * lv.n1, 424 + 3.2 * lv.n1]} page="WHEEL" wheel={wheel('down')} memo={[[`AUTO BRK ${ab.name}`, '#3ee36b'], ...(lv.u > LANDING.spoilerAt ? ([['GND SPLRS', '#3ee36b']] as [string, string][]) : [])]} footer={{ tat: 18, sat: 18, isa: 3, flt: '07:11', time: '20:33:34', gw: MASS, gwcg: 28.5, fob: 9800 }} width={260} />
     </CockpitDock>
@@ -560,6 +657,7 @@ export function GearLab({ mode, params, live, pose }: { mode: GearMode; params: 
         <TyreSmoke live={live} />
         {pose && <LandingFlow live={live} pose={pose} />}
         <CockpitDock>
+          {controls}
           <Pfd pitch={lv.pitch} bank={-lv.bank} ias={lv.v * 1.944} iasTarget={LANDING.vApp * 1.944} alt={lv.h * 3.281} ra={lv.h * 3.281} vs={-lv.sink * 196.85} heading={0} track={0} baro={1013} fd={null} fma={fma} width={260} />
           <Ecam
             thrMode={null}
@@ -608,6 +706,10 @@ export function GearLab({ mode, params, live, pose }: { mode: GearMode; params: 
     return (
       <>
         <CockpitDock>
+          <ControlStack>
+            <GearLever lever={params.up ? 'up' : 'down'} state={gear} />
+            <ThrustLevers pos={[1, 1]} athr size={96} />
+          </ControlStack>
           <Ecam thrMode={['CLB', 92]} n1={[88, 88]} egt={[742, 745]} page="WHEEL" wheel={wheel(gear)} footer={{ tat: 12, sat: 8, isa: 3, flt: '00:01', time: '14:22:05', gw: 310000, gwcg: 29.1, fob: 98000 }} width={260} />
         </CockpitDock>
         <InfoPortal>
@@ -629,6 +731,7 @@ export function GearLab({ mode, params, live, pose }: { mode: GearMode; params: 
         {lv.landing && pose && <LandingFlow live={live} pose={pose} />}
         {landingDock ?? (
           <CockpitDock>
+            {controls}
             <Ecam thrMode={null} n1={[lv.n1, lv.n1]} rev={[lv.rev, lv.rev]} egt={[420 + 3.2 * lv.n1, 424 + 3.2 * lv.n1]} page="WHEEL" wheel={wheel('down')} memo={[[`AUTO BRK ${ab.name}`, '#3ee36b']]} footer={{ tat: 18, sat: 18, isa: 3, flt: '07:11', time: '20:33:34', gw: MASS, gwcg: 28.5, fob: 9800 }} width={260} />
           </CockpitDock>
         )}
@@ -667,29 +770,98 @@ export function GearLab({ mode, params, live, pose }: { mode: GearMode; params: 
       </>
     );
   }
-  // sterowanie: okręgi zakrętu na płycie (kąt z animacji albo z suwaka)
+  // sterowanie: zawracanie na pasie – ślady kół, pas o wybranej szerokości i wymagany zapas od krawędzi
   const deg = lv.deg;
-  const tr = turnRadii(deg);
+  const tiller = Math.max(20, Math.min(70, Number(params.tiller ?? 70)));
+  const span = uTurnSpan(tiller);
+  const rwW = Number(params.rw ?? 45);
+  const right = span.zMin - EDGE_CLR;
+  const left = right + rwW;
+  const margin = left - span.zMax;
+  const fits = margin >= EDGE_CLR;
+  const T = lv.turn ?? (lv.turn = newTurn());
+  const turnPhase = T.ph === 0 ? 'postój przy krawędzi pasa – koło przednie prosto' : T.ph === 1 ? 'pilot obraca tillerem – koło przednie skręca' : T.ph === 2 ? `zawracanie – obrócony o ${fmt((T.yaw * 180) / Math.PI, 0)}°` : 'po zawróceniu – koło wraca prosto';
   return (
     <>
-      {tr && <TurnCircles deg={deg} rc={tr.rc} />}
+      <TurnPad right={right} left={left} limit={left - EDGE_CLR} fits={fits} turn={T} cz={T.cz} showCenter={T.ph > 0} />
       <CockpitDock>
-        <Ecam thrMode={null} n1={[21, 21]} egt={[460, 462]} page="WHEEL" wheel={{ ...wheel('down'), steer: true }} footer={{ tat: 18, sat: 18, isa: 3, flt: '00:00', time: '05:40:12', gw: 316000, gwcg: 29.4, fob: 132000 }} width={260} />
+        <ControlStack>
+          <Tiller deg={deg} />
+          <ThrustLevers pos={[T.ph === 2 ? 0.12 : 0, T.ph === 2 ? 0.12 : 0]} size={80} />
+        </ControlStack>
+        {/* ND: kurs obraca się w czasie zawracania, zielony łuk – przewidywany tor przy obecnym skręcie koła (w lewo) */}
+        <Nd heading={wrapDeg(270 - (T.yaw * 180) / Math.PI)} gs={T.ph === 2 ? TURN_V * 1.944 : 0} tas={0} turnRadiusNm={Math.abs(deg) > 1 ? -(turnRadii(deg)?.rc ?? 0) / 1852 : 0} range={0.1} target="RWY 27R" width={240} />
+        <Ecam thrMode={null} n1={[21, 21]} egt={[460, 462]} page="WHEEL" wheel={{ ...wheel('down'), steer: true }} footer={{ tat: 18, sat: 18, isa: 3, flt: '00:00', time: '05:40:12', gw: 316000, gwcg: 29.4, fob: 132000 }} width={240} />
       </CockpitDock>
       <InfoPortal>
-        <div style={{ fontWeight: 700 }}>Skręt koła przedniego {fmt(Math.abs(deg), 0)}°{Math.abs(deg) > 15 ? ' · tylne osie skręcają w przeciwną stronę' : ''}</div>
-        {tr ? (
-          <div>
-            środek zakrętu <b>{fmt(tr.rc, 1)} m</b> od osi kadłuba · ślad koła przedniego – promień <b>{fmt(tr.nose, 1)} m</b> · końcówka skrzydła – <b>{fmt(tr.tip, 1)} m</b>
+        <div style={{ fontWeight: 700 }}>{turnPhase}</div>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '1px 12px', fontSize: 13 }}>
+            <span>skręt koła przedniego</span>
+            <b>{fmt(Math.abs(deg), 0)}°</b>
+            <span>tylne osie wózków</span>
+            <b>{Math.abs(deg) > 15 ? `${fmt((Math.abs(rearOf(deg)) * 180) / Math.PI, 1)}° w przeciwną stronę` : 'prosto'}</b>
+            <span>środek zakrętu</span>
+            <b>{fmt(span.rc, 1)} m od osi kadłuba</b>
+            <span>ślad koła przedniego</span>
+            <b>R = {fmt(span.nose, 1)} m</b>
+            <span>końcówka skrzydła</span>
+            <b>R = {fmt(span.tip, 1)} m</b>
           </div>
-        ) : (
-          <div>Koło przednie ustawione prosto – samolot kołuje po prostej.</div>
-        )}
-        <div style={{ opacity: 0.8 }}>
-          <span style={{ color: '#facc15' }}>Żółty</span> okrąg – ślad koła przedniego, <span style={{ color: '#f472b6' }}>różowy</span> – końcówki skrzydła (wyznacza, ile miejsca potrzeba na zawrócenie). Rozstaw osi ok. {fmt(WHEELBASE, 1)} m.
+        </div>
+        <div style={{ fontSize: 13 }}>
+          Koła zajmują w poprzek pasa <b>{fmt(span.zMax - span.zMin, 1)} m</b>; z zapasem {fmt(EDGE_CLR, 1)} m od obu krawędzi potrzeba <b>{fmt(span.need, 1)} m</b>. Pas {rwW} m:{' '}
+          <b style={{ color: fits ? '#3ee36b' : '#ff6b5b' }}>{fits ? `wystarczy (zapas po lewej ${fmt(margin, 1)} m)` : `za wąski – brakuje ${fmt(EDGE_CLR - margin, 1)} m zapasu`}</b>
+        </div>
+        <div style={{ opacity: 0.8, fontSize: 12 }}>
+          Ślady: <span style={{ color: '#facc15' }}>koło przednie</span>, <span style={{ color: '#e2e8f0' }}>zewnętrzne koła wózków</span>, <span style={{ color: '#f472b6' }}>końcówka prawego skrzydła</span> (może wystawać poza pas). Przerywana linia – granica zapasu {fmt(EDGE_CLR, 1)} m od lewej krawędzi. Animacja ok. {TURN_K}× szybsza, geometria przybliżona.
         </div>
       </InfoPortal>
     </>
+  );
+}
+
+/**
+ * Pas startowy na płycie (nieruchomy – samolot obraca się nad nim): asfalt o wybranej szerokości, krawędzie, oś,
+ * linia wymaganego zapasu od lewej krawędzi, środek zakrętu i ślady kół zapisane w czasie zawracania.
+ */
+function TurnPad({ right, left, limit, fits, turn, cz, showCenter }: { right: number; left: number; limit: number; fits: boolean; turn: TurnState; cz: number; showCenter: boolean }) {
+  const y = PAD_Y + 0.01;
+  // pas ciągnie się za samolotem; koniec pasa – kawałek przed nosem (zawraca się na samym końcu)
+  const x0 = -52;
+  const x1 = 170;
+  const mid = (left + right) / 2;
+  const tr = turn.tracks;
+  const dashes = useMemo(() => Array.from({ length: 7 }, (_, i) => x0 + 12 + i * 30), [x0]);
+  return (
+    <group>
+      <mesh position={[(x0 + x1) / 2, y - 0.02, mid]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+        <planeGeometry args={[x1 - x0, left - right]} />
+        <meshStandardMaterial color="#2c3036" roughness={0.95} />
+      </mesh>
+      {[right + 0.5, left - 0.5].map((z) => (
+        <Line key={z} points={[[x0, y, z], [x1, y, z]]} color="#f2f4f6" lineWidth={2.5} />
+      ))}
+      {/* koniec pasa przed nosem samolotu */}
+      <Line points={[[x0, y, right], [x0, y, left]]} color="#f2f4f6" lineWidth={2.5} />
+      {dashes.map((x) => (
+        <Line key={x} points={[[x, y, mid], [x + 18, y, mid]]} color="#e5e7eb" lineWidth={1.6} />
+      ))}
+      <Line points={[[x0, y, limit], [x1, y, limit]]} color={fits ? '#22c55e' : '#f59e0b'} lineWidth={1.4} dashed dashSize={1.5} gapSize={1} />
+      {showCenter && (
+        <group>
+          <mesh position={[TURN_X, y + 0.02, cz]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.5, 0.8, 24]} />
+            <meshBasicMaterial color="#e2e8f0" />
+          </mesh>
+          <Line points={[[TURN_X, y, 0], [TURN_X, y, cz]]} color="#e2e8f0" lineWidth={1} dashed dashSize={0.6} gapSize={0.5} />
+        </group>
+      )}
+      {tr.nose.length > 1 && <Line points={tr.nose} color="#facc15" lineWidth={3} />}
+      {tr.mainL.length > 1 && <Line points={tr.mainL} color="#e2e8f0" lineWidth={2.5} />}
+      {tr.mainR.length > 1 && <Line points={tr.mainR} color="#e2e8f0" lineWidth={2.5} />}
+      {tr.tip.length > 1 && <Line points={tr.tip} color="#f472b6" lineWidth={2} dashed dashSize={1.2} gapSize={0.8} />}
+    </group>
   );
 }
 
@@ -844,24 +1016,6 @@ function TyreSmoke({ live }: { live: MutableRefObject<Live> }) {
 }
 
 /** Okręgi zakrętu na płycie: ślad koła przedniego i końcówki skrzydła (od strony zewnętrznej). */
-function TurnCircles({ deg, rc }: { deg: number; rc: number }) {
-  const sg = Math.sign(deg) || 1;
-  const cz = sg * rc;
-  const y = -6.1;
-  const ring = (r: number): V3[] => Array.from({ length: 121 }, (_, i) => {
-    const t = (i / 120) * Math.PI * 2;
-    return [MLG.x + Math.cos(t) * r, y, cz + Math.sin(t) * r];
-  });
-  const nose = Math.hypot(WHEELBASE, rc);
-  const tip = Math.hypot(TIP[0] - MLG.x, rc + TIP[2]);
-  return (
-    <group>
-      <Line points={ring(nose)} color="#facc15" lineWidth={2} />
-      <Line points={ring(tip)} color="#f472b6" lineWidth={2} dashed dashSize={1.2} gapSize={0.8} />
-      <Line points={[[MLG.x, y, 0], [MLG.x, y, cz]]} color="#e2e8f0" lineWidth={1} dashed dashSize={0.6} gapSize={0.5} />
-    </group>
-  );
-}
 
 /* ======================= zakładki modułu ======================= */
 
@@ -953,13 +1107,22 @@ export function makeGearSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey
     plane({
       title: 'Sterowanie na ziemi',
       spot: GEAR_SPOTS[4],
-      // nisko, z przodu i z boku: widać skręcające koło przednie i okręgi zakrętu na płycie
-      camera: [-48, 3, 20],
-      target: [-26, -5.4, 3],
+      // z góry, z przodu po prawej: cały zakręt na pasie i ślady kół
+      camera: [-62, 78, -48],
+      target: [-6, -6, 16],
       preset: { focus: 'gear', gear: 'steer' },
       controls: [
-        { type: 'toggle', key: 'sweep', label: 'Skręcanie w obie strony (animacja)', default: true },
-        { type: 'slider', key: 'tiller', label: 'Skręt koła przedniego (bez animacji)', min: -70, max: 70, step: 1, default: 40, unit: '°' },
+        { type: 'slider', key: 'tiller', label: 'Skręt koła przedniego (tiller)', min: 20, max: 70, step: 1, default: 70, unit: '°' },
+        {
+          type: 'select',
+          key: 'rw',
+          label: 'Szerokość pasa',
+          default: '45',
+          options: [
+            { value: '45', label: '45 m' },
+            { value: '60', label: '60 m' },
+          ],
+        },
       ],
       body: (
         <>
@@ -969,7 +1132,10 @@ export function makeGearSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey
           <p>
             W wersji -1000 przy ciasnych zakrętach skręcają też <b>tylne osie wózków głównych</b> – w przeciwną stronę. Opony mniej się wtedy ścierają, a wózki nie „szorują” bokiem po płycie.
           </p>
-          <p>Na płycie widać okręgi: ślad koła przedniego i końcówki skrzydła. Ten drugi decyduje, czy samolot zmieści się przy zawracaniu na końcu pasa.</p>
+          <p>
+            Samolot zawraca o 180° na końcu pasa: pilot obraca tillerem, a samolot kręci się wokół <b>środka zakrętu</b> na linii nieskrętnych osi wózków. Na asfalcie zostają ślady kół: <b>koła przedniego</b> (najszerszy łuk) i wózków, a różowy łuk to <b>końcówka skrzydła</b>. Kurs i przewidywany tor widać na ND.
+          </p>
+          <p>Zmieniaj kąt tillera i szerokość pasa: przy pełnym skręcie A350-1000 potrzebuje ok. 60 m nawierzchni – na pasie szerokości 45 m musi zawracać na specjalnej zatoczce (turn pad).</p>
         </>
       ),
     }),
