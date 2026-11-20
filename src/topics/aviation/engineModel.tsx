@@ -43,6 +43,11 @@ export const PLUG3: Tab = [[690, 40], [740, 44], [765, 46], [800, 44], [840, 37]
 export const S = 1 / 100;
 const X0 = 4.4;
 export const ax = (x: number) => x * S - X0;
+/**
+ * Pas kaskad odwracacza (układ modelu silnika, m): od przedniego do tylnego pierścienia i promień zewnętrznego
+ * brzegu łopatek – stąd wylatuje strumień wsteczny po odsunięciu osłony.
+ */
+export const CASCADE_BAND = { x0: ax(366), x1: ax(448), r: (lerpTable(NAC3_OUT, 407) - 4) * S };
 const CUT_START = 0.5;
 const CUT_LEN = Math.PI * 1.5;
 

@@ -11,7 +11,8 @@ import type { Params, Step } from '../../lib/types';
 import { InfoPortal, fmt } from '../../lib/plot';
 import { useSpeed } from '../../components/ui';
 import { CockpitDock, Ecam, Pfd } from '../../components/cockpit';
-import { GEAR_STROKE, MAIN_WHEEL_INDEX, MLG, NOSE_X, engineOrigin, newGearDrive, wingSurface, type GearDrive } from './airliner';
+import { CASCADE_BAND } from './engineModel';
+import { ENG_K, GEAR_STROKE, MAIN_WHEEL_INDEX, MLG, NOSE_X, engineOrigin, newGearDrive, wingSurface, type GearDrive } from './airliner';
 import { EngineStreams, FollowPlane, PathStreaks, SpoilerFlow, type DirectPose, type PoseState } from './wingLab';
 import { LANDING, landingAir, landingGround, landingPhase } from './landing';
 
@@ -437,7 +438,11 @@ function wingUnderside(x: number, z: number): number | null {
 export function reverserPaths(sides: number[]) {
   const e = engineOrigin();
   const out: [number, number, number][][] = [];
-  const n = 12;
+  // kaskady w układzie samolotu: pas na zewnętrznej ściance gondoli, odsłonięty przez odsuniętą osłonę
+  const cx0 = e[0] + CASCADE_BAND.x0 * ENG_K;
+  const cx1 = e[0] + CASCADE_BAND.x1 * ENG_K;
+  const r0 = CASCADE_BAND.r * ENG_K;
+  const n = 18;
   for (const side of sides)
     for (let k = 0; k < n; k++) {
       const ph = ((k + 0.5) / n) * Math.PI * 2;
@@ -447,10 +452,12 @@ export function reverserPaths(sides: number[]) {
       let up = 0; // ile struga została zepchnięta w dół przez skrzydło (m, ≤ 0)
       let gr = 0; // ile uniesiona nad pasem (m, ≥ 0)
       let spread = 0; // przesunięcie wzdłuż rozpiętości (m)
+      // struga wychodzi z kaskad (w różnych miejscach pasa) skośnie na zewnątrz i do przodu – tak kierują ją łopatki
+      const xs = cx0 + (cx1 - cx0) * (0.2 + 0.3 * (k % 3));
       for (let i = 0; i <= 28; i++) {
         const u = i / 28;
-        const r = 1.75 + 3.2 * u;
-        const x = e[0] + 1.2 - 7 * u * u;
+        const r = r0 + 3.2 * u;
+        const x = xs - 2.4 * u - 4.6 * u * u;
         const y0 = e[1] + Math.cos(ph) * r;
         const zl = e[2] + Math.sin(ph) * r; // w układzie lewego skrzydła
         const wy = wingUnderside(x, zl + spread);
@@ -468,7 +475,7 @@ export function reverserPaths(sides: number[]) {
 
 function ReverserStreams({ sides = [1, -1] }: { sides?: number[] }) {
   const paths = useMemo(() => reverserPaths(sides), [sides]);
-  return <PathStreaks paths={paths} count={65 * sides.length} color="#c7e6ff" speed={14} trail={3} width={0.07} opacity={0.65} />;
+  return <PathStreaks paths={paths} count={90 * sides.length} color="#c7e6ff" speed={14} trail={3} width={0.07} opacity={0.65} />;
 }
 
 /**
