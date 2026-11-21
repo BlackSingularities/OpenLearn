@@ -959,14 +959,14 @@ const FUS_CUT = (x: number, th: number) => th > -0.35 + jag(x / 40 + 0.5, 5, 0.1
 const CK_PANES_REF: [number, number][][] = [[[1.942,0.091],[2.05,0.085],[2.157,0.079],[2.264,0.086],[2.353,0.154],[2.402,0.302],[2.47,0.446],[2.537,0.589],[2.633,0.715],[2.696,0.833],[2.599,0.893],[2.514,0.947],[2.446,0.992],[2.352,0.977],[2.236,0.884],[2.134,0.762],[2.048,0.628],[1.965,0.492],[1.906,0.344],[1.884,0.188]],[[3.027,1.067],[3.124,1.162],[3.141,1.25],[3.135,1.323],[3.13,1.394],[3.125,1.466],[3.13,1.524],[3.136,1.58],[3.034,1.544],[2.916,1.479],[2.802,1.407],[2.694,1.331],[2.591,1.245],[2.525,1.158],[2.549,1.104],[2.604,1.051],[2.668,0.998],[2.732,0.945],[2.816,0.918],[2.919,0.985]],[[3.224,1.504],[3.227,1.549],[3.23,1.594],[3.251,1.644],[3.342,1.69],[3.449,1.725],[3.549,1.742],[3.642,1.75],[3.689,1.727],[3.695,1.684],[3.669,1.632],[3.637,1.57],[3.594,1.5],[3.528,1.431],[3.446,1.365],[3.355,1.303],[3.266,1.27],[3.236,1.323],[3.232,1.383],[3.227,1.443]]];
 const CK_TIP = -33.4 - PF;
 /**
- * Szyby przesunięte według dokumentacji Airbusa (AC A350-900, rys. 4-4-0 „Visibility from Cockpit”): z punktu oczu
- * pilota (3,04 m za czubkiem nosa, 0,53 m od osi, 0,71 m nad osią kadłuba) widać ok. 20° w dół i 27° w górę, a okna
- * boczne leżą ok. 0,33–1,12 m nad osią. W modelu referencyjnym szyby były wyżej i za krótkie ku przodowi – przednia
- * jest wydłużona do przodu i obniżona (widoczność −17°…+27°), boczne przesunięte w tył i w dół (0,35–1,17 m).
+ * Szyby kokpitu (sześć: po dwie przednie, boczne i małe tylne) wyznaczone z dokumentacji Airbusa (AC A350-900,
+ * rys. 2-2-0 i 4-4-0): pas szyb ok. 0,75 m wysoki na wysokości oczu pilota (od ok. 0,32 m pod oczami do 0,4 m nad
+ * nimi – stąd widoczność ok. 20° w dół i 27° w górę), szyby przednie od słupka środkowego do 0,9 m w bok od osi,
+ * cały pas od ok. 1,6 do 3,4 m za czubkiem nosa; słupki między szybami ok. 10 cm. Obrysy [odległość od czubka nosa,
+ * odsunięcie od osi w bok] liczone na poszyciu nosa (skrypt dopasowania) – obrysy z modelu referencyjnego zostały
+ * w CK_PANES_REF.
  */
-const CK_PANES: [number, number][][] = CK_PANES_REF.map((pane, i) =>
-  pane.map(([d, z]): [number, number] => (i === 0 ? [2.9 - (2.7 - d) * 1.75, z * 1.3] : [d + (i === 1 ? 0.3 : 0.35), z + 0.25])),
-);
+const CK_PANES: [number, number][][] = [[[1.592,0.07],[1.597,0.12],[1.608,0.2],[1.629,0.3],[1.657,0.4],[1.694,0.5],[1.741,0.6],[1.797,0.7],[1.865,0.8],[1.944,0.9],[2.674,0.9],[2.616,0.8],[2.569,0.7],[2.534,0.6],[2.507,0.5],[2.49,0.4],[2.482,0.3],[2.481,0.2],[2.485,0.12],[2.49,0.07]],[[2.064,1.012],[2.318,1.238],[2.572,1.412],[2.826,1.555],[3.08,1.679],[3.09,1.663],[3.1,1.645],[3.11,1.625],[3.12,1.605],[3.12,1.563],[3.12,1.516],[3.12,1.465],[3.12,1.407],[3.11,1.386],[3.1,1.365],[3.09,1.342],[3.08,1.319],[3.008,1.258],[2.937,1.192],[2.865,1.119],[2.794,1.038],[2.611,1.046],[2.429,1.044],[2.246,1.032]],[[3.2,1.709],[3.225,1.718],[3.25,1.727],[3.275,1.735],[3.3,1.744],[3.317,1.74],[3.335,1.735],[3.353,1.729],[3.37,1.724],[3.373,1.706],[3.375,1.688],[3.377,1.668],[3.38,1.648],[3.37,1.629],[3.36,1.609],[3.35,1.588],[3.34,1.567],[3.315,1.546],[3.29,1.526],[3.265,1.504],[3.24,1.482],[3.23,1.494],[3.22,1.506],[3.21,1.518],[3.2,1.529],[3.2,1.582],[3.2,1.629],[3.2,1.671]]];
 /**
  * Punkt oczu kapitana (AC A350-900, rys. 4-4-0): 3,04 m za czubkiem nosa, 0,53 m w bok od osi; wysokość 0,71 m nad
  * osią kadłuba (6,27 m nad ziemią na rysunku, ok. 1,1 m nad podłogą kabiny i kokpitu). Pierwszy oficer – symetrycznie.
@@ -1025,6 +1025,46 @@ const inPoly = (q: P2, poly: P2[]) => {
 const CK_POLYS = CK_PANES.map((p) => ckPoly(p, 0));
 /** Czy punkt poszycia (x, θ) leży w otworze szyby kokpitu (obie burty). */
 const COCKPIT = (x: number, th: number) => CK_POLYS.some((poly) => inPoly([x, Math.abs(th) * CK_R], poly));
+/** Otoczka wypukła punktów (x, łuk) – łańcuch monotoniczny. */
+function hull2(pts: P2[]): P2[] {
+  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o: P2, a: P2, b: P2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: P2[] = [];
+  for (const q of p) {
+    while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop();
+    lo.push(q);
+  }
+  const up: P2[] = [];
+  for (const q of [...p].reverse()) {
+    while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop();
+    up.push(q);
+  }
+  return [...lo.slice(0, -1), ...up.slice(0, -1)];
+}
+/**
+ * Czarna „maska” wokół szyb kokpitu – znak rozpoznawczy A350: jedna plama obejmująca szyby przednie (także nad
+ * słupkiem środkowym) i boczne, ok. 12 cm poza ich krawędziami, zakończona ku tyłowi ostrzem na wysokości okien bocznych.
+ * Obrys w płaszczyźnie (x, θ·R), jak obrysy szyb.
+ */
+const CK_MASK: P2[] = (() => {
+  const pts: P2[] = [];
+  const r = 0.12;
+  CK_POLYS.forEach((poly) =>
+    poly.forEach(([x, a]) => {
+      for (let k = 0; k < 12; k++) {
+        const t = (k / 12) * Math.PI * 2;
+        pts.push([x + r * Math.cos(t), Math.max(0, a + r * Math.sin(t))]);
+      }
+    }),
+  );
+  const front = CK_POLYS[0];
+  pts.push([Math.min(...front.map((q) => q[0])) + 0.12, 0], [Math.max(...front.map((q) => q[0])), 0]);
+  const rear = CK_POLYS[2];
+  const amid = rear.reduce((sum, q) => sum + q[1], 0) / rear.length;
+  pts.push([Math.max(...rear.map((q) => q[0])) + 0.55, amid]);
+  return hull2(pts);
+})();
+const CK_MASK_A = Math.max(...CK_MASK.map((q) => q[1]));
 const DOORS = PAX_DOOR.xs;
 /** Podłoga kabiny: próg drzwi 1 (AC A350-900, rys. 2-3-0: D1 ≈ 5,05 m nad ziemią). */
 export const FLOOR = -1.08;
@@ -1289,6 +1329,45 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
         glassG.push(gl);
       }
     const cockpit = merge(glassG);
+    // maska: cienka warstwa farby tuż nad poszyciem, z otworami szyb (ich brzegi zakrywa czarna ramka)
+    // w każdym rzędzie (stały łuk) pas od lewej do prawej krawędzi obrysu – brzeg dokładnie po obrysie, bez schodków;
+    // otwory szyb wycięte komórkami (ich brzegi zakrywa czarna ramka w tym samym kolorze)
+    const ckMask = (() => {
+      const span = (a: number): [number, number] | null => {
+        const xs: number[] = [];
+        for (let i = 0; i < CK_MASK.length; i++) {
+          const [x1, y1] = CK_MASK[i];
+          const [x2, y2] = CK_MASK[(i + 1) % CK_MASK.length];
+          if ((y1 - a) * (y2 - a) <= 0 && y1 !== y2) xs.push(x1 + ((a - y1) * (x2 - x1)) / (y2 - y1));
+        }
+        if (xs.length < 2) return null;
+        return [Math.max(RADOME_X + 0.03, Math.min(...xs)), Math.max(...xs)];
+      };
+      const N = 140;
+      const ths = refine([-CK_MASK_A / CK_R + 0.001, CK_MASK_A / CK_R - 0.001], 0.015 / CK_R);
+      const pos: number[] = [];
+      const idx: number[] = [];
+      const rows = ths.map((th) => span(Math.abs(th) * CK_R));
+      ths.forEach((th, j) => {
+        const sp = rows[j] ?? [0, 0];
+        for (let k = 0; k <= N; k++) pos.push(...fusPt(sp[0] + ((sp[1] - sp[0]) * k) / N, th, -0.003));
+      });
+      for (let j = 0; j < ths.length - 1; j++) {
+        if (!rows[j] || !rows[j + 1]) continue;
+        for (let k = 0; k < N; k++) {
+          const p0 = j * (N + 1) + k;
+          const q0 = p0 + N + 1;
+          const cx = (pos[p0 * 3] + pos[(q0 + 1) * 3]) / 2;
+          if (COCKPIT(cx, (ths[j] + ths[j + 1]) / 2)) continue;
+          idx.push(p0, q0, p0 + 1, p0 + 1, q0, q0 + 1);
+        }
+      }
+      const gm = new THREE.BufferGeometry();
+      gm.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      gm.setIndex(idx);
+      gm.computeVertexNormals();
+      return gm;
+    })();
     const ckWall = merge(wallG);
     const ckFrame = merge(frameG);
     const ckTrim = merge(trimG);
@@ -1564,7 +1643,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     }
     // zawór wylotowy ciśnienia w kabinie: prostokątna klapka na spodzie tylnej części kadłuba (prawa strona)
     const outflow = [flat(15.2 + PA, -(Math.PI - 0.5), [0.55, 0.012, 0.4])];
-    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTrim, ckLining, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
+    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTrim, ckLining, ckMask, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
   }), []);
   // moduł kadłuba: poszycie całe – samolot przecina płaszczyzna symetrii (przycinanie w shaderze), nie wyrwa w burcie
   const shell = useShared(g.shell, apu ? g.apuCut : radar ? g.radarCut : open && view === 'cargo' ? g.cargoCut : doorsOpen ? g.doorCut : g.full);
@@ -1594,6 +1673,10 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
       <mesh geometry={g.ckFrame}>
         <M k="#0b0e12" side={THREE.DoubleSide} />
       </mesh>
+      <mesh geometry={g.ckMask}>
+        <M k="#101317" side={THREE.DoubleSide} />
+      </mesh>
+      <FuselagePaint />
       <mesh geometry={g.cockpit} renderOrder={2}>
         <M k="glass" side={THREE.DoubleSide} opacity={0.42} />
       </mesh>
@@ -4854,6 +4937,91 @@ function getLogoTex() {
   logoTex.anisotropy = 4;
   return logoTex;
 }
+/**
+ * Malowanie kadłuba (fikcyjna linia, w barwach logo na stateczniku): nazwa nad oknami w przedniej części i znaki
+ * rejestracyjne z tyłu, po obu burtach. Napisy to cienkie nakładki na poszyciu, czytelne od nosa ku ogonowi.
+ */
+function textTex(key: string, w: number, h: number, draw: (x: CanvasRenderingContext2D) => void) {
+  return cached(`tex-${key}`, () => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const x = c.getContext('2d')!;
+    x.clearRect(0, 0, w, h);
+    draw(x);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  });
+}
+/** Nakładka na burcie: prostokąt x0…x1 (wzdłuż kadłuba) × y0…y1 (wysokość) owinięty na poszyciu. */
+function skinDecal(x0: number, x1: number, y0: number, y1: number, side: 1 | -1) {
+  const xs = refine([x0, x1], 0.1);
+  const ys = refine([y0, y1], 0.05);
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const idx: number[] = [];
+  ys.forEach((y) =>
+    xs.forEach((x) => {
+      pos.push(...fusPt(x, fusTheta(x, y) * side, -0.004));
+      const u = (x - x0) / (x1 - x0);
+      uv.push(side > 0 ? u : 1 - u, (y - y0) / (y1 - y0));
+    }),
+  );
+  for (let j = 0; j < ys.length - 1; j++)
+    for (let i = 0; i < xs.length - 1; i++) {
+      const a = j * xs.length + i;
+      idx.push(a, a + 1, a + xs.length, a + 1, a + xs.length + 1, a + xs.length);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+function FuselagePaint() {
+  const title = textTex('title', 1024, 160, (x) => {
+    x.fillStyle = '#0b3a82';
+    x.font = 'bold 124px "Segoe UI", Arial, sans-serif';
+    x.textBaseline = 'middle';
+    x.fillText('OpenLearn', 10, 84);
+    x.fillStyle = '#1d6fd6';
+    x.fillRect(660, 72, 350, 10);
+    x.fillStyle = '#ffb020';
+    x.beginPath();
+    x.arc(1000, 77, 14, 0, Math.PI * 2);
+    x.fill();
+  });
+  const reg = textTex('reg', 512, 128, (x) => {
+    x.fillStyle = '#2b3038';
+    x.font = 'bold 92px "Segoe UI", Arial, sans-serif';
+    x.textBaseline = 'middle';
+    x.textAlign = 'center';
+    x.fillText('SP-OLN', 256, 68);
+  });
+  const geos = useMemo(
+    () =>
+      cached('paint-decals', () =>
+        ([1, -1] as const).flatMap((sd) => [
+          { g: skinDecal(-25.6, -25.6 + 1.05 * 6.4, 0.36, 1.41, sd), t: 'title' as const },
+          { g: skinDecal(18.8, 18.8 + 0.5 * 4, 0.3, 0.8, sd), t: 'reg' as const },
+        ]),
+      ),
+    [],
+  );
+  return (
+    <ClipCull>
+      {geos.map((d, i) => (
+        <mesh key={i} geometry={d.g} renderOrder={1} raycast={() => null}>
+          <meshStandardMaterial map={d.t === 'title' ? title : reg} transparent alphaTest={0.05} roughness={0.45} metalness={0.05} side={THREE.DoubleSide} polygonOffset polygonOffsetFactor={-2} />
+        </mesh>
+      ))}
+    </ClipCull>
+  );
+}
+
 function FinLogo() {
   const geos = useMemo(
     () =>
