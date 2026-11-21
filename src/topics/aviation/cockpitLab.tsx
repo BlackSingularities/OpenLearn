@@ -30,7 +30,7 @@ type V3 = [number, number, number];
 const K = 3;
 /**
  * Umieszczenie kokpitu w nosie samolotu, w skali 1:1. Model budowany w metrach (oś −z – do przodu, x – w prawo,
- * podłoga stanowiska y = 0, oczy pilotów w (±0,53; 1,17; 0)), obrócony tak, że −z to nos (−x samolotu), a +x –
+ * podłoga stanowiska y = 0 – równo z podłogą kabiny, oczy pilotów ok. 1,1 m nad nią), obrócony tak, że −z to nos (−x samolotu), a +x –
  * prawa burta (−z samolotu). Punkt oczu – według dokumentacji Airbusa (COCKPIT_EYE w airliner.tsx).
  */
 const CK_EYE_H = COCKPIT_EYE.y - COCKPIT_FLOOR;
@@ -1605,8 +1605,8 @@ type CkTex = Record<'pfd' | 'nd' | 'ewd' | 'sd' | 'oh' | 'fcu' | 'efis' | 'ped' 
 
 /**
  * Bryły wyposażenia kokpitu (układ modelu, metry, skala 1:1). Początek układu: podłoga stanowiska pod punktem oczu,
- * w połowie między pilotami; oczy pilotów w (±0,53; 1,17; 0) – jak w dokumentacji Airbusa. Wymiary według typowego
- * stanowiska A350: ekrany 15″ (ok. 30 cm szerokości) ok. 0,7 m przed oczami, osłona przeciwsłoneczna ok. 1,9 m
+ * w połowie między pilotami; oczy pilotów ok. 1,1 m nad nią, 0,53 m od osi – jak w dokumentacji Airbusa. Wymiary według typowego
+ * stanowiska A350: ekrany 15″ (ok. 30 cm szerokości) ok. 0,7 m przed oczami, osłona przeciwsłoneczna ok. 1,8 m
  * szerokości tuż pod linią widoczności 17–20° w dół, fotele w rozstawie 1,06 m, panel górny nad głowami.
  * Z teksturami (`tex`) ekrany świecą obrazem, a panele mają lica; bez nich (kamera daleko) ekrany są ciemne, a lica
  * w kolorze panelu. Ściany, sufit i szyby to kadłub.
@@ -1621,7 +1621,7 @@ function CockpitEquipment({ sim, tex }: { sim: MutableRefObject<Sim>; tex?: CkTe
   return (
     <group>
       {/* osłona przeciwsłoneczna (glareshield) z FCU, panelami EFIS i lampkami ostrzegawczymi */}
-      <Bx p={[0, 0.86, -0.72]} s={[1.9, 0.08, 0.2]} c={C_DARK} rough={0.95} />
+      <Bx p={[0, 0.86, -0.72]} s={[1.8, 0.08, 0.2]} c={C_DARK} rough={0.95} />
       <Face w={0.7} h={0.07} tex={tex?.fcu} p={[0, 0.86, -0.619]} />
       {[-1, 1].map((k) => (
         <group key={k}>

@@ -762,10 +762,18 @@ const RUDDER: [number, number] = [2.9, 10.55];
 /** Wstawki kadłuba wersji -1000 względem -900: przed skrzydłem (nos idzie do przodu) i za skrzydłem (ogon do tyłu). */
 const PF = 3.5;
 const PA = 3.49;
+/**
+ * Położenie kadłuba w pionie względem reszty samolotu (skrzydła, podwozia, usterzenia, ziemi). Według tabeli prześwitów
+ * Airbusa (AC A350-900, rys. 2-3-0) spód kadłuba jest 2,41 m, a grzbiet 8,50 m nad ziemią, czyli oś kadłuba 5,46 m nad
+ * ziemią – o 0,67 m niżej niż oś układu modelu (y = 0, ziemia y = −6,13). Z tym przesunięciem zgadzają się też: próg
+ * drzwi 1 (podłoga kabiny ok. 0,48 m pod osią kadłuba), próg ładowni (3,09 m) i punkt oczu pilota.
+ */
+export const FUS_DY = -0.67;
 /** Przekrój kadłuba w x: środek yc, półwysokość h, półszerokość w. Nos lekko opuszczony, ogon podniesiony. */
 function fusSec(x: number) {
   // część walcowa wydłużona o obie wstawki; nos i stożek ogonowy jak w krótszej wersji
-  return fusSec900(x < -24.5 - PF ? x + PF : x > 6 + PA ? x - PA : 0);
+  const s = fusSec900(x < -24.5 - PF ? x + PF : x > 6 + PA ? x - PA : 0);
+  return { yc: s.yc + FUS_DY, h: s.h, w: s.w };
 }
 function fusSec900(x: number) {
   if (x < -24.5) {
@@ -837,12 +845,12 @@ export const fuselageSection = (x: number) => fusSec(x);
  * owiewką centropłata, za drzwiami 3. Szerokość ok. 2,7 m; górna krawędź (zawias) pod belkami podłogi kabiny,
  * dolna równo z podłogą ładowni (próg) – kontener LD3 (1,1 m w modelu) mieści się z zapasem.
  */
-const CARGO_DOOR = { xs: [-19.6, 10.6], hw: 1.35, yb: -2.47, yt: -1.27 };
+const CARGO_DOOR = { xs: [-19.6, 10.6], hw: 1.35, yb: -3.06, yt: -1.36 };
 /**
  * Drzwi pasażerskie A350-1000 (typ A, po cztery z każdej strony): środki w x, połowa szerokości otworu i jego dół/góra
  * (y; podłoga kabiny −1,15). Otwór ok. 1,07 × 1,93 m.
  */
-export const PAX_DOOR = { xs: [-26.9 - 3.5, -16.4, 7.4, 18.6 + 3.49], hw: 0.535, yb: -1.15 + 0.05, yt: -1.15 + 1.98 };
+export const PAX_DOOR = { xs: [-26.9 - 3.5, -16.4, 7.4, 18.6 + 3.49], hw: 0.535, yb: -1.08 + 0.05, yt: -1.08 + 1.98 };
 /** Zakresy kąta θ otworów (drzwi ładowni – prawa burta, drzwi pasażerskie – obie) na wręgu x. */
 function openingGaps(x: number): [number, number][] {
   const out: [number, number][] = [];
@@ -961,9 +969,9 @@ const CK_PANES: [number, number][][] = CK_PANES_REF.map((pane, i) =>
 );
 /**
  * Punkt oczu kapitana (AC A350-900, rys. 4-4-0): 3,04 m za czubkiem nosa, 0,53 m w bok od osi; wysokość 0,71 m nad
- * osią (6,27 m nad ziemią na rysunku, czyli ok. 1,17 m nad podłogą stanowiska). Pierwszy oficer – symetrycznie.
+ * osią kadłuba (6,27 m nad ziemią na rysunku, ok. 1,1 m nad podłogą kabiny i kokpitu). Pierwszy oficer – symetrycznie.
  */
-export const COCKPIT_EYE = { x: CK_TIP + 3.04, y: 0.71, z: 0.53 };
+export const COCKPIT_EYE = { x: CK_TIP + 3.04, y: 0.71 + FUS_DY, z: 0.53 };
 /** Przelicznik kąta θ na metry łuku (do odsuwania obrysów) – przybliżony promień kadłuba w rejonie kokpitu. */
 const CK_R = 2.6;
 /** Kąt θ (od grzbietu), pod którym górna połowa burty w x jest odsunięta od osi o z. */
@@ -1018,16 +1026,18 @@ const CK_POLYS = CK_PANES.map((p) => ckPoly(p, 0));
 /** Czy punkt poszycia (x, θ) leży w otworze szyby kokpitu (obie burty). */
 const COCKPIT = (x: number, th: number) => CK_POLYS.some((poly) => inPoly([x, Math.abs(th) * CK_R], poly));
 const DOORS = PAX_DOOR.xs;
-export const FLOOR = -1.15;
+/** Podłoga kabiny: próg drzwi 1 (AC A350-900, rys. 2-3-0: D1 ≈ 5,05 m nad ziemią). */
+export const FLOOR = -1.08;
 /**
- * Kokpit w nosie kadłuba (układ samolotu): podłoga stanowiska pilotów (podest ok. 0,7 m nad podłogą kabiny – pod nim
- * jest przedział awioniki) i tylna ściana z drzwiami. Wnętrze rysuje model kokpitu (cockpitLab), wbudowany w samolot.
+ * Kokpit w nosie kadłuba (układ samolotu): podłoga stanowiska pilotów równo z podłogą kabiny (pod nią – przedział
+ * awioniki) i tylna ściana z drzwiami. Wnętrze rysuje model kokpitu (cockpitLab), wbudowany w samolot.
  */
-export const COCKPIT_FLOOR = COCKPIT_EYE.y - 1.17;
+export const COCKPIT_FLOOR = FLOOR;
 export const COCKPIT_REAR = -32.1;
 /** Wykładzina kokpitu: odsunięcie od poszycia do środka (do niej sięgają ścianki wnęk szyb). */
 const CK_LINING = 0.12;
-const WIN_Y = 0.15;
+/** Środek okien kabiny: ok. 1,2 m nad podłogą (na rysunku Airbusa okna są na wysokości oczu siedzącego pasażera). */
+const WIN_Y = 0.05;
 
 /* ================= pamięć geometrii ================= */
 
@@ -1518,7 +1528,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
         [-30.55 - PF, -0.55],
         [-30.15 - PF, -1.05],
       ]) {
-        const th = fusTheta(x, y) * side;
+        const th = fusTheta(x, y + FUS_DY) * side;
         const p = fusPt(x, th);
         const n = fusNormal(x, th);
         const b: V3 = [p[0] + n.x * 0.16, p[1] + n.y * 0.16, p[2] + n.z * 0.16];
@@ -1538,7 +1548,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
         [5.55, -0.55],
       ] as const) {
         const x = CK_TIP + d;
-        statics.push(flat(x, fusTheta(x, y) * side, [0.1, 0.006, 0.1]));
+        statics.push(flat(x, fusTheta(x, y + FUS_DY) * side, [0.1, 0.006, 0.1]));
       }
     // maszty odpływowe: małe płetwy pod kadłubem, pochylone do tyłu – odprowadzają wodę i skropliny z dala od poszycia
     const masts: THREE.Matrix4[] = [];
@@ -1632,12 +1642,12 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
       {/* światła antykolizyjne (czerwone, migające) na grzbiecie i pod owiewką oraz białe strobo w stożku ogonowym */}
       <Lamp p={fusPt(-1.5, 0)} n={[0, 1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" lt="beacon" />
       <Lamp p={[-3.0, -4.4, 0]} n={[0, -1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" lt="beacon" />
-      <Lamp p={[33.1 + PA, 1.62, 0]} n={[1, 0.05, 0]} color="#ffffff" r={0.09} halo={4.4} blink="strobe1" sector={SECTOR.tailStrobe} lt="strobe" />
+      <Lamp p={[33.1 + PA, 1.62 + FUS_DY, 0]} n={[1, 0.05, 0]} color="#ffffff" r={0.09} halo={4.4} blink="strobe1" sector={SECTOR.tailStrobe} lt="strobe" />
       {ext?.night && (
         <>
           <FlashLight p={[fusPt(-1.5, 0)[0], fusPt(-1.5, 0)[1] + 0.6, 0]} lt="beacon" blink="beacon" color="#ff3020" power={28} dist={28} />
           <FlashLight p={[-3.0, -5.0, 0]} lt="beacon" blink="beacon" color="#ff3020" power={28} dist={22} />
-          <FlashLight p={[33.6 + PA, 1.62, 0]} lt="strobe" blink="strobe1" color="#eef4ff" power={140} dist={40} />
+          <FlashLight p={[33.6 + PA, 1.62 + FUS_DY, 0]} lt="strobe" blink="strobe1" color="#eef4ff" power={140} dist={40} />
         </>
       )}
       {open && <Interior view={view} labels={labels} pick={pick} />}
@@ -1726,12 +1736,13 @@ export type FusView = 'home' | 'struct' | 'press' | 'decomp' | 'water' | 'fire' 
 export const FUS_LIVE = { dp: 0, cargo: 99, outflow: 1, cargoT: 1e9, fog: 0, masks: 0, maskAge: 0, cargoUnload: false };
 
 /** Ładownie pod podłogą: podłoga i zakres w x. */
-const CARGO_Y = -2.45;
+/** Podłoga ładowni na wysokości progu drzwi ładowni (AC A350-900, rys. 2-3-0: C1 ≈ 3,09 m nad ziemią). */
+const CARGO_Y = -3.04;
 const HOLDS: [number, number][] = [
   // od przodu: zbiorniki wody pitnej; z tyłu, przed kesonem centropłata – mieszalnik klimatyzacji i recyrkulacja
   [-24.6, -10.2],
   // tylny luk kończy się tam, gdzie spód kadłuba zaczyna się podnosić ku ogonowi (dalej kontenery wystawałyby z poszycia)
-  [4.6, 12.2],
+  [4.6, 11.2],
 ];
 /** Drzwi ładowni (prawa burta): przednie i tylne – stąd kontenery wjeżdżają do luku. */
 export const CARGO_DOORS = CARGO_DOOR.xs;
@@ -1739,7 +1750,7 @@ export const CARGO_DOOR_X = CARGO_DOOR.xs;
 /** Miejsca kontenerów LD3 w kolejności załadunku (przednia ładownia od przodu, potem tylna). */
 export const CARGO_SLOTS: { x: number; z: number; hold: number; j: number }[] = HOLDS.flatMap(([a, b], hold) => {
   const out: { x: number; z: number; hold: number; j: number }[] = [];
-  for (let x = a + 0.85; x <= b - 0.8; x += 1.66) for (const z of [0.82, -0.82]) out.push({ x, z, hold, j: 0 });
+  for (let x = a + 0.85; x <= b - 0.8; x += 1.66) for (const z of [1.03, -1.03]) out.push({ x, z, hold, j: 0 });
   // kolejność wjazdu (j): od miejsc najdalej od drzwi, w każdym rzędzie najpierw pas dalszy od drzwi (lewa burta)
   const door = CARGO_DOOR.xs[hold];
   [...out].sort((p, q) => Math.abs(q.x - door) - Math.abs(p.x - door) || q.z - p.z).forEach((sl, j) => (sl.j = j));
@@ -1761,31 +1772,31 @@ const fusGroupColor = (g: string) => FUS_GROUPS.find((x) => x.id === g)?.color ?
  * blisko płaszczyzny przekroju (z ≈ 0,3), więc nie zasłania ich poszycie.
  */
 export const FUS_PART_INFO: Record<string, { name: string; group: string; pos: V3; sub?: boolean; desc: string }> = {
-  radar: { name: 'radar pogodowy', group: 'nose', pos: [RADOME_X - 0.5, -0.35, 0.3], desc: 'Pod opływową osłoną z materiału przepuszczającego fale radiowe obraca się płyta anteny. Przeszukuje przestrzeń przed samolotem i pokazuje opady na ekranie nawigacyjnym w kokpicie. Pod nią, na ścianie kadłuba, są dwa nadajniki-odbiorniki. Więcej – w module radaru.' },
-  fwdBulk: { name: 'gródź przednia', group: 'struct', pos: [RADOME_X + 0.1, 0.4, 0.3], sub: true, desc: 'Płaska, usztywniona ściana, od której z przodu zaczyna się szczelna część kadłuba (ta, w której utrzymuje się ciśnienie). Przed nią, pod osłoną radaru, jest zwykłe ciśnienie zewnętrzne, więc w przelocie na każdy metr kwadratowy grodzi naciska kilka ton. Sięga do podłogi kokpitu – niżej, za nią, jest nieszczelna wnęka podwozia przedniego.' },
-  avionics: { name: 'przedział awioniki', group: 'nose', pos: [-28.75, -2.8, 0.3], desc: 'Pod podłogą, tuż za wnęką podwozia przedniego, stoją regały z komputerami samolotu: do sterowania, nawigacji, łączności i prowadzenia lotu. Każdy komputer to skrzynka, którą wsuwa się na półkę i wymienia w kilka minut. Chłodzi je powietrze tłoczone kanałami wzdłuż regałów. Mechanicy wchodzą tu po drabince przez właz w spodzie kadłuba.' },
-  restF: { name: 'odpoczynek pilotów', group: 'cabin', pos: [-28.8, 2.75, 0.3], sub: true, desc: 'Na długich lotach na pokładzie jest dodatkowa załoga, a piloci odpoczywają na zmianę. Mają mały przedział z dwiema kojami nad kabiną, tuż za kokpitem. Wchodzi się do niego po stromych schodach od strony pierwszych drzwi. W środku są koje z pościelą, zasłony i lampki do czytania.' },
+  radar: { name: 'radar pogodowy', group: 'nose', pos: [RADOME_X - 0.5, -0.35 + FUS_DY, 0.3], desc: 'Pod opływową osłoną z materiału przepuszczającego fale radiowe obraca się płyta anteny. Przeszukuje przestrzeń przed samolotem i pokazuje opady na ekranie nawigacyjnym w kokpicie. Pod nią, na ścianie kadłuba, są dwa nadajniki-odbiorniki. Więcej – w module radaru.' },
+  fwdBulk: { name: 'gródź przednia', group: 'struct', pos: [RADOME_X + 0.1, 0.4 + FUS_DY, 0.3], sub: true, desc: 'Płaska, usztywniona ściana, od której z przodu zaczyna się szczelna część kadłuba (ta, w której utrzymuje się ciśnienie). Przed nią, pod osłoną radaru, jest zwykłe ciśnienie zewnętrzne, więc w przelocie na każdy metr kwadratowy grodzi naciska kilka ton. Sięga do podłogi kokpitu – niżej, za nią, jest nieszczelna wnęka podwozia przedniego.' },
+  avionics: { name: 'przedział awioniki', group: 'nose', pos: [-28.75, -2.8 + FUS_DY, 0.3], desc: 'Pod podłogą, tuż za wnęką podwozia przedniego, stoją regały z komputerami samolotu: do sterowania, nawigacji, łączności i prowadzenia lotu. Każdy komputer to skrzynka, którą wsuwa się na półkę i wymienia w kilka minut. Chłodzi je powietrze tłoczone kanałami wzdłuż regałów. Mechanicy wchodzą tu po drabince przez właz w spodzie kadłuba.' },
+  restF: { name: 'odpoczynek pilotów', group: 'cabin', pos: [-28.8, 2.75 + FUS_DY, 0.3], sub: true, desc: 'Na długich lotach na pokładzie jest dodatkowa załoga, a piloci odpoczywają na zmianę. Mają mały przedział z dwiema kojami nad kabiną, tuż za kokpitem. Wchodzi się do niego po stromych schodach od strony pierwszych drzwi. W środku są koje z pościelą, zasłony i lampki do czytania.' },
   business: { name: 'klasa biznes', group: 'cabin', pos: [-23.0, 0.9, 0.3], desc: 'Fotele w układzie 1-2-1 (cztery w rzędzie), ustawione skośnie jak jodełka – z każdego można wyjść prosto do przejścia, bez przechodzenia nad sąsiadem. Fotel rozkłada się w płaskie łóżko. Od sąsiada oddziela go wysoka osłona ze schowkiem, obok jest lampka i panel do ustawiania fotela, a przed nim – duży ekran. Rzędy są co ok. 2 m.' },
   economy: { name: 'klasa ekonomiczna 3-3-3', group: 'cabin', pos: [0.5, 0.75, 0.3], desc: 'Dziewięć foteli w rzędzie (3-3-3), rzędy co ok. 81 cm. Szeroki kadłub A350 mieści też ciaśniejszy układ – dziesięć foteli w rzędzie (3-4-3). Nad fotelami są schowki na bagaż podręczny: po bokach i pośrodku.' },
   galley: { name: 'kuchnie i toalety', group: 'cabin', pos: [DOORS[2] - 1.0, FLOOR + 2.3, 0.3], sub: true, desc: 'Przy drzwiach są kuchnie – z wózkami, piekarnikami i chłodziarkami – oraz toalety. Toalety są podciśnieniowe: różnica ciśnień między kabiną a powietrzem na zewnątrz zasysa ścieki rurą do zbiorników z tyłu kadłuba.' },
-  restA: { name: 'odpoczynek personelu pokładowego', group: 'cabin', pos: [12.8 + PA, 2.65, 0.3], sub: true, desc: 'Nad tylną częścią kabiny są koje dla personelu pokładowego. Na lotach trwających kilkanaście godzin stewardesy i stewardzi pracują na zmiany.' },
-  duct: { name: 'kanał klimatyzacji i wiązki kabli', group: 'sys', pos: [-6, 2.85, 0.3], sub: true, desc: 'Nad sufitem biegnie główny kanał klimatyzacji – okrągła rura owinięta izolacją, podwieszona do szkieletu kadłuba. Co kilka metrów odchodzą od niej odgałęzienia do nawiewów nad schowkami, a zużyte powietrze uchodzi z kabiny kratkami przy podłodze. Po bokach, w korytkach, biegną wiązki kabli: zasilania i przesyłu danych (niebieska to światłowód). Kable z lewej i prawej strony prowadzi się osobno, żeby jedno uszkodzenie nie przecięło obu zapasowych kopii instalacji.' },
+  restA: { name: 'odpoczynek personelu pokładowego', group: 'cabin', pos: [12.8 + PA, 2.65 + FUS_DY, 0.3], sub: true, desc: 'Nad tylną częścią kabiny są koje dla personelu pokładowego. Na lotach trwających kilkanaście godzin stewardesy i stewardzi pracują na zmiany.' },
+  duct: { name: 'kanał klimatyzacji i wiązki kabli', group: 'sys', pos: [-6, 2.85 + FUS_DY, 0.3], sub: true, desc: 'Nad sufitem biegnie główny kanał klimatyzacji – okrągła rura owinięta izolacją, podwieszona do szkieletu kadłuba. Co kilka metrów odchodzą od niej odgałęzienia do nawiewów nad schowkami, a zużyte powietrze uchodzi z kabiny kratkami przy podłodze. Po bokach, w korytkach, biegną wiązki kabli: zasilania i przesyłu danych (niebieska to światłowód). Kable z lewej i prawej strony prowadzi się osobno, żeby jedno uszkodzenie nie przecięło obu zapasowych kopii instalacji.' },
   floor: { name: 'podłoga i belki podłogi', group: 'struct', pos: [-12.5, FLOOR - 0.35, 0.3], sub: true, desc: 'Płyty podłogi leżą na poprzecznych belkach, podpartych od spodu słupkami. W podłodze są szyny do mocowania foteli – linia lotnicza może więc zmienić układ kabiny.' },
-  fwdHold: { name: 'ładownia przednia', group: 'cargo', pos: [-17.0, -2.1, 0.3], desc: 'Kontenery z bagażem wjeżdżają przez drzwi w prawym boku i jadą po rolkach w podłodze. Ładownia jest szczelna i ogrzewana, więc można w niej przewozić np. zwierzęta. Ma czujniki dymu i instalację gaśniczą.' },
+  fwdHold: { name: 'ładownia przednia', group: 'cargo', pos: [-17.0, -2.3, 0.3], desc: 'Kontenery z bagażem wjeżdżają przez drzwi w prawym boku i jadą po rolkach w podłodze. Ładownia jest szczelna i ogrzewana, więc można w niej przewozić np. zwierzęta. Ma czujniki dymu i instalację gaśniczą.' },
   water: { name: 'woda pitna', group: 'cargo', pos: [-25.3, -1.55, 0.3], sub: true, desc: 'Zbiorniki wody do kuchni i umywalek. Przed lotem napełnia się je z cysterny przez zawór w spodzie kadłuba, a do kranów wodę wypycha sprężone powietrze.' },
   centre: { name: 'centropłat (zbiornik centralny)', group: 'struct', pos: [-4.6, -0.55, 0.3], desc: 'Środkowa część skrzydła – mocna skrzynia, która przechodzi przez kadłub pod podłogą kabiny i łączy oba skrzydła. Przenosi na kadłub siłę, z jaką skrzydła niosą samolot, a w środku mieści centralny zbiornik paliwa. Więcej – w module skrzydła i w zakładce o tankowaniu w module silnika.' },
   bay: { name: 'wnęka podwozia i belka kilowa', group: 'struct', pos: [2.4, -3.6, 0.3], desc: 'Za środkową częścią skrzydła chowają się koła podwozia głównego. Wnęka to wielki otwór w spodzie kadłuba, więc obciążenia przejmuje mocna belka biegnąca pod nią (belka kilowa), a nad kołami jest szczelna płyta. Więcej – w module podwozia.' },
-  aftHold: { name: 'ładownia tylna', group: 'cargo', pos: [7.0, -2.1, 0.3], desc: 'Druga ładownia na kontenery, za wnęką podwozia, z własnymi drzwiami w prawym boku. Od tego, jak rozłoży się ładunek między ładowniami, zależy położenie środka ciężkości samolotu.' },
-  bulkHold: { name: 'bagaż luzem · zbiorniki ścieków', group: 'cargo', pos: [11.6 + PA, -1.15, 0.3], sub: true, desc: 'Za tylną ładownią jest miejsce na bagaż bez kontenerów: spóźnione walizki, wózki dziecięce, sprzęt sportowy. Obok stoją zbiorniki ścieków z toalet, opróżniane na ziemi przez zawór w spodzie kadłuba.' },
-  rearBulk: { name: 'gródź ciśnieniowa', group: 'struct', pos: [20.8 + PA, 0.55, 0.3], desc: 'Kopuła, która z tyłu zamyka szczelną część kadłuba. Jest wypukła jak dno puszki z napojem – taki kształt najlepiej znosi ciśnienie. Za nią, w zwężającym się ogonie, nie ma już ciśnienia kabiny.' },
-  jack: { name: 'śruba trymera statecznika', group: 'sys', pos: [26.2 + PA, 2.05, 0.3], sub: true, desc: 'Cały statecznik poziomy (mniejsze „skrzydło” na ogonie) może się powoli obracać – przestawia go długa śruba z napędem hydraulicznym. Tak samolot jest wyważany przy różnych prędkościach i różnym rozłożeniu ładunku, żeby stery wysokości nie musiały być przez cały czas wychylone.' },
-  apu: { name: 'APU', group: 'sys', pos: [33.6 + 0.0, 1.35, 0.3], desc: 'Mały silnik turbinowy w samym końcu kadłuba, za ścianą ogniową (APU – pomocniczy zespół napędowy). Na ziemi daje prąd i sprężone powietrze do klimatyzacji i uruchamiania silników, w locie może być zapasowym źródłem prądu. Powietrze wpada przez klapkę w boku kadłuba, a spaliny wylatują na samym końcu ogona. Więcej – w module APU.' },
-  fireWall: { name: 'gródź ogniowa APU', group: 'struct', pos: [APU_HATCH.x0 - 0.5, 1.15, 0.3], sub: true, desc: 'Tytanowa ściana oddziela przedział APU od reszty ogona, żeby ewentualny pożar nie przeszedł dalej. W przedziale są czujniki ognia i dysze, przez które butla wypuszcza środek gaśniczy. Więcej – w module APU.' },
-  statics: { name: 'porty ciśnienia statycznego', group: 'skin', pos: fusPt(CK_TIP + 5.7, fusTheta(CK_TIP + 5.7, -0.4), -0.6), sub: true, desc: 'Małe otworki w poszyciu, równo z powierzchnią. Mierzą ciśnienie powietrza wokół samolotu – na tej podstawie komputery liczą wysokość lotu i to, jak szybko samolot się wznosi albo zniża.' },
-  pitot: { name: 'rurki Pitota i czujniki kąta natarcia', group: 'skin', pos: [-30.4 - PF, -1.6, 3.0], sub: true, desc: 'Rurki Pitota to rurki skierowane do przodu, w które wpada pęd powietrza – z jego nacisku komputery liczą prędkość samolotu. Obracające się łopatki obok mierzą, pod jakim kątem powietrze napływa na samolot (kąt natarcia). Wszystkie są podgrzewane, żeby nie oblodziły się w chmurach.' },
-  mast: { name: 'maszt odpływowy', group: 'skin', pos: [-19.5 - PF, -3.6, 0.6], sub: true, desc: 'Wystający, podgrzewany maszt pod kadłubem. Wyrzuca na zewnątrz wodę z umywalek i kuchni (nie ścieki z toalet) – daleko od poszycia, żeby nie zamarzała na kadłubie.' },
+  aftHold: { name: 'ładownia tylna', group: 'cargo', pos: [7.0, -2.3, 0.3], desc: 'Druga ładownia na kontenery, za wnęką podwozia, z własnymi drzwiami w prawym boku. Od tego, jak rozłoży się ładunek między ładowniami, zależy położenie środka ciężkości samolotu.' },
+  bulkHold: { name: 'bagaż luzem · zbiorniki ścieków', group: 'cargo', pos: [11.6 + PA, -1.15 + FUS_DY, 0.3], sub: true, desc: 'Za tylną ładownią jest miejsce na bagaż bez kontenerów: spóźnione walizki, wózki dziecięce, sprzęt sportowy. Obok stoją zbiorniki ścieków z toalet, opróżniane na ziemi przez zawór w spodzie kadłuba.' },
+  rearBulk: { name: 'gródź ciśnieniowa', group: 'struct', pos: [20.8 + PA, 0.55 + FUS_DY, 0.3], desc: 'Kopuła, która z tyłu zamyka szczelną część kadłuba. Jest wypukła jak dno puszki z napojem – taki kształt najlepiej znosi ciśnienie. Za nią, w zwężającym się ogonie, nie ma już ciśnienia kabiny.' },
+  jack: { name: 'śruba trymera statecznika', group: 'sys', pos: [26.2 + PA, 2.05 + FUS_DY, 0.3], sub: true, desc: 'Cały statecznik poziomy (mniejsze „skrzydło” na ogonie) może się powoli obracać – przestawia go długa śruba z napędem hydraulicznym. Tak samolot jest wyważany przy różnych prędkościach i różnym rozłożeniu ładunku, żeby stery wysokości nie musiały być przez cały czas wychylone.' },
+  apu: { name: 'APU', group: 'sys', pos: [33.6, 1.35 + FUS_DY, 0.3], desc: 'Mały silnik turbinowy w samym końcu kadłuba, za ścianą ogniową (APU – pomocniczy zespół napędowy). Na ziemi daje prąd i sprężone powietrze do klimatyzacji i uruchamiania silników, w locie może być zapasowym źródłem prądu. Powietrze wpada przez klapkę w boku kadłuba, a spaliny wylatują na samym końcu ogona. Więcej – w module APU.' },
+  fireWall: { name: 'gródź ogniowa APU', group: 'struct', pos: [APU_HATCH.x0 - 0.5, 1.15 + FUS_DY, 0.3], sub: true, desc: 'Tytanowa ściana oddziela przedział APU od reszty ogona, żeby ewentualny pożar nie przeszedł dalej. W przedziale są czujniki ognia i dysze, przez które butla wypuszcza środek gaśniczy. Więcej – w module APU.' },
+  statics: { name: 'porty ciśnienia statycznego', group: 'skin', pos: fusPt(CK_TIP + 5.7, fusTheta(CK_TIP + 5.7, -0.4 + FUS_DY), -0.6), sub: true, desc: 'Małe otworki w poszyciu, równo z powierzchnią. Mierzą ciśnienie powietrza wokół samolotu – na tej podstawie komputery liczą wysokość lotu i to, jak szybko samolot się wznosi albo zniża.' },
+  pitot: { name: 'rurki Pitota i czujniki kąta natarcia', group: 'skin', pos: [-30.4 - PF, -1.6 + FUS_DY, 3.0], sub: true, desc: 'Rurki Pitota to rurki skierowane do przodu, w które wpada pęd powietrza – z jego nacisku komputery liczą prędkość samolotu. Obracające się łopatki obok mierzą, pod jakim kątem powietrze napływa na samolot (kąt natarcia). Wszystkie są podgrzewane, żeby nie oblodziły się w chmurach.' },
+  mast: { name: 'maszt odpływowy', group: 'skin', pos: [-19.5 - PF, -3.6 + FUS_DY, 0.6], sub: true, desc: 'Wystający, podgrzewany maszt pod kadłubem. Wyrzuca na zewnątrz wodę z umywalek i kuchni (nie ścieki z toalet) – daleko od poszycia, żeby nie zamarzała na kadłubie.' },
   ram: { name: 'wloty powietrza klimatyzacji', group: 'skin', pos: [-6.6, -4.7, 1.6], sub: true, desc: 'Wloty w osłonie pod kadłubem. Doprowadzają zimne powietrze z zewnątrz do chłodnic klimatyzacji. W locie ich klapki się przymykają, żeby zmniejszyć opór.' },
-  outflow: { name: 'zawór wylotowy kabiny', group: 'skin', pos: [15.2 + PA, -2.9, 0.3], sub: true, desc: 'Klapka w prawym boku kadłuba za skrzydłem (w przekroju zdjęta razem z prawą połową samolotu). Wypuszcza powietrze z kabiny – to, jak bardzo jest otwarta, decyduje o ciśnieniu w środku. Zobacz zakładkę „Ciśnienie i klimatyzacja”.' },
+  outflow: { name: 'zawór wylotowy kabiny', group: 'skin', pos: [15.2 + PA, -2.9 + FUS_DY, 0.3], sub: true, desc: 'Klapka w prawym boku kadłuba za skrzydłem (w przekroju zdjęta razem z prawą połową samolotu). Wypuszcza powietrze z kabiny – to, jak bardzo jest otwarta, decyduje o ciśnieniu w środku. Zobacz zakładkę „Ciśnienie i klimatyzacja”.' },
 };
 
 /** Klikane podpisy części kadłuba (strona główna modułu). */
@@ -1979,19 +1990,19 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
     // a w środku znaki „zapiąć pasy” i „zakaz palenia” oraz klapka masek tlenowych
     for (const sg of [1, -1]) {
       const pz = 1.95 * sg * k;
-      B('#e5e7eb', [x, 0.97, pz], [0.6, 0.05, 1.2]);
-      B('#d6d1c4', [x + 0.12, 0.945, pz], [0.3, 0.01, 1.05]); // klapka masek
+      B('#e5e7eb', [x, 0.97 + FUS_DY, pz], [0.6, 0.05, 1.2]);
+      B('#d6d1c4', [x + 0.12, 0.945 + FUS_DY, pz], [0.3, 0.01, 1.05]); // klapka masek
       for (const dz of [-0.47, 0, 0.47]) {
-        add('cylV', '#fff7e0', box([x - 0.16, 0.94, pz + dz * k - 0.08], [0.07, 0.02, 0.07]), '#fff2cc'); // lampka
-        add('cylV', '#9ca3af', box([x - 0.16, 0.94, pz + dz * k + 0.08], [0.06, 0.03, 0.06])); // nawiew
-        B('#60a5fa', [x - 0.22, 0.943, pz + dz * k], [0.03, 0.01, 0.03], undefined, '#3b82f6'); // wezwanie personelu
+        add('cylV', '#fff7e0', box([x - 0.16, 0.94 + FUS_DY, pz + dz * k - 0.08], [0.07, 0.02, 0.07]), '#fff2cc'); // lampka
+        add('cylV', '#9ca3af', box([x - 0.16, 0.94 + FUS_DY, pz + dz * k + 0.08], [0.06, 0.03, 0.06])); // nawiew
+        B('#60a5fa', [x - 0.22, 0.943 + FUS_DY, pz + dz * k], [0.03, 0.01, 0.03], undefined, '#3b82f6'); // wezwanie personelu
       }
-      B('#fde68a', [x + 0.2, 0.943, pz - 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zapiąć pasy”
-      B('#fde68a', [x + 0.2, 0.943, pz + 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zakaz palenia”
+      B('#fde68a', [x + 0.2, 0.943 + FUS_DY, pz - 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zapiąć pasy”
+      B('#fde68a', [x + 0.2, 0.943 + FUS_DY, pz + 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zakaz palenia”
     }
     // schowki nad głowami: uchwyt klapy i zatrzask (boczne – od strony przejścia, środkowe – z obu stron)
-    for (const sg of [1, -1]) B('#475569', [x, 1.02, 1.93 * sg * k], [0.28, 0.035, 0.04]);
-    for (const sg of [1, -1]) B('#475569', [x, 1.54, 0.56 * sg], [0.28, 0.035, 0.04]);
+    for (const sg of [1, -1]) B('#475569', [x, 1.02 + FUS_DY, 1.93 * sg * k], [0.28, 0.035, 0.04]);
+    for (const sg of [1, -1]) B('#475569', [x, 1.54 + FUS_DY, 0.56 * sg], [0.28, 0.035, 0.04]);
   }
   // listwa pod oknami (półka przy burcie, na wysokości podłokietników) wzdłuż całej kabiny
   for (let x = -28.1; x < 20.6; x += 0.62) {
@@ -2073,8 +2084,8 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
   }
   const cx0 = -27.5;
   const cx1 = 19.5 + PA;
-  for (const s of [1, -1]) B('#dbeafe', [(cx0 + cx1) / 2, 1.62, 1.72 * s], [cx1 - cx0, 0.03, 0.05], undefined, '#bfdbfe'); // światło nad schowkami
-  B('#dbeafe', [(cx0 + cx1) / 2, 2.12, 0], [cx1 - cx0, 0.02, 0.28], undefined, '#93c5fd'); // światło sufitu
+  for (const s of [1, -1]) B('#dbeafe', [(cx0 + cx1) / 2, 1.62 + FUS_DY, 1.72 * s], [cx1 - cx0, 0.03, 0.05], undefined, '#bfdbfe'); // światło nad schowkami
+  B('#dbeafe', [(cx0 + cx1) / 2, 2.12 + FUS_DY, 0], [cx1 - cx0, 0.02, 0.28], undefined, '#93c5fd'); // światło sufitu
   for (const s of [1, -1]) B('#fde68a', [(cx0 + cx1) / 2, FLOOR + 0.01, 0.95 * s], [cx1 - cx0, 0.01, 0.03], undefined, '#facc15'); // ścieżka ewakuacyjna
 
   // ---------- instalacje nad sufitem ----------
@@ -2082,7 +2093,8 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
   // co drugi odcinek odgałęzienia w dół, do nawiewów nad schowkami po obu stronach
   const D0 = -27;
   const D1 = 21.5;
-  const DY = 2.42;
+  // instalacje nad sufitem wiszą pod grzbietem kadłuba – przesunięte razem z nim
+  const DY = 2.42 + FUS_DY;
   const DR = 0.22;
   const cyl = (k: string, x: number, y: number, z: number, len: number, d: number, e?: string) => add('cylX', k, box([x, y, z], [len, d, d]), e);
   let seg = 0;
@@ -2100,8 +2112,8 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
       for (const s of [1, -1]) {
         // odgałęzienie: skośnie w dół ku burcie, zakończone nawiewem nad schowkami
         B('#c3ced6', [x + 0.62, DY - 0.17, 0.55 * s], [0.13, 0.13, 0.75], [0.5 * s, 0, 0]);
-        B('#c3ced6', [x + 0.62, 2.0, 0.92 * s], [0.13, 0.22, 0.13]);
-        B('#9ca3af', [x + 0.62, 1.88, 0.98 * s], [0.42, 0.04, 0.16]); // nawiew
+        B('#c3ced6', [x + 0.62, 2.0 + FUS_DY, 0.92 * s], [0.13, 0.22, 0.13]);
+        B('#9ca3af', [x + 0.62, 1.88 + FUS_DY, 0.98 * s], [0.42, 0.04, 0.16]); // nawiew
       }
   }
   // korytka kablowe po obu stronach: otwarte, na wspornikach co dwie wręgi; w nich wiązki zasilania i danych
@@ -2109,16 +2121,16 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
   const T1 = 19.8;
   for (const s of [1, -1]) {
     const z = 1.32 * s;
-    B('#6b7280', [(T0 + T1) / 2, 2.15, z], [T1 - T0, 0.015, 0.3]); // dno korytka
-    for (const dz of [0.15, -0.15]) B('#6b7280', [(T0 + T1) / 2, 2.19, z + dz], [T1 - T0, 0.08, 0.012]); // burty
+    B('#6b7280', [(T0 + T1) / 2, 2.15 + FUS_DY, z], [T1 - T0, 0.015, 0.3]); // dno korytka
+    for (const dz of [0.15, -0.15]) B('#6b7280', [(T0 + T1) / 2, 2.19 + FUS_DY, z + dz], [T1 - T0, 0.08, 0.012]); // burty
     const bundles: [number, number, string][] = [
       [-0.08, 0.06, '#d1d5db'], // zasilanie
       [0, 0.07, '#4b5563'],
       [0.08, 0.05, '#e5e7eb'],
       [0.03, 0.035, '#3b82f6'], // sieć danych (światłowód) – cieńsza, na wierzchu
     ];
-    for (const [dz, d, k] of bundles) cyl(k, (T0 + T1) / 2, 2.19 + (k === '#3b82f6' ? 0.05 : 0), z + dz * s, T1 - T0, d);
-    for (let x = T0 + 0.3; x < T1; x += 1.24) B('#9ca3af', [x, 2.27, z], [0.03, 0.26, 0.34]); // wspornik
+    for (const [dz, d, k] of bundles) cyl(k, (T0 + T1) / 2, 2.19 + FUS_DY + (k === '#3b82f6' ? 0.05 : 0), z + dz * s, T1 - T0, d);
+    for (let x = T0 + 0.3; x < T1; x += 1.24) B('#9ca3af', [x, 2.27 + FUS_DY, z], [0.03, 0.26, 0.34]); // wspornik
   }
 
   // ---------- odpoczynek załóg: przedziały nad kabiną (podłoga, sufit, ściany, koje z pościelą, lampki) ----------
@@ -2140,20 +2152,21 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
       }
   };
   // pilotów: nad wejściem do kabiny za kokpitem; wchodzi się stromymi schodami z przestrzeni przy drzwiach 1
-  crewRest(-30.2, -27.4, 1.72, 2.52, [-28.8]);
+  crewRest(-30.2, -27.4, 1.72 + FUS_DY, 2.52 + FUS_DY, [-28.8]);
   // personelu pokładowego: nad tylną częścią kabiny, cztery koje
-  crewRest(14.0, 18.7, 1.6, 2.38, [15.2, 17.4]);
+  crewRest(14.0, 18.7, 1.6 + FUS_DY, 2.38 + FUS_DY, [15.2, 17.4]);
   {
     const xb = -31.9;
     const xt = -30.3;
-    const rise = 1.72 - FLOOR;
+    const rest = 1.72 + FUS_DY;
+    const rise = rest - FLOOR;
     const run = xt - xb;
     for (let i = 1; i <= 11; i++) B('#9ca3af', [xb + (run * i) / 11.5, FLOOR + (rise * i) / 11.5, 1.0], [0.2, 0.035, 0.55]); // stopnie
     const len = Math.hypot(run, rise);
     const ang = Math.atan2(rise, run);
-    for (const z of [0.71, 1.29]) B('#6b7280', [(xb + xt) / 2, (FLOOR + 1.72) / 2, z], [len, 0.07, 0.04], [0, 0, ang]); // policzki schodów
-    B('#d1d5db', [(xb + xt) / 2, (FLOOR + 1.72) / 2 + 0.7, 1.3], [len, 0.03, 0.03], [0, 0, ang]); // poręcz
-    B('#e7e2d6', [xt + 0.02, 2.12, 1.0], [0.04, 0.8, 0.6]); // obramowanie włazu w podłodze przedziału
+    for (const z of [0.71, 1.29]) B('#6b7280', [(xb + xt) / 2, (FLOOR + rest) / 2, z], [len, 0.07, 0.04], [0, 0, ang]); // policzki schodów
+    B('#d1d5db', [(xb + xt) / 2, (FLOOR + rest) / 2 + 0.7, 1.3], [len, 0.03, 0.03], [0, 0, ang]); // poręcz
+    B('#e7e2d6', [xt + 0.02, 2.12 + FUS_DY, 1.0], [0.04, 0.8, 0.6]); // obramowanie włazu w podłodze przedziału
   }
 
   // ---------- awionika: regały (słupki, półki), moduły LRU z uchwytami i diodami, chłodzenie, pomost ----------
@@ -2181,27 +2194,26 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
   {
     const gx = RADOME_X + 0.09;
     for (const z of [-0.6, 0, 0.6]) {
-      const top = fusPt(gx, fusTheta(gx, 0.2) * (z === 0 ? 0.01 : Math.abs(z) / 1.2))[1] - 0.12;
-      B('#7f9a63', [gx, (FLOOR + top) / 2, z], [0.05, top - FLOOR, 0.07]);
+      const top = fusPt(gx, fusTheta(gx, 0.2 + FUS_DY) * (z === 0 ? 0.01 : Math.abs(z) / 1.2))[1] - 0.12;
+      // dół usztywnienia nad zwężeniem nosa (przy podłodze kokpitu gródź jest wąska)
+      const bot = FLOOR + (z === 0 ? 0 : 0.3);
+      B('#7f9a63', [gx, (bot + top) / 2, z], [0.05, top - bot, 0.07]);
     }
-    for (const y of [-0.55, 0.2]) B('#7f9a63', [gx, y, 0], [0.05, 0.07, 2 * half(y, gx) + 0.2]);
+    for (const y of [-0.55 + FUS_DY, 0.2 + FUS_DY]) B('#7f9a63', [gx, y, 0], [0.05, 0.07, 2 * half(y, gx) - 0.2]);
   }
 
-  // ---------- schodki do kokpitu: ściana z pancernymi drzwiami należy do modelu kokpitu (wbudowanego w samolot) ----------
-  {
-    const n = 4;
-    const rise = COCKPIT_FLOOR - FLOOR;
-    for (let i = 0; i < n; i++) {
-      const top = FLOOR + (rise * (i + 1)) / n;
-      const x1 = COCKPIT_REAR + 0.04 + (n - i) * 0.26;
-      B('#8b929b', [(COCKPIT_REAR + x1) / 2, (FLOOR + top) / 2, 0], [x1 - COCKPIT_REAR, top - FLOOR, 0.9]);
-    }
-  }
+  // kokpit: podłoga stanowiska pilotów równo z podłogą kabiny; ściana z pancernymi drzwiami należy do modelu kokpitu
 
   return [...groups.values()];
 }
 
 /** Kontener LD3: profil ze skosem od strony burty (pasuje do zaokrąglenia kadłuba), wysokość ok. 1,1 m w skali modelu. */
+/**
+ * Kontener LD3 (AKE) w prawdziwych wymiarach: 1,53 m długości, 1,63 m wysokości, 2,01 m szerokości u góry (1,56 m przy
+ * podstawie, skos od strony burty). Bryła i detale są rysowane w jednostkach „roboczych” i skalowane tym mnożnikiem.
+ */
+const LD3_K = { x: 1.53 / 1.56, y: 1.63 / 1.1, z: 2.01 / 1.55 };
+const LD3_S = new THREE.Matrix4().makeScale(LD3_K.x, LD3_K.y, LD3_K.z);
 function ld3Geo() {
   const sh = new THREE.Shape();
   sh.moveTo(-0.775, 0);
@@ -2214,6 +2226,7 @@ function ld3Geo() {
   g.translate(0, 0, -0.78);
   // profil w płaszczyźnie (z, y), długość wzdłuż x; skos po stronie +z (lewa burta)
   g.rotateY(-Math.PI / 2);
+  g.scale(LD3_K.x, LD3_K.y, LD3_K.z);
   g.computeVertexNormals();
   return g;
 }
@@ -2243,7 +2256,7 @@ const CAN_PARTS: { k: string; mats: THREE.Matrix4[] }[] = (() => {
     // tabliczka z numerem (biała z ciemnym napisem)
     { k: '#eef2f6', mats: [box([0.42, 1.0, -0.79], [0.32, 0.1, 0.012])] },
     { k: '#111317', mats: [box([0.42, 1.0, -0.798], [0.24, 0.028, 0.006])] },
-  ];
+  ].map((p) => ({ ...p, mats: p.mats.map((m) => LD3_S.clone().multiply(m)) }));
 })();
 
 /**
@@ -2436,7 +2449,8 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
       const sec = fusSec(x);
       // nad wnęką podwozia głównego belki są płytkie – pod nimi jest płyta ciśnieniowa i schowane koła
       const overBay = x > BAY_MAIN.x0 - 0.3 && x < BAY_MAIN.x1 + 0.3;
-      const hb = Math.min(overBay ? 0.14 : 0.36, FLOOR - 0.08 - (sec.yc - sec.h) - 0.12);
+      // belki płytkie (ok. 0,18 m): między podłogą kabiny a podłogą ładowni jest 1,96 m, a kontener LD3 ma 1,63 m
+      const hb = Math.min(overBay ? 0.14 : 0.18, FLOOR - 0.08 - (sec.yc - sec.h) - 0.12);
       if (hb < 0.12) continue;
       const yb = FLOOR - 0.08 - hb;
       // nad drzwiami ładowni belki kończą się przed ramą otworu (nie wchodzą w otwór drzwi)
@@ -2453,7 +2467,8 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
     // słupki podpierające belki podłogi od spodu (po bokach ładowni) i belka kilowa pod wnęką podwozia
     const struts: THREE.Matrix4[] = [];
     for (let x = XA + 0.3; x <= XB - 0.6; x += 1.24) {
-      const zs = Math.min(1.62, hw(-2.3, x) - 0.12);
+      // przy samej burcie – obok skośnych ścian kontenerów
+      const zs = hw(-2.3, x) - 0.15;
       if (zs < 1.0) continue;
       for (const sg of [1, -1]) struts.push(box([x, -1.85, zs * sg], [0.05, 0.9, 0.05]));
     }
@@ -2521,10 +2536,10 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
     const bins: THREE.Matrix4[] = [];
     for (let x = -24.4 - PF; x <= 17 + PA; x += 1.72) {
       // schowki boczne przy burcie – w zwężającym się ogonie bliżej osi
-      const zb = Math.min(2.2, Math.min(hw(1.45, x - 0.82), hw(1.45, x + 0.82)) - 0.36);
-      bins.push(box([x, 1.2, zb], [1.64, 0.42, 0.62], [0.35, 0, 0]));
-      bins.push(box([x, 1.2, -zb], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
-      if (x > -16) bins.push(box([x, 1.72, 0], [1.64, 0.4, 1.1]));
+      const zb = Math.min(2.2, Math.min(hw(1.45 + FUS_DY, x - 0.82), hw(1.45 + FUS_DY, x + 0.82)) - 0.36);
+      bins.push(box([x, 1.2 + FUS_DY, zb], [1.64, 0.42, 0.62], [0.35, 0, 0]));
+      bins.push(box([x, 1.2 + FUS_DY, -zb], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
+      if (x > -16) bins.push(box([x, 1.72 + FUS_DY, 0], [1.64, 0.4, 1.1]));
     }
     // kuchnie, toalety, zbiorniki wody i ścieków, oświetlenie, awionika i drobiazgi kokpitu – interiorDetail
     const detail = interiorDetail(half);
@@ -2620,11 +2635,11 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
     // ładownia na bagaż luzem za tylną ładownią
     const bulkBags: THREE.Matrix4[] = [];
     // ładownia luzem: za tylną ładownią, na własnej podłodze (spód kadłuba jest tu już wyżej); torby i walizki w stosie
-    const BY = -2.42;
+    const BY = -2.42 + FUS_DY;
     for (let i = 0; i < 14; i++) bulkBags.push(box([12.55 + (i % 5) * 0.42, BY + 0.2 + Math.floor(i / 5) * 0.3, 0.15 + ((i * 7) % 5) * 0.1 - 0.2], [0.38, 0.28, 0.5], [0, i * 0.4, 0]));
     cargoFloor.push(box([13.4, BY - 0.03, 0], [2.4, 0.06, 2 * (Math.min(hw(BY - 0.06, 12.2), hw(BY - 0.06, 14.6)) - 0.12)]));
     // stożek ogonowy: śruba trymera statecznika poziomego
-    const jack = [box([26.2 + PA, 0.75, 0], [0.16, 1.5, 0.16]), box([26.2 + PA, 1.55, 0], [0.4, 0.3, 0.4])];
+    const jack = [box([26.2 + PA, 0.75 + FUS_DY, 0], [0.16, 1.5, 0.16]), box([26.2 + PA, 1.55 + FUS_DY, 0], [0.4, 0.3, 0.4])];
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
       const U = { geo: unit };
       const can = new THREE.Object3D();
@@ -3509,7 +3524,7 @@ function Tail({ animate, surfaces, open = false, fin = 1 }: { animate: boolean; 
     nut.translate(jx, jy - 0.05, 0);
     const jack = merge([rodGeo([jx, jy - 1.4, 0], [jx, jy + 0.45, 0], 0.12), gearbox, nut]);
     // APU – wylot w stożku ogonowym
-    const apu = podLoft(refine([32.6 + PA, 33.5 + PA], 0.1), () => ({ yc: 1.2, h: 0.34, zc: 0, w: 0.34 }), 2, 24);
+    const apu = podLoft(refine([32.6 + PA, 33.5 + PA], 0.1), () => ({ yc: 1.2 + FUS_DY, h: 0.34, zc: 0, w: 0.34 }), 2, 24);
     return { htpU, htpL, htpTip, vtpU, vtpL, vtpTip, dorsal, movers, disMovers, htpCove, vtpCove, htpSeams, vtpSeams, rudderAct, elevAct, pivot, jack, apu };
   }), []);
   // ster wysokości i ster kierunku z manewru (koordynacja zakrętu, podnoszenie nosa)
@@ -3667,7 +3682,7 @@ export const WING_MAC = (() => {
 /** x punktu na SCA o danym ułamku (0 – krawędź natarcia, 1 – spływu). */
 export const macX = (f: number) => WING_MAC.lemac + f * WING_MAC.mac;
 /** Poziomy w układzie samolotu: płyta lotniska, podłoga kabiny, podłoga luków bagażowych. */
-export const PLANE_LEVELS = { ground: GROUND, floor: FLOOR, cargo: -2.45 };
+export const PLANE_LEVELS = { ground: GROUND, floor: FLOOR, cargo: CARGO_Y };
 
 /** Kolory grup podpisów usterzenia: stateczniki, stery, mechanizmy (prześwietlone), wyposażenie. */
 const TAIL_GROUP_COLOR: Record<string, string> = { vtp: '#e2e8f0', htp: '#e2e8f0', dorsal: '#e2e8f0', rudder: '#fbbf24', elevator: '#fbbf24', rudderAct: '#c084fc', elevAct: '#c084fc', thsPivot: '#facc15', thsJack: '#fb923c', dis: '#94a3b8', tailLights: '#7dd3fc', aileron: '#f87171', spoiler: '#f87171' };
@@ -4786,7 +4801,7 @@ export const EXT_LIGHT_POS = (() => {
     navL: mid(WING, LAMP_R, 0.004),
     navTail: mid(WING, LAMP_R, 0.996),
     strobe: LAMP.strobeF,
-    tailStrobe: [33.1 + PA, 1.62, 0] as V3,
+    tailStrobe: [33.1 + PA, 1.62 + FUS_DY, 0] as V3,
     beaconTop: fusPt(-1.5, 0),
     beaconBottom: [-3.0, -4.4, 0] as V3,
     land: LAMP.land[0].p,

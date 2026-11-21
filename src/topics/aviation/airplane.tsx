@@ -24,7 +24,7 @@ import { DoorsLab, DoorsScene, useDoorsDriver, type DoorMode } from './doors';
 import { ElecLab, ElecScene, useElecDriver, type ElecMode } from './electrics';
 import { CockpitLab, cockpitOnGround, makeCockpitModule, useCockpitDriver, type CkMode } from './cockpitLab';
 import { cycleModule } from './cycleLab';
-import { FUS_GROUPS, FUS_LIVE, FUS_PART_INFO, cargoDoorOpen, type FusView } from './airliner';
+import { FUS_DY, FUS_GROUPS, FUS_LIVE, FUS_PART_INFO, cargoDoorOpen, type FusView } from './airliner';
 
 /* ======================= sceny ======================= */
 
@@ -1046,8 +1046,8 @@ const apuModule: PartModule = {
     plane({
       title: 'APU w stożku ogonowym',
       spot: APU_SPOTS[0],
-      camera: [37.6, 1.9, 5.6],
-      target: [34.0, 1.05, 0.1],
+      camera: [37.6, 1.9 + FUS_DY, 5.6],
+      target: [34.0, 1.05 + FUS_DY, 0.1],
       preset: { focus: 'apu', apu: 'home' },
       body: (
         <>

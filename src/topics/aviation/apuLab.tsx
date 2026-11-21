@@ -15,7 +15,7 @@ import type { Params, Step } from '../../lib/types';
 import { InfoPortal, Sparkline } from '../../lib/plot';
 import { useSceneHidden } from '../../lib/topicNav';
 import { AIRBUS, CockpitDock, Ecam, PanelBox, Pushbutton as Pb } from '../../components/cockpit';
-import { fuselageSection } from './airliner';
+import { FUS_DY, fuselageSection } from './airliner';
 import { PathStreaks } from './wingLab';
 
 type V3 = [number, number, number];
@@ -370,7 +370,8 @@ function fp(x: number, th: number, inset = 0): V3 {
 }
 
 /** Oś APU (y) i położenia elementów wzdłuż osi (x, układ samolotu). */
-const AY = 1.08;
+/** Oś APU (y) – w stożku ogonowym, razem z kadłubem (FUS_DY – położenie kadłuba według dokumentacji Airbusa). */
+const AY = 1.08 + FUS_DY;
 const X = {
   wall: 32.75,
   gen0: 32.92,
@@ -546,10 +547,10 @@ export function ApuModel({ sim, mode, section = false, detail = true }: { sim: M
     const tbCase = casingGeo([[X.tb0, 0.33], [X.tb0 + 0.12, 0.31], [X.tb1, 0.29]]);
     const gen = casingGeo([[X.gen0, 0.08], [X.gen0 + 0.03, 0.17], [X.gen1 - 0.03, 0.18], [X.gen1, 0.15]], 0);
     // kanał wylotowy z tłumikiem (eżektor wciąga powietrze chłodzące przedział) do wylotu w końcu stożka
-    const exh = tubeGeo([[X.tb1 - 0.02, AY, 0], [35.3, AY + 0.03, 0], [35.8, AY + 0.08, 0], [X.exh + 0.2, 1.2, 0]], 0.2);
+    const exh = tubeGeo([[X.tb1 - 0.02, AY, 0], [35.3, AY + 0.03, 0], [35.8, AY + 0.08, 0], [X.exh + 0.2, 1.2 + FUS_DY, 0]], 0.2);
     const silencer = tubeGeo([[35.05, AY + 0.02, 0], [35.6, AY + 0.06, 0]], 0.26, 10);
     // wlot: od klapy do komory wlotowej między sprężarkami
-    const inlet = tubeGeo([flapMid, [33.82, 0.62, 0.32], [(X.pl0 + X.pl1) / 2, AY - 0.3, 0.1]], 0.11);
+    const inlet = tubeGeo([flapMid, [33.82, 0.62 + FUS_DY, 0.32], [(X.pl0 + X.pl1) / 2, AY - 0.3, 0.1]], 0.11);
     // przewód upustowy: od spirali sprężarki obciążeniowej przez zawór i gródź do przodu
     const bleed = tubeGeo([[X.lc0 + 0.14, AY + 0.36, 0], [X.lc0 + 0.1, AY + 0.55, 0], [33.0, AY + 0.62, 0], [32.0, AY + 0.7, 0], [30.6, AY + 0.82, 0]], 0.075);
     return { wall, liner, flap, hinge, lcCase, plCase, pcCase, cbCase, liner2, tbCase, gen, exh, silencer, inlet, bleed };
@@ -622,7 +623,7 @@ export function ApuModel({ sim, mode, section = false, detail = true }: { sim: M
 /** Drobne części APU (tylko z bliska): zawór upustowy, wał z wirnikami, butla gaśnicza, pętla czujnika pożaru, dym. */
 function ApuDetail({ sim, valveG }: { sim: MutableRefObject<ApuSim>; valveG: RefObject<THREE.Mesh> }) {
   const M = (color: string, metal = 0.6, rough = 0.4) => <meshStandardMaterial color={color} metalness={metal} roughness={rough} side={THREE.DoubleSide} />;
-  const bottleLine = useMemo(() => tubeGeo([[32.35, 1.55, -0.1], [32.6, 1.6, 0], [X.wall + 0.15, 1.62, 0.05]], 0.025, 12), []);
+  const bottleLine = useMemo(() => tubeGeo([[32.35, 1.55 + FUS_DY, -0.1], [32.6, 1.6 + FUS_DY, 0], [X.wall + 0.15, 1.62 + FUS_DY, 0.05]], 0.025, 12), []);
   const fireLoop = useMemo(() => tubeGeo([[X.wall + 0.1, AY + 0.48, -0.3], [33.8, AY + 0.52, -0.42], [34.6, AY + 0.45, -0.38], [34.9, AY - 0.35, -0.3], [33.9, AY - 0.42, -0.35], [X.wall + 0.1, AY - 0.4, -0.3]], 0.012, 60), []);
   return (
     <>
@@ -648,7 +649,7 @@ function ApuDetail({ sim, valveG }: { sim: MutableRefObject<ApuSim>; valveG: Ref
       <Rotor x={X.tb0 + 0.08} r={0.26} w={0.06} blades={24} kind="axial" sim={sim} color="#c8a46a" />
       <Rotor x={X.tb0 + 0.19} r={0.25} w={0.06} blades={24} kind="axial" sim={sim} color="#c8a46a" />
       {/* butla gaśnicza przed grodzią i przewód wyładowczy */}
-      <mesh position={[32.35, 1.55, -0.25]}>
+      <mesh position={[32.35, 1.55 + FUS_DY, -0.25]}>
         <sphereGeometry args={[0.15, 20, 14]} />
         {M('#c0392b', 0.3, 0.45)}
       </mesh>
@@ -682,7 +683,7 @@ function flowPaths() {
       [n[0] - 0.9, n[1] - 0.3 + o, n[2] + 0.3],
       [n[0] - 0.2, n[1] + o * 0.5, n[2]],
       [flapMid[0], flapMid[1] + o * 0.3, flapMid[2]],
-      [33.82, 0.62, 0.32],
+      [33.82, 0.62 + FUS_DY, 0.32],
       [(X.pl0 + X.pl1) / 2, AY - 0.3, 0.1],
       [(X.pl0 + X.pl1) / 2, AY + ca * 0.3, sa * 0.3],
       [X.pc0 + 0.02, AY + ca * r, sa * r],
@@ -798,7 +799,7 @@ export function apuStations(s: ApuSim) {
   ];
 }
 const STATION_POS: Record<string, V3> = {
-  in: [33.84, 0.36, 0.62],
+  in: [33.84, 0.36 + FUS_DY, 0.62],
   pc: [X.pc1 - 0.05, AY + 0.62, 0.35],
   cb: [X.cb1 - 0.05, AY - 0.62, 0.45],
   ex: [35.8, AY + 0.55, 0.4],
@@ -808,17 +809,17 @@ const STATION_POS: Record<string, V3> = {
 /* ======================= podpisy części ======================= */
 
 export const APU_PARTS: Record<string, { name: string; desc: string; pos: V3 }> = {
-  wall: { name: 'gródź ogniowa', desc: 'Tytanowa przegroda oddziela przedział APU od reszty kadłuba. Gdyby w przedziale wybuchł pożar, gródź zatrzyma ogień, a gasi go butla gaśnicza po drugiej stronie.', pos: [X.wall, 0.42, 0.75] },
+  wall: { name: 'gródź ogniowa', desc: 'Tytanowa przegroda oddziela przedział APU od reszty kadłuba. Gdyby w przedziale wybuchł pożar, gródź zatrzyma ogień, a gasi go butla gaśnicza po drugiej stronie.', pos: [X.wall, 0.42 + FUS_DY, 0.75] },
   gen: { name: 'rozrusznik-prądnica', desc: 'Jedno urządzenie o dwóch rolach. Przy rozruchu jest silnikiem elektrycznym zasilanym z akumulatorów i kręci wirnikiem APU. Gdy APU pracuje, staje się prądnicą i może zasilić cały samolot na ziemi.', pos: [X.gen0 + 0.1, AY + 0.38, 0.3] },
   gb: { name: 'skrzynka napędów', desc: 'Przekładnia zębata zmniejsza obroty wału (ok. 40 000 obr./min) do obrotów prądnicy i napędza pompy oleju i paliwa. Na niej wisi zbiornik oleju smarującego łożyska.', pos: [X.gb0 + 0.05, AY - 0.62, 0.42] },
   lc: { name: 'sprężarka obciążeniowa', desc: 'Osobna sprężarka na tym samym wale. Ściska powietrze tylko dla samolotu – do klimatyzacji i uruchamiania silników – więc jego pobór nie przeszkadza w spalaniu. Ile powietrza daje, ustawiają ruchome łopatki na jej wlocie.', pos: [X.lc0 + 0.12, AY + 0.55, 0.42] },
-  inlet: { name: 'wlot z klapą', desc: 'Powietrze wpada przez otwór w spodzie stożka ogonowego. Klapa otwiera się po włączeniu APU głównym wyłącznikiem (MASTER SW, trwa to ok. 20 s) i zamyka po zatrzymaniu wirnika, żeby w locie nie było zbędnego oporu.', pos: [33.86, 0.25, 0.75] },
+  inlet: { name: 'wlot z klapą', desc: 'Powietrze wpada przez otwór w spodzie stożka ogonowego. Klapa otwiera się po włączeniu APU głównym wyłącznikiem (MASTER SW, trwa to ok. 20 s) i zamyka po zatrzymaniu wirnika, żeby w locie nie było zbędnego oporu.', pos: [33.86, 0.25 + FUS_DY, 0.75] },
   pc: { name: 'sprężarka napędowa', desc: 'Dwie sprężarki ściskają powietrze ok. 4 razy, zanim trafi do komory spalania. Ta część APU działa jak każdy silnik turbinowy – sprężarka, spalanie, turbina.', pos: [X.pc0 + 0.1, AY + 0.58, 0.3] },
   cb: { name: 'komora spalania', desc: 'Pierścieniowa komora z wtryskiwaczami paliwa i świecami zapłonowymi. Zapłon następuje przy ok. 7% obrotów; od tej chwili spalanie rozgrzewa gazy do ok. 1000 °C.', pos: [X.cb0 + 0.18, AY - 0.6, 0.38] },
   tb: { name: 'turbina', desc: 'Dwa rzędy łopatek zamieniają energię gorących gazów na obroty wału, który napędza obie sprężarki i prądnicę. Za turbiną mierzy się temperaturę spalin (EGT) – najważniejszy wskaźnik pracy APU.', pos: [X.tb0 + 0.14, AY + 0.5, 0.25] },
   exh: { name: 'wylot z tłumikiem', desc: 'Kanał wylotowy prowadzi spaliny do otworu w końcu stożka ogonowego. Tłumik zmniejsza hałas na płycie lotniska, a strumień spalin zasysa przy okazji powietrze chłodzące przedział i chłodnicę oleju.', pos: [35.6, AY + 0.42, 0.15] },
   bleed: { name: 'zawór upustowy', desc: 'Zawór na rurze od sprężarki, która daje powietrze dla samolotu. Otwiera się, gdy pilot włączy APU BLEED, a APU jest gotowe (AVAIL). Rura biegnie do przodu – do klimatyzacji i rozruszników silników.', pos: [33.3, AY + 0.86, 0.25] },
-  fire: { name: 'butla gaśnicza i czujnik pożaru', desc: 'Pętla czujnika biegnie wokół przedziału. Przy pożarze na ziemi APU wyłącza się samo, a butla wyładowuje środek gaśniczy po ok. 3 s. W locie robi to pilot przyciskami APU FIRE i AGENT.', pos: [32.3, 2.32, -0.25] },
+  fire: { name: 'butla gaśnicza i czujnik pożaru', desc: 'Pętla czujnika biegnie wokół przedziału. Przy pożarze na ziemi APU wyłącza się samo, a butla wyładowuje środek gaśniczy po ok. 3 s. W locie robi to pilot przyciskami APU FIRE i AGENT.', pos: [32.3, 2.32 + FUS_DY, -0.25] },
 };
 const PART_COLOR: Record<string, string> = {
   wall: '#cbd5e1',
@@ -1043,11 +1044,11 @@ export function ApuLab({ mode, sim }: { mode: ApuMode; sim: MutableRefObject<Apu
 
 /** Numery zakładek na modelu – przy części, o której jest zakładka. */
 export const APU_SPOTS: V3[] = [
-  [33.9, 2.1, 0.6], // budowa
-  [33.86, 0.2, 0.9], // rozruch – klapa wlotu
-  [34.4, 1.85, 0.6], // przepływ – komora
-  [33.1, 2.05, 0.4], // prąd i powietrze – zawór upustowy
-  [32.35, 2.1, -0.1], // wyłączanie i pożar – butla
+  [33.9, 2.1 + FUS_DY, 0.6], // budowa
+  [33.86, 0.2 + FUS_DY, 0.9], // rozruch – klapa wlotu
+  [34.4, 1.85 + FUS_DY, 0.6], // przepływ – komora
+  [33.1, 2.05 + FUS_DY, 0.4], // prąd i powietrze – zawór upustowy
+  [32.35, 2.1 + FUS_DY, -0.1], // wyłączanie i pożar – butla
 ];
 
 /** Zakładki modułu APU (po stronie głównej): rozruch, przepływ, prąd i powietrze, wyłączanie i zabezpieczenia. */
@@ -1056,8 +1057,8 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
     plane({
       title: 'Rozruch APU',
       spot: APU_SPOTS[1],
-      camera: [39.2, 0.9, 7.4],
-      target: [34.4, 1.0, 0.2],
+      camera: [39.2, 0.9 + FUS_DY, 7.4],
+      target: [34.4, 1.0 + FUS_DY, 0.2],
       preset: { focus: 'apu', apu: 'start' },
       controls: [
         { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
@@ -1079,8 +1080,8 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
     plane({
       title: 'Przepływ przez APU',
       spot: APU_SPOTS[2],
-      camera: [37.3, 2.6, 4.6],
-      target: [34.2, 1.0, 0.1],
+      camera: [37.3, 2.6 + FUS_DY, 4.6],
+      target: [34.2, 1.0 + FUS_DY, 0.1],
       preset: { focus: 'apu', apu: 'flow' },
       body: (
         <>
@@ -1119,8 +1120,8 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
     plane({
       title: 'Wyłączanie i zabezpieczenia',
       spot: APU_SPOTS[4],
-      camera: [39.5, 2.2, 7.2],
-      target: [34.0, 1.1, 0.1],
+      camera: [39.5, 2.2 + FUS_DY, 7.2],
+      target: [34.0, 1.1 + FUS_DY, 0.1],
       preset: { focus: 'apu', apu: 'stop' },
       controls: [
         {
