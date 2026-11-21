@@ -60,7 +60,9 @@ function CameraAnchor({ children }: { children: ReactNode }) {
     const p = camera.getWorldPosition(new THREE.Vector3()).addScaledVector(dir.current, 1);
     // pozycja w układzie rodzica (dok bywa w grupie przesuniętej albo obracanej)
     o.position.copy(o.parent ? o.parent.worldToLocal(p) : p);
-  });
+    // priorytet −1: kotwica ustawia się przed Html-ami doku – inaczej przy pierwszej klatce stoją w środku układu, mogą
+    // zostać uznane za „za kamerą” i (bo ich położenie na ekranie się nie zmienia) już się nie pokażą
+  }, -1);
   return <group ref={g}>{children}</group>;
 }
 

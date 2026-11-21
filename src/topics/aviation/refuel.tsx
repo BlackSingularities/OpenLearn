@@ -84,7 +84,7 @@ const wr = (r: number, s: number, t: number): V3 => {
   return [lo[0] + (hi[0] - lo[0]) * t, lo[1] + (hi[1] - lo[1]) * t, -(lo[2] + (hi[2] - lo[2]) * t)];
 };
 const R_CPL = 16;
-const LAY = (() => {
+export const REFUEL_LAY = (() => {
   const cpl: V3 = (() => {
     const p = wingSurface(R_CPL, 0.3, -1);
     return [p[0], p[1] - 0.02, -p[2]];
@@ -119,15 +119,15 @@ const LAY = (() => {
 })();
 
 const VIEWS: { cam: V3; tgt: V3 }[] = [
-  { cam: [LAY.stopX - 34, 7, LAY.lane - 30], tgt: [LAY.stopX - 4, G + 1.5, LAY.lane + 2] }, // płyta i nadjeżdżająca cysterna
-  { cam: [LAY.cpl[0] - 7.5, G + 2.8, LAY.cpl[2] - 7], tgt: [LAY.cpl[0] - 1.5, LAY.cpl[1] - 0.8, LAY.cpl[2]] }, // platforma i złącze
-  { cam: [LAY.cpl[0] - 12, 9, LAY.cpl[2] - 22], tgt: [LAY.cpl[0] - 1, -2.6, LAY.cpl[2] + 6] }, // galeria i zbiornik w skrzydle
+  { cam: [REFUEL_LAY.stopX - 34, 7, REFUEL_LAY.lane - 30], tgt: [REFUEL_LAY.stopX - 4, G + 1.5, REFUEL_LAY.lane + 2] }, // płyta i nadjeżdżająca cysterna
+  { cam: [REFUEL_LAY.cpl[0] - 7.5, G + 2.8, REFUEL_LAY.cpl[2] - 7], tgt: [REFUEL_LAY.cpl[0] - 1.5, REFUEL_LAY.cpl[1] - 0.8, REFUEL_LAY.cpl[2]] }, // platforma i złącze
+  { cam: [REFUEL_LAY.cpl[0] - 12, 9, REFUEL_LAY.cpl[2] - 22], tgt: [REFUEL_LAY.cpl[0] - 1, -2.6, REFUEL_LAY.cpl[2] + 6] }, // galeria i zbiornik w skrzydle
   { cam: [-14, 32, -46], tgt: [-2, -2, -2] }, // wszystkie zbiorniki z góry
-  { cam: [LAY.stopX - 30, 5, LAY.lane - 26], tgt: [LAY.stopX - 12, G + 1, LAY.lane] }, // odjazd cysterny
+  { cam: [REFUEL_LAY.stopX - 30, 5, REFUEL_LAY.lane - 26], tgt: [REFUEL_LAY.stopX - 12, G + 1, REFUEL_LAY.lane] }, // odjazd cysterny
   // droga paliwa do silnika – na przekroju lewego silnika (ten sam model i układ paliwowy co w module silnika)
-  { cam: [LAY.El[0] - 6.5, LAY.El[1] + 3.6, LAY.El[2] + 8.5], tgt: [LAY.El[0] + 1.2, LAY.El[1] + 1.4, LAY.El[2]] }, // pompy, zawór LP, pylon
-  { cam: [LAY.El[0] - 2.5, LAY.El[1] + 1.4, LAY.El[2] + 6.5], tgt: [LAY.El[0] + 1.4, LAY.El[1] + 0.3, LAY.El[2]] }, // w silniku
-  { cam: [LAY.El[0] - 16, LAY.El[1] + 9, LAY.El[2] + 20], tgt: [LAY.El[0] + 2, LAY.El[1] + 0.8, LAY.El[2] - 2] }, // całość: lewy silnik w przekroju i zbiorniki
+  { cam: [REFUEL_LAY.El[0] - 6.5, REFUEL_LAY.El[1] + 3.6, REFUEL_LAY.El[2] + 8.5], tgt: [REFUEL_LAY.El[0] + 1.2, REFUEL_LAY.El[1] + 1.4, REFUEL_LAY.El[2]] }, // pompy, zawór LP, pylon
+  { cam: [REFUEL_LAY.El[0] - 2.5, REFUEL_LAY.El[1] + 1.4, REFUEL_LAY.El[2] + 6.5], tgt: [REFUEL_LAY.El[0] + 1.4, REFUEL_LAY.El[1] + 0.3, REFUEL_LAY.El[2]] }, // w silniku
+  { cam: [REFUEL_LAY.El[0] - 16, REFUEL_LAY.El[1] + 9, REFUEL_LAY.El[2] + 20], tgt: [REFUEL_LAY.El[0] + 2, REFUEL_LAY.El[1] + 0.8, REFUEL_LAY.El[2] - 2] }, // całość: lewy silnik w przekroju i zbiorniki
 ];
 
 /* ============================== stan scenariusza ============================== */
@@ -142,7 +142,7 @@ export function refuelState(t: number) {
   // cysterna: dojazd w etapie 1 (−1 → stoi daleko), odjazd w etapie 5
   const arrive = t < 0 ? 0 : sm(t / (REFUEL_STAGES[0].dur - 1));
   const leave = t < s4 + 3 ? 0 : sm((t - s4 - 3) / 4);
-  const truckX = LAY.stopX - 70 * (1 - arrive) + 80 * leave * leave;
+  const truckX = REFUEL_LAY.stopX - 70 * (1 - arrive) + 80 * leave * leave;
   // platforma: w górę w etapie 2, w dół w etapie 5; wąż podłączony od połowy etapu 2 do początku odjazdu
   const plat = t < s1 ? 0 : sm((t - s1) / 3) * (1 - sm((t - s4) / 2.5));
   const hose = t >= s1 + 3.5 && t < s4 + 0.5;
@@ -174,10 +174,10 @@ export function useRefuelDriver(on: boolean, params: Params) {
  * filtr-separator za kabiną, tylna szafa z żaluzjami, licznikiem i zwijadłem węża, koła bliźniacze z błotnikami
  * i chlapaczami, osłona przeciwnajazdowa, z przodu nad kabiną podnoszona platforma z barierkami (do skrzydła).
  */
-function FuelTruck({ plat }: { plat: () => number }) {
+export function FuelTruck({ plat }: { plat: () => number }) {
   const platRef = useRef<THREE.Group>(null);
   const legs = useRef<(THREE.Mesh | null)[]>([]);
-  const lift = LAY.platTop[1] - (G + 2.75);
+  const lift = REFUEL_LAY.platTop[1] - (G + 2.75);
   useFrame(() => {
     const k = plat();
     if (platRef.current) platRef.current.position.y = G + 2.75 + lift * k;
@@ -431,10 +431,10 @@ export function RefuelScene({ sim }: { sim: ReturnType<typeof useRefuelDriver> }
   const [fuelQ, setFuelQ] = useState(15000);
   useFrame(() => {
     const f = refuelState(sim.getT());
-    if (truck.current) truck.current.position.set(f.truckX, 0, LAY.lane);
+    if (truck.current) truck.current.position.set(f.truckX, 0, REFUEL_LAY.lane);
     if (hose.current) {
       hose.current.visible = f.hose;
-      if (f.hose) placeBetween(hose.current, [f.truckX + 4.4 - 0.6, LAY.platTop[1] + 0.1, LAY.lane + 0.6], LAY.cpl);
+      if (f.hose) placeBetween(hose.current, [f.truckX + 4.4 - 0.6, REFUEL_LAY.platTop[1] + 0.1, REFUEL_LAY.lane + 0.6], REFUEL_LAY.cpl);
     }
     // wypełnienie zbiorników odświeżane co 1 t (bryły paliwa przeliczają się przy zmianie)
     const q = Math.round(f.fuel / 1000) * 1000;
@@ -442,9 +442,9 @@ export function RefuelScene({ sim }: { sim: ReturnType<typeof useRefuelDriver> }
   });
   const groups = useMemo<Group[]>(
     () => [
-      { stage: 2, until: 4, paths: [LAY.truckFlow], color: '#f5b041', speed: 3, count: 26, width: 0.08, arrowStep: 0.9, arrowSize: 0.16 },
-      { stage: 2, paths: LAY.refuelIn, color: '#fb923c', speed: 4, count: 60, width: 0.07, duct: { color: '#9ca3af', r: 0.05 }, arrowStep: 1.6, arrowSize: 0.18 },
-      { stage: 3, until: 4, paths: [LAY.vent], color: '#cbd5e1', speed: 2.5, count: 24, width: 0.05, arrowStep: 1.8, arrowSize: 0.14 },
+      { stage: 2, until: 4, paths: [REFUEL_LAY.truckFlow], color: '#f5b041', speed: 3, count: 26, width: 0.08, arrowStep: 0.9, arrowSize: 0.16 },
+      { stage: 2, paths: REFUEL_LAY.refuelIn, color: '#fb923c', speed: 4, count: 60, width: 0.07, duct: { color: '#9ca3af', r: 0.05 }, arrowStep: 1.6, arrowSize: 0.18 },
+      { stage: 3, until: 4, paths: [REFUEL_LAY.vent], color: '#cbd5e1', speed: 2.5, count: 24, width: 0.05, arrowStep: 1.8, arrowSize: 0.14 },
     ],
     [],
   );
@@ -454,7 +454,7 @@ export function RefuelScene({ sim }: { sim: ReturnType<typeof useRefuelDriver> }
       <StageCamera view={view} />
       {/* to samo stanowisko co przy załadunku */}
       <CargoStand />
-      <group ref={truck} position={[LAY.stopX - 70, 0, LAY.lane]}>
+      <group ref={truck} position={[REFUEL_LAY.stopX - 70, 0, REFUEL_LAY.lane]}>
         <FuelTruck plat={() => refuelState(sim.getT()).plat} />
       </group>
       {/* wąż tankowania od platformy do złącza */}
@@ -463,7 +463,7 @@ export function RefuelScene({ sim }: { sim: ReturnType<typeof useRefuelDriver> }
         <meshStandardMaterial color="#111317" roughness={0.6} />
       </mesh>
       {/* złącze tankowania w spodzie skrzydła */}
-      <mesh position={[LAY.cpl[0], LAY.cpl[1] - 0.04, LAY.cpl[2]]}>
+      <mesh position={[REFUEL_LAY.cpl[0], REFUEL_LAY.cpl[1] - 0.04, REFUEL_LAY.cpl[2]]}>
         <cylinderGeometry args={[0.12, 0.12, 0.08, 18]} />
         <meshStandardMaterial color="#d97706" metalness={0.4} roughness={0.4} emissive="#d97706" emissiveIntensity={stage === 1 || stage === 2 ? 0.6 : 0} />
       </mesh>

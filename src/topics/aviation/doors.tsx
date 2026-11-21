@@ -92,8 +92,8 @@ function doorOffset(u: number): { off: V3; phi: number; push: number } {
 
 /* ============================== stan drzwi w scenariuszach ============================== */
 
-type DS = { u: number; handle: number; lever: number; girt: number; ind: boolean; press: boolean; k: number; actuator: boolean };
-const CLOSED: DS = { u: 0, handle: 0, lever: 0, girt: 0, ind: false, press: false, k: 0, actuator: false };
+export type DS = { u: number; handle: number; lever: number; girt: number; ind: boolean; press: boolean; k: number; actuator: boolean };
+export const CLOSED: DS = { u: 0, handle: 0, lever: 0, girt: 0, ind: false, press: false, k: 0, actuator: false };
 
 export const DOOR_STAGES: Record<Exclude<DoorMode, 'home'>, { title: string; color: string; dur: number; text: string }[]> = {
   open: [
@@ -251,7 +251,7 @@ const PAINT = '#eef1f4';
 const LINING = '#e8e3d8';
 
 /** Jedne drzwi (lewa burta – dla prawej rodzic odbija z); stan czytany co klatkę. */
-function PaxDoor({ i, side, getState }: { i: number; side: number; getState: () => DS }) {
+export function PaxDoor({ i, side, getState }: { i: number; side: number; getState: () => DS }) {
   const xd = PAX_DOOR.xs[i];
   const name = `${i + 1}${side > 0 ? 'L' : 'R'}`;
   const flip = side < 0;

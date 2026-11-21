@@ -110,8 +110,13 @@ varying vec3 vPlane;
 float clipH(float p) { return fract(sin(p * 127.1 + 311.7) * 43758.5453); }
 float clipN(float p) { float i = floor(p); return mix(clipH(i), clipH(i + 1.0), fract(p)); }
 `;
-function clipShader(u: ClipUniforms) {
+/**
+ * `cap` – bryła wygląda na pełną: przez przecięcie widać jej tylne ściany od środka, więc rysujemy je płaskim,
+ * przyciemnionym kolorem bryły (jak zamalowany przekrój). Wymaga materiału dwustronnego.
+ */
+function clipShader(u: ClipUniforms, cap = false) {
   return (sh: THREE.WebGLProgramParametersWithUniforms) => {
+    if (cap) sh.fragmentShader = sh.fragmentShader.replace('#include <tonemapping_fragment>', 'if (!gl_FrontFacing) gl_FragColor.rgb = diffuseColor.rgb * 0.55;\n#include <tonemapping_fragment>');
     sh.uniforms.uInv = u.uInv;
     sh.uniforms.uClip = u.uClip;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform mat4 uInv;\nvarying vec3 vPlane;').replace(
@@ -135,19 +140,19 @@ function clipShader(u: ClipUniforms) {
   };
 }
 
-function M({ k, side = THREE.FrontSide, opacity = 1, color, emit, matRef }: { k: keyof typeof MATS | string; side?: THREE.Side; opacity?: number; color?: string; emit?: string; matRef?: React.Ref<THREE.MeshPhysicalMaterial> }) {
+function M({ k, side = THREE.FrontSide, opacity = 1, color, emit, matRef, cap = false }: { k: keyof typeof MATS | string; side?: THREE.Side; opacity?: number; color?: string; emit?: string; matRef?: React.Ref<THREE.MeshPhysicalMaterial>; cap?: boolean }) {
   const glow = useContext(GlowCtx);
   const glowColor = useContext(GlowColorCtx);
   const clip = useContext(ClipCtx);
   // bez przekroju też podajemy funkcje (no-op i stały klucz): wartość undefined nadpisałaby metody three.js
   // i po przełączeniu z widoku z przekrojem renderowanie przerwałoby się błędem
-  const onCompile = useMemo(() => (clip ? clipShader(clip) : () => {}), [clip]);
+  const onCompile = useMemo(() => (clip ? clipShader(clip, cap) : () => {}), [clip, cap]);
   const m = MATS[k] ?? { color: k, metal: 0.2, rough: 0.5 };
   return (
     <meshPhysicalMaterial
       ref={matRef}
       onBeforeCompile={onCompile}
-      customProgramCacheKey={clip ? () => `plane-clip-${clip.id}` : () => 'plane'}
+      customProgramCacheKey={clip ? () => `plane-clip-${clip.id}${cap ? '-cap' : ''}` : () => 'plane'}
       color={color ?? m.color}
       metalness={m.metal}
       roughness={m.rough}
@@ -1596,7 +1601,8 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
       )}
       {open && <Interior view={view} labels={labels} pick={pick} />}
       {/* moduł drzwi: przez otwarte drzwi widać kabinę */}
-      {doorsOpen && !open && <Interior view="home" labels={false} doorHoles />}
+      {/* zamknięty kadłub z otworami drzwi; widok ładowni – kontenery jadą jak w scenariuszu załadunku (cykl obsługi) */}
+      {doorsOpen && !open && <Interior view={view === 'cargo' ? 'cargo' : 'home'} labels={false} doorHoles />}
       {open && view === 'cargo' && <CargoOps />}
       {open && view === 'decomp' && <DecompFx />}
     </group>
@@ -1604,7 +1610,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
 }
 
 /** Wiele jednakowych brył w jednym wywołaniu rysowania. */
-function Inst({ geo, mats, k, side, emit }: { geo: THREE.BufferGeometry; mats: THREE.Matrix4[]; k: string; side?: THREE.Side; emit?: string }) {
+function Inst({ geo, mats, k, side, emit, cap }: { geo: THREE.BufferGeometry; mats: THREE.Matrix4[]; k: string; side?: THREE.Side; emit?: string; cap?: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useEffect(() => {
     const m = ref.current;
@@ -1615,7 +1621,7 @@ function Inst({ geo, mats, k, side, emit }: { geo: THREE.BufferGeometry; mats: T
   }, [mats]);
   return (
     <instancedMesh ref={ref} args={[geo, undefined, mats.length]}>
-      <M k={k} side={side} emit={emit} />
+      <M k={k} side={cap ? THREE.DoubleSide : side} emit={emit} cap={cap} />
     </instancedMesh>
   );
 }
@@ -1687,7 +1693,7 @@ const HOLDS: [number, number][] = [
   [4.6, 12.2],
 ];
 /** Drzwi ładowni (prawa burta): przednie i tylne – stąd kontenery wjeżdżają do luku. */
-const CARGO_DOORS = CARGO_DOOR.xs;
+export const CARGO_DOORS = CARGO_DOOR.xs;
 export const CARGO_DOOR_X = CARGO_DOOR.xs;
 /** Miejsca kontenerów LD3 w kolejności załadunku (przednia ładownia od przodu, potem tylna). */
 export const CARGO_SLOTS: { x: number; z: number; hold: number; j: number }[] = HOLDS.flatMap(([a, b], hold) => {
@@ -1783,21 +1789,26 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
     const gw = Math.min(1, (Math.min(hw(FLOOR + 0.02, dx + 1.65), hw(FLOOR + 2.0, dx + 1.65)) - 0.3) / 1.2);
     const B0 = Bmain;
     const B = (k: string, p: V3, sz: V3, rot?: V3, e?: string) => B0(k, [p[0], p[1], p[2] * gw], [sz[0], sz[1], sz[2] * gw], rot, e);
-    B('#e7e2d6', [dx + 1.2, FLOOR + 1.0, 0], [0.9, 2.0, 2.4]);
-    B('#2b3036', [f - 0.005, FLOOR + 0.53, 0], [0.01, 1.04, 2.3]); // wnęka na wózki
+    // obudowa: tylna ściana, boki, dach – w środku osobne bryły, więc w przekroju widać, co jest w kuchni
+    B('#e7e2d6', [dx + 1.62, FLOOR + 1.0, 0], [0.06, 2.0, 2.4]); // tylna ściana
+    for (const z of [-1.18, 1.18]) B('#e7e2d6', [dx + 1.2, FLOOR + 1.0, z], [0.9, 2.0, 0.04]); // boki
+    B('#e7e2d6', [dx + 1.2, FLOOR + 1.98, 0], [0.9, 0.04, 2.4]); // dach
+    B('#2b3036', [dx + 1.585, FLOOR + 0.53, 0], [0.01, 1.04, 2.3]); // ciemne tło wnęki na wózki
+    for (const z of [-0.66, -0.22, 0.22, 0.66]) B('#d6d1c4', [dx + 1.2, FLOOR + 0.53, z], [0.8, 1.04, 0.02]); // przegródki
     for (const z of [-0.88, -0.44, 0, 0.44, 0.88]) {
-      B('#c3c8ce', [f - 0.02, FLOOR + 0.52, z], [0.04, 0.98, 0.42]); // wózek
-      B('#4b5563', [f - 0.05, FLOOR + 0.95, z], [0.02, 0.035, 0.32]); // uchwyt
-      B('#dc2626', [f - 0.045, FLOOR + 0.1, z + 0.13], [0.02, 0.05, 0.07]); // hamulec wózka
+      B('#c3c8ce', [f + 0.41, FLOOR + 0.52, z], [0.8, 0.98, 0.4]); // wózek – pełnej głębokości wnęki
+      B('#4b5563', [f, FLOOR + 0.95, z], [0.02, 0.035, 0.32]); // uchwyt
+      B('#dc2626', [f + 0.005, FLOOR + 0.1, z + 0.13], [0.02, 0.05, 0.07]); // hamulec wózka
     }
-    B('#9aa1a9', [f + 0.05, FLOOR + 1.07, 0], [0.3, 0.05, 2.36]); // blat
+    B('#9aa1a9', [dx + 1.2, FLOOR + 1.07, 0], [0.9, 0.05, 2.36]); // blat
     for (const z of [-0.6, 0.6]) {
-      B('#d1d5db', [f - 0.015, FLOOR + 1.42, z], [0.03, 0.42, 0.52]); // piekarnik
-      B('#111827', [f - 0.03, FLOOR + 1.44, z], [0.01, 0.22, 0.36]); // szyba piekarnika
+      B('#d1d5db', [f + 0.245, FLOOR + 1.42, z], [0.55, 0.42, 0.52]); // piekarnik
+      B('#3a3f46', [f + 0.27, FLOOR + 1.42, z], [0.44, 0.3, 0.42]); // komora piekarnika
+      B('#111827', [f - 0.035, FLOOR + 1.44, z], [0.01, 0.22, 0.36]); // szyba piekarnika
     }
-    B('#9ca3af', [f - 0.02, FLOOR + 1.3, 0], [0.05, 0.38, 0.32]); // ekspres do kawy
+    B('#9ca3af', [f + 0.18, FLOOR + 1.3, 0], [0.4, 0.38, 0.32]); // ekspres do kawy
     B('#1f2937', [f - 0.05, FLOOR + 1.16, 0], [0.05, 0.1, 0.12]); // dzbanek
-    for (const z of [-0.9, -0.45, 0, 0.45, 0.9]) B('#d6d1c4', [f - 0.01, FLOOR + 1.85, z], [0.02, 0.3, 0.43]); // schowki górne
+    for (const z of [-0.9, -0.45, 0, 0.45, 0.9]) B('#d6d1c4', [f + 0.265, FLOOR + 1.83, z], [0.55, 0.26, 0.43]); // schowki górne
     B('#fff7e0', [f - 0.02, FLOOR + 1.66, 0], [0.02, 0.025, 2.3], undefined, '#fff2cc'); // oświetlenie blatu
     // fotel personelu przy drzwiach (jumpseat): składany, na panelu ściennym obok kuchni, z szelkami;
     // obok słuchawka interkomu i latarka w uchwycie (lampka ładowania)
@@ -2673,7 +2684,7 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
           <Inst geo={d.unit} mats={d.bulkBags} k="#3f4a5a" />
           <Inst geo={d.grilleGeo} mats={d.grilles} k="#5b6470" />
           {d.detail.map((gr, i) => (
-            <Inst key={i} geo={{ box: d.unit, capsule: d.capsule, cylX: d.cylX, cylV: d.cylV, cone: d.cone, ringH: d.ringH, sphere: d.sphere }[gr.g]} mats={gr.m} k={gr.k} emit={gr.e} />
+            <Inst key={i} geo={{ box: d.unit, capsule: d.capsule, cylX: d.cylX, cylV: d.cylV, cone: d.cone, ringH: d.ringH, sphere: d.sphere }[gr.g]} mats={gr.m} k={gr.k} emit={gr.e} cap />
           ))}
           <instancedMesh ref={cans} args={[d.ld3, undefined, CARGO_SLOTS.length]} frustumCulled={false}>
             <M k="can" side={THREE.DoubleSide} />
@@ -5666,7 +5677,7 @@ function liftY(h: number, t: number) {
  * otwierają się do góry i na zewnątrz (prawa burta).
  */
 const DOOR_D = 0.15;
-function CargoDoor({ xd }: { xd: number }) {
+export function CargoDoor({ xd }: { xd: number }) {
   const g = useMemo(() => {
     const x0 = xd - CARGO_DOOR.hw + 0.015;
     const x1 = xd + CARGO_DOOR.hw - 0.015;
@@ -5945,7 +5956,7 @@ export function GseWheel({ p, r = 0.3, w = 0.24 }: { p: V3; r?: number; w?: numb
  * prowadnice wejściowe, barierki z poprzeczką) i tylna platforma na nożycach, która zjeżdża do wysokości wózka po
  * każdy kontener.
  */
-function CargoLoader({ xd, hold }: { xd: number; hold: number }) {
+export function CargoLoader({ xd, hold }: { xd: number; hold: number }) {
   const G = GROUND;
   const rear = useRef<THREE.Group>(null);
   const rearBars = useRef<(THREE.Mesh | null)[]>([]);
@@ -6436,7 +6447,7 @@ function DollyModel() {
  * otwarte stanowisko kierowcy z fotelem i kierownicą, dach na czterech słupkach z lampą ostrzegawczą, przeciwwaga
  * z tyłu z hakiem i światłami, zderzak z przodu.
  */
-function TugModel() {
+export function TugModel() {
   const G = GROUND;
   const white = '#e9ecef';
   const blue = '#1f5fd1';
@@ -6653,7 +6664,7 @@ function TugModel() {
 }
 
 /** Pociągi wózków jednej ładowni (każdy: ciągnik i do TRAIN_N wózków) jadące po swojej trasie. */
-function DollyTrains({ hold }: { hold: number }) {
+export function DollyTrains({ hold }: { hold: number }) {
   const P = TRAIN_PATHS[hold];
   const nTrains = Math.ceil(holdCount(hold) / TRAIN_N);
   const trains = Array.from({ length: nTrains }, (_, m) => Math.min(TRAIN_N, holdCount(hold) - m * TRAIN_N));

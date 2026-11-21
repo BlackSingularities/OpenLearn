@@ -37,7 +37,7 @@ const genAt = (side: number, dx = 0): V3 => {
   return [E[0] + a[0] * ENG_K, E[1] + a[1] * ENG_K, side * (E[2] + a[2] * ENG_K)];
 };
 const EBAY: V3 = [-28.6, -2.15, 0];
-const EXT: V3 = (() => {
+export const EXT_SOCKET: V3 = (() => {
   const x = -30.4;
   const z = -0.55;
   return [x, fusBottom(x, z, 0.01), z];
@@ -52,7 +52,7 @@ const ratTip = (a: number): V3 => {
   return [RAT_HINGE[0] + RAT_L * Math.cos(ang), RAT_HINGE[1] - RAT_L * Math.sin(ang), RAT_HINGE[2]];
 };
 const APU_GEN: V3 = [32.6, 1.05, 0];
-const GPU_POS: V3 = [-33.5, G, -4.6];
+export const GPU_POS: V3 = [-33.5, G, -4.6];
 
 /** Przewody zasilające (od źródła do centrów rozdziału w przedziale awioniki). */
 const feeder = (side: number): V3[] => {
@@ -63,7 +63,7 @@ const P = {
   gen1: feeder(1),
   gen2: feeder(-1),
   apu: [APU_GEN, [28, 0.2, 0.3], [20, -1.75, 0.35], [-12, -1.95, 0.2], [-24, -2.0, 0.15], [EBAY[0] + 0.4, EBAY[1] + 0.1, 0.1]] as V3[],
-  ext: [EXT, [EXT[0], EXT[1] + 0.35, EXT[2]], [EBAY[0] - 0.3, EBAY[1] - 0.2, -0.3], EBAY] as V3[],
+  ext: [EXT_SOCKET, [EXT_SOCKET[0], EXT_SOCKET[1] + 0.35, EXT_SOCKET[2]], [EBAY[0] - 0.3, EBAY[1] - 0.2, -0.3], EBAY] as V3[],
   rat: [ratTip(1), [RAT_X + 0.05, RAT_HINGE[1] + 0.1, RAT_Z], [-12, -2.1, -0.6], [-24, -2.05, -0.3], [EBAY[0] + 0.4, EBAY[1], -0.1]] as V3[],
   // rozdział: kokpit, kabina (wzdłuż sufitu), kuchnie, pompy paliwa w skrzydłach, podgrzewane szyby
   cockpit: [EBAY, [-29.5, -0.6, 0], [-31.2, 0.5, 0]] as V3[],
@@ -179,7 +179,7 @@ export function elecState(mode: ElecMode, t: number) {
 /* ============================== wózek GPU ============================== */
 
 /** Wózek zasilania z płyty (przód w +x): rama z dyszlem, agregat w obudowie z kratkami, panel, bęben z kablem. */
-function GpuCart() {
+export function GpuCart() {
   const y = '#e8b10e';
   return (
     <group>
@@ -300,7 +300,7 @@ function Ebay({ lit }: { lit: () => boolean }) {
           <meshBasicMaterial ref={(m) => (glow.current[i] = m)} color={b.c} transparent opacity={0.2} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
       ))}
-      <mesh position={EXT} renderOrder={21}>
+      <mesh position={EXT_SOCKET} renderOrder={21}>
         <boxGeometry args={[0.32, 0.06, 0.24]} />
         {xray('#facc15', 0.8)}
       </mesh>
@@ -318,7 +318,7 @@ export const ELEC_GROUPS = [
 export const ELEC_PART_INFO: Record<string, { name: string; group: string; pos: V3; sub?: boolean; desc: string }> = {
   gen: { name: 'generatory na silniku (2 × ok. 100 kVA)', group: 'src', pos: [genAt(-1)[0], genAt(-1)[1] - 0.35, genAt(-1)[2] - 0.6], desc: 'Każdy silnik napędza przez skrzynkę kół zębatych dwa generatory. Częstotliwość ich prądu zmienia się z obrotami silnika – urządzenia w samolocie są do tego przystosowane, a dzięki temu generator nie potrzebuje skomplikowanej przekładni.' },
   apu: { name: 'generator APU', group: 'src', pos: [APU_GEN[0], APU_GEN[1] + 0.7, -0.6], desc: 'APU w ogonie napędza swój generator. Na ziemi zasila samolot, gdy nie ma wózka GPU, a w locie jest zapasowym źródłem prądu.' },
-  ext: { name: 'gniazdo zasilania z płyty', group: 'src', pos: [EXT[0], EXT[1] - 0.3, EXT[2] - 0.3], desc: 'Podwójne gniazdo w spodzie kadłuba pod nosem. Na postoju wkłada się tu wtyczkę z wózka z agregatem (GPU) albo z instalacji przy rękawie – to najtańsze i najcichsze źródło prądu na ziemi.' },
+  ext: { name: 'gniazdo zasilania z płyty', group: 'src', pos: [EXT_SOCKET[0], EXT_SOCKET[1] - 0.3, EXT_SOCKET[2] - 0.3], desc: 'Podwójne gniazdo w spodzie kadłuba pod nosem. Na postoju wkłada się tu wtyczkę z wózka z agregatem (GPU) albo z instalacji przy rękawie – to najtańsze i najcichsze źródło prądu na ziemi.' },
   gpu: { name: 'wózek zasilania (GPU)', group: 'src', pos: [GPU_POS[0], G + 1.9, GPU_POS[2]], desc: 'Lotniskowy agregat prądotwórczy: silnik diesla z generatorem, na wózku z dyszlem. Gruby kabel prowadzi prąd do gniazda pod nosem samolotu.' },
   bat: { name: 'akumulatory litowo-jonowe', group: 'src', pos: [EBAY[0] + 0.55, EBAY[1] - 0.45, -0.7], sub: true, desc: 'Cztery akumulatory pod kokpitem: dwa główne, awaryjny i osobny do uruchamiania APU. Zasilają samolot, gdy „budzi się” rano, kręcą rozrusznikiem APU i podtrzymują najważniejsze urządzenia, gdy zawiodą wszystkie generatory. Są w ognioodpornych obudowach.' },
   rat: { name: 'RAT – turbina awaryjna', group: 'src', pos: [RAT_X, RAT_HINGE[1] - 0.45, RAT_Z - 0.6], desc: 'RAT (z ang. Ram Air Turbine) to mała turbina wiatrowa schowana pod kadłubem. Wysuwa się sama, gdy samolot straci prąd ze wszystkich generatorów. Pęd powietrza kręci jej śmigłem, a ono – awaryjnym generatorem i pompą hydrauliczną. Przy przeglądach sprawdza się, czy wysuwa się poprawnie.' },
@@ -430,7 +430,7 @@ export function ElecScene({ sim, sel, onSelect }: { sim: ReturnType<typeof useEl
     }
     if (cable.current) {
       cable.current.visible = k > 0.98;
-      placeBetween(cable.current, [GPU_POS[0] + 0.9, G + 1.3, GPU_POS[2] + 0.4], [EXT[0], EXT[1] - 0.05, EXT[2]]);
+      placeBetween(cable.current, [GPU_POS[0] + 0.9, G + 1.3, GPU_POS[2] + 0.4], [EXT_SOCKET[0], EXT_SOCKET[1] - 0.05, EXT_SOCKET[2]]);
     }
   });
   const ground = !s.flight;
