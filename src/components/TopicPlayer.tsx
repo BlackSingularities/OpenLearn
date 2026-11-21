@@ -72,8 +72,9 @@ export function TopicPlayer() {
       openModule: (id, s = 1) => navigate(`${base}/${id}/${s}`),
       openOverview: (s = 1) => navigate(`${base}/${s}`),
       module: module?.id ?? null,
+      home: !module || index === 0,
     }),
-    [navigate, base, module],
+    [navigate, base, module, index],
   );
 
   useEffect(() => {

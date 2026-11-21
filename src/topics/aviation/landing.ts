@@ -7,8 +7,10 @@
  * – wyrównanie (flare) od ok. 30 ft (9 m): pilot podnosi nos do ok. 5,5°, opadanie maleje do ok. 0,9 m/s,
  *   na ok. 20 ft dźwignie ciągu na bieg jałowy („RETARD”), prędkość spada o kilka węzłów,
  * – przyziemienie kół głównych (wózki pochylone – najpierw jedna oś, potem cały wózek),
- * – po ok. 0,3 s wysuwają się spojlery naziemne (gaszą siłę nośną, ciężar przechodzi na koła), po ok. 1 s pilot
- *   otwiera odwracacze ciągu, autobrake zaczyna hamować razem ze spojlerami i dochodzi do zadanego opóźnienia,
+ * – gdy obie golenie główne są ugięte, wysuwają się spojlery naziemne (gaszą siłę nośną, ciężar przechodzi na koła;
+ *   przy jednej goleni i wybranym ciągu wstecznym – częściowo), a ich sygnał uruchamia autobrake,
+ * – zaraz po przyziemieniu kół głównych (ok. 0,5 s) pilot wybiera ciąg wsteczny: REV IDLE, odwracacze otwierają się
+ *   ok. 1,5 s, a po zielonym REV – MAX REV (koło przednie nie musi jeszcze dotykać pasa),
  * – derotacja: po ok. 1 s pilot łagodnie opuszcza nos (do ok. 1,8°/s), koło przednie dotyka pasa po ok. 5,5 s,
  * – dobieg: hamowanie do zatrzymania (prędkość i drogę liczy scena, bo zależą od wybranego autobrake).
  *
@@ -32,10 +34,13 @@ export const LANDING = {
   /** Po przyziemieniu (s): początek i czas opuszczania nosa. */
   derotStart: 1.0,
   derotTime: 4.5,
-  /** Po przyziemieniu (s): spojlery naziemne, odwracacze, początek hamowania i czas dojścia do pełnego opóźnienia. */
+  /**
+   * Po przyziemieniu (s): spojlery naziemne (tylko podpowiedź – w animacji wysuwają się, gdy obie golenie główne są na
+   * pasie), wybór ciągu wstecznego, opóźnienie autobrake po wysunięciu spojlerów i czas dojścia do pełnego opóźnienia.
+   */
   spoilerAt: 0.3,
-  revAt: 1.0,
-  brakeAt: 1.2,
+  revAt: 0.5,
+  brakeAt: 0.4,
   brakeRamp: 1.5,
   /** N1 (%) na podejściu i na biegu jałowym. */
   n1App: 45,

@@ -4,8 +4,9 @@
  * Macha, taśma wysokości z okienkiem, wariometr i taśma kursu. Wszystko sterowane właściwościami – komponent
  * można wstawić w dowolnym miejscu aplikacji (w HTML albo w podpisie sceny 3D).
  */
-import { useId } from 'react';
-import { AIRBUS, cockpitFont, wrap360 } from './common';
+import { useContext, useId, useRef } from 'react';
+import { useCockpitPref } from '../ui';
+import { AIRBUS, ScreenWidth, cockpitFont, wrap360 } from './common';
 
 export interface PfdProps {
   /** Pochylenie (°, nos w górę dodatnio). */
@@ -55,8 +56,32 @@ export interface PfdProps {
 const W = 360;
 const H = 330;
 
-export function Pfd({ pitch = 0, bank = 0, ias = 250, iasTarget, mach, vAlphaMax, vAlphaProt, vls, vmax, speedTrend = 0, fd = [0, 0], track, alt = 10000, altSel, vs = 0, heading = 0, baro = 'STD', fma = ['SPEED', 'ALT', 'NAV', '', 'AP1\n1FD2\nA/THR'], slip = 0, ra, width = 300 }: PfdProps) {
+/**
+ * Trend prędkości (o ile węzłów zmieni się prędkość w ciągu 10 s) liczony z kolejnych wskazań – wygładzony, więc
+ * strzałka pojawia się sama w każdej scenie, w której prędkość się zmienia (lądowanie, fugoida, przyspieszanie).
+ */
+function useSpeedTrend(ias: number) {
+  const st = useRef({ v: ias, t: 0, tr: 0 });
+  const now = performance.now() / 1000;
+  const s = st.current;
+  if (s.t === 0) Object.assign(s, { v: ias, t: now });
+  const dt = now - s.t;
+  if (dt > 0.05) {
+    const a = (ias - s.v) / dt; // kt/s
+    s.tr += (a * 10 - s.tr) * Math.min(1, dt / 0.6);
+    Object.assign(s, { v: ias, t: now });
+  }
+  return s.tr;
+}
+
+export function Pfd({ pitch = 0, bank = 0, ias = 250, iasTarget, mach, vAlphaMax, vAlphaProt, vls, vmax, speedTrend: trendIn, fd = [0, 0], track, alt = 10000, altSel, vs = 0, heading = 0, baro = 'STD', fma = ['SPEED', 'ALT', 'NAV', '', 'AP1\n1FD2\nA/THR'], slip = 0, ra, width: widthProp = 300 }: PfdProps) {
+  // w doku kokpitu – wspólna szerokość ekranów (PFD i ND zawsze tej samej wielkości)
+  const width = useContext(ScreenWidth) ?? widthProp;
+  const autoTrend = useSpeedTrend(ias);
+  const speedTrend = Math.max(-40, Math.min(40, trendIn ?? autoTrend));
   const id = useId().replace(/:/g, '');
+  const shown = useCockpitPref('screens');
+  if (!shown) return null;
   const cx = 178;
   const cy = 160;
   const K = 3.6; // px na stopień pochylenia
@@ -94,7 +119,25 @@ export function Pfd({ pitch = 0, bank = 0, ias = 250, iasTarget, mach, vAlphaMax
   const sideH = Math.sqrt(ar * ar - aw * aw);
   const attPath = `M${cx - aw},${cy - sideH} A${ar},${ar} 0 0 1 ${cx + aw},${cy - sideH} L${cx + aw},${cy + sideH} A${ar},${ar} 0 0 1 ${cx - aw},${cy + sideH} Z`;
   const fmaCols = fma.map((t, i) => ({ t, x: 36 + i * 72 }));
-  const fmaColor = (i: number) => (i === 4 ? AIRBUS.white : i === 1 || i === 2 ? AIRBUS.green : AIRBUS.green);
+  /**
+   * Kolory FMA jak w Airbusie: wiersz 1 – tryby aktywne (zielone), wiersz 2 – uzbrojone (niebieskie), kolumna 4
+   * (kategoria podejścia) i 5 (AP / FD / A/THR) – białe; ciąg ręczny (MAN TOGA) – biały.
+   */
+  const wide = /^(LAND|FLARE|ROLL OUT)$/.test(fma[1].split('\n')[0]) && !fma[2];
+  const fmaColor = (i: number, row: number, man: boolean) => (i >= 3 || man ? AIRBUS.white : row === 0 ? AIRBUS.green : AIRBUS.cyan);
+  // świeżo włączony tryb (zmiana napisu w wierszu 1) – w ramce przez 10 s
+  const fmaSeen = useRef<{ t: string; at: number }[]>([]);
+  const now = Date.now();
+  const boxedCols = fma.slice(0, 3).flatMap((t, i) => {
+    const top = t.split('\n')[0];
+    const seen = fmaSeen.current[i];
+    if (!seen) {
+      fmaSeen.current[i] = { t: top, at: 0 };
+      return [];
+    }
+    if (seen.t !== top) fmaSeen.current[i] = { t: top, at: now };
+    return now - fmaSeen.current[i].at < 10000 ? [i] : [];
+  });
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width={width} height={(width * H) / W} style={{ display: 'block', background: AIRBUS.bg, borderRadius: 6, fontFamily: cockpitFont }} role="img" aria-label="Główny wyświetlacz lotu (PFD)">
       <defs>
@@ -119,17 +162,29 @@ export function Pfd({ pitch = 0, bank = 0, ias = 250, iasTarget, mach, vAlphaMax
           <rect width={7} height={4} fill={AIRBUS.red} />
         </pattern>
       </defs>
-      {/* ---- FMA ---- */}
-      {[72, 144, 216, 288].map((x) => (
-        <line key={x} x1={x} x2={x} y1={4} y2={34} stroke={AIRBUS.white} strokeWidth={1.2} />
-      ))}
-      {fmaCols.map(({ t, x }, i) =>
-        t.split('\n').map((line, k, arr) => (
-          <text key={`${i}-${k}`} x={x} y={arr.length > 1 ? 13 + k * 10 : 22} fill={fmaColor(i)} fontSize={arr.length > 1 ? 9 : 11} textAnchor="middle">
-            {line}
-          </text>
-        )),
+      {/* ---- FMA (jak w Airbusie): 5 kolumn, 3 wiersze; świeżo włączony tryb w białej ramce przez 10 s ---- */}
+      {[72, 144, 216, 288].map((x) =>
+        x === 144 && wide ? null : <line key={x} x1={x} x2={x} y1={3} y2={41} stroke={AIRBUS.white} strokeWidth={1.2} />,
       )}
+      {fmaCols.map(({ t, x: x0 }, i) => {
+        // LAND, FLARE, ROLL OUT – wspólne dla toru pionowego i poziomego: na środku kolumn 2 i 3
+        const x = i === 1 && wide ? 144 : x0;
+        const rows = t.split('\n');
+        const man = i === 0 && /^MAN /.test(rows[0]);
+        // ciąg ręczny (MAN TOGA, MAN FLX) – biały, w dwóch wierszach, zawsze w ramce
+        const lines = man ? [rows[0].slice(0, 3), rows[0].slice(4), ...rows.slice(1)] : rows;
+        const boxed = man || (Boolean(rows[0]) && i < 3 && boxedCols.includes(i));
+        return (
+          <g key={i}>
+            {boxed && <rect x={x - 33} y={4} width={66} height={man ? 23 : 13} fill="none" stroke={AIRBUS.white} strokeWidth={1} />}
+            {lines.map((line, k) => (
+              <text key={k} x={x} y={14 + k * 12} fill={fmaColor(i, k, man)} fontSize={10.5} textAnchor="middle" letterSpacing="0.02em">
+                {line}
+              </text>
+            ))}
+          </g>
+        );
+      })}
       {/* ---- horyzont ---- */}
       <g clipPath={`url(#att-${id})`}>
         <g transform={`rotate(${-bank} ${cx} ${cy}) translate(0 ${pitch * K})`}>
@@ -261,10 +316,22 @@ export function Pfd({ pitch = 0, bank = 0, ias = 250, iasTarget, mach, vAlphaMax
       <text x={aT.x + 46} y={aMid + 5} fill={AIRBUS.green} fontSize={11} textAnchor="end">
         {String(Math.round((Math.max(0, alt) % 100) / 20) * 20).padStart(2, '0')}
       </text>
-      <rect x={aT.x + 4} y={aT.y + aT.h + 8} width={32} height={16} fill="none" stroke={AIRBUS.yellow} strokeWidth={1.2} />
-      <text x={aT.x + 20} y={aT.y + aT.h + 20} fill={AIRBUS.cyan} fontSize={11} textAnchor="middle">
-        {baro === 'STD' ? 'STD' : baro}
-      </text>
+      {/* nastawa ciśnienia jak w Airbusie: STD – niebieski w żółtej ramce, QNH – biały napis i niebieska wartość */}
+      {baro === 'STD' ? (
+        <>
+          <rect x={aT.x + 3} y={aT.y + aT.h + 8} width={34} height={16} fill="none" stroke={AIRBUS.yellow} strokeWidth={1.2} />
+          <text x={aT.x + 20} y={aT.y + aT.h + 20} fill={AIRBUS.cyan} fontSize={11} textAnchor="middle">
+            STD
+          </text>
+        </>
+      ) : (
+        <text x={aT.x + 22} y={aT.y + aT.h + 20} fill={AIRBUS.white} fontSize={9} textAnchor="middle">
+          QNH
+          <tspan fill={AIRBUS.cyan} fontSize={11} dx={3}>
+            {baro}
+          </tspan>
+        </text>
+      )}
       {/* ---- wariometr ---- */}
       <path d={`M330,${cy - 92} h14 l8,30 v124 l-8,30 h-14 z`} fill={AIRBUS.tape} opacity={0.85} />
       {[-6000, -2000, -1000, 1000, 2000, 6000].map((v) => (

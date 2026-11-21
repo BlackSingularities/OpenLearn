@@ -78,6 +78,17 @@ export type ApuSim = {
   rot: number;
   /** Opis fazy do podpisów. */
   phase: string;
+  /**
+   * Scenariusz zakładki (po „Rozpocznij”): czas od startu (s, czas samolotu) i chwile, w których załoga wcisnęła
+   * przyciski (nazwa → czas scenariusza) – przyciski w kokpicie przełączają się same, ten w użyciu jest podświetlony.
+   */
+  run: boolean;
+  scT: number;
+  acts: Record<string, number>;
+  /** Chwila samoczynnego wyłączenia (czas scenariusza) – od niej liczy się reakcja załogi. */
+  shutT: number | null;
+  /** Ostatnia czynność załogi – do podpisu. */
+  crew: string;
 };
 
 const newSim = (): ApuSim => ({
@@ -115,7 +126,62 @@ const newSim = (): ApuSim => ({
   histAcc: 0,
   rot: 0,
   phase: 'APU wyłączone',
+  run: false,
+  scT: 0,
+  acts: {},
+  shutT: null,
+  crew: '',
 });
+
+/** Jak długo (s, czas samolotu) przycisk po wciśnięciu jest podświetlony jako używany. */
+const ACT_HOLD = 4.5;
+/** Czy załoga właśnie używa tego przycisku. */
+export const acting = (s: ApuSim, name: string) => s.acts[name] !== undefined && s.scT - s.acts[name] < ACT_HOLD;
+/** Załoga wciska przycisk: zmiana stanu i podświetlenie. */
+function press(s: ApuSim, name: string, crew: string, apply: () => void) {
+  s.acts[name] = s.scT;
+  s.crew = crew;
+  apply();
+}
+/** Raz o czasie `at` (czas scenariusza): przycisk jeszcze niewciśnięty, a czas już minął. */
+const due = (s: ApuSim, name: string, at: number | null) => at !== null && s.scT >= at && s.acts[name] === undefined;
+
+/** MASTER SW: wyłączenie kasuje lampkę FAULT, włączenie – zapamiętane samoczynne wyłączenie. */
+function setMaster(s: ApuSim, m: boolean) {
+  s.master = m;
+  if (!m) s.masterFault = false;
+  else if (!s.fire) s.autoShut = null;
+}
+
+/** Scenariusze zakładek – co i kiedy wciska załoga (czas samolotu od „Rozpocznij”). */
+function crewScript(s: ApuSim, mode: ApuMode, fault: string) {
+  if (mode === 'start') {
+    if (due(s, 'MASTER SW', 3)) press(s, 'MASTER SW', 'załoga włącza MASTER SW', () => setMaster(s, true));
+    if (due(s, 'START', 9)) press(s, 'START', 'załoga wciska START', () => (s.startReq = true));
+  } else if (mode === 'loads') {
+    if (due(s, 'APU BLEED', 4)) press(s, 'APU BLEED', 'załoga włącza APU BLEED', () => (s.bleedSw = true));
+    if (due(s, 'PACK 1', 14)) press(s, 'PACK 1', 'załoga włącza PACK 1', () => (s.packs = [true, s.packs[1]]));
+    if (due(s, 'PACK 2', 24)) press(s, 'PACK 2', 'załoga włącza PACK 2', () => (s.packs = [s.packs[0], true]));
+    if (due(s, 'ENG 1 START', 45)) press(s, 'ENG 1 START', 'załoga uruchamia silnik 1 – powietrze z APU kręci jego rozrusznikiem', () => (s.engStart = 40));
+  } else if (mode === 'stop') {
+    if (fault === 'off') {
+      if (due(s, 'MASTER SW', 4)) press(s, 'MASTER SW', 'załoga wyłącza MASTER SW', () => setMaster(s, false));
+      return;
+    }
+    // usterka pojawia się po chwili, a załoga reaguje według ECAM – po samoczynnym wyłączeniu
+    if (s.scT >= 3 && !s.fault) {
+      s.fault = fault as ApuFault;
+      if (fault === 'fire') s.fire = true;
+      s.crew = '';
+    }
+    if (s.autoShut && s.shutT === null) s.shutT = s.scT;
+    const t0 = s.shutT;
+    if (fault === 'fire') {
+      if (due(s, 'APU FIRE', t0 === null ? null : t0 + 2)) press(s, 'APU FIRE', 'załoga wciska APU FIRE (odcięcie paliwa i powietrza)', () => (s.firePb = true));
+      if (due(s, 'MASTER SW', t0 === null ? null : t0 + 9)) press(s, 'MASTER SW', 'załoga wyłącza MASTER SW', () => setMaster(s, false));
+    } else if (due(s, 'MASTER SW', t0 === null ? null : t0 + 5)) press(s, 'MASTER SW', 'załoga wyłącza MASTER SW – gaśnie FAULT', () => setMaster(s, false));
+  }
+}
 
 /** APU zimne (wyłączone) albo pracujące, gotowe do pracy (AVAIL) – stan na początku zakładki. */
 function presetSim(s: ApuSim, running: boolean, bleed = false) {
@@ -243,13 +309,13 @@ function phaseOf(s: ApuSim): string {
   if (s.fire) return s.agent === 'disch' ? 'pożar – butla gaśnicza wyładowana' : 'POŻAR APU – samoczynne wyłączenie';
   if (s.autoShut && s.n > 1) return `samoczynne wyłączenie: ${s.autoShut.toLowerCase()}`;
   if (s.cool > 0) return `chłodzenie przed wyłączeniem – jeszcze ${Math.ceil(s.cool)} s`;
-  if (s.masterFault) return `wyłączone przez sterownik (${s.autoShut?.toLowerCase() ?? 'usterka'}) – wyłącz MASTER SW`;
+  if (s.masterFault) return `wyłączone przez sterownik (${s.autoShut?.toLowerCase() ?? 'usterka'}) – trzeba wyłączyć MASTER SW`;
   if (s.starter && !s.fuelOn) return 'rozrusznik kręci wirnikiem (przed zapłonem)';
   if (!s.fuelOn && s.n > 1) return 'wybieg – wirnik zwalnia';
   if (s.avail) return 'APU pracuje (AVAIL)';
   if (s.fuelOn) return s.n < 55 ? 'zapłon – rozrusznik i spalanie razem' : 'turbina sama przyspiesza do 100%';
   if (s.master && s.flap < 1) return 'otwiera się klapa wlotu';
-  if (s.master) return s.startReq ? 'czekanie na klapę' : 'gotowe do rozruchu – naciśnij START';
+  if (s.master) return s.startReq ? 'czekanie na klapę' : 'gotowe do rozruchu – START';
   if (s.autoShut) return `wyłączone: ${s.autoShut.toLowerCase()}`;
   return s.flap > 0.01 ? 'zamyka się klapa wlotu' : 'APU wyłączone';
 }
@@ -265,21 +331,25 @@ export function useApuDriver(mode: ApuMode | null, params: Params) {
     if (!mode) return;
     const s = sim.current;
     const dt = Math.min(0.05, dtRaw);
-    const key = `${mode}|${mode === 'stop' ? `${params.fault}|${params.trig}` : ''}`;
+    const run = Boolean(params.run);
+    const fault = String(params.fault ?? 'off');
+    const key = `${mode}|${mode === 'stop' ? fault : ''}|${run}`;
     if (key !== prev.current) {
       prev.current = key;
       if (mode === 'start') presetSim(s, false);
       else if (mode === 'stop') {
         presetSim(s, true, true);
         s.packs = [true, true];
-        if (params.trig) {
-          const f = String(params.fault ?? 'fire') as ApuFault;
-          s.fault = f;
-          if (f === 'fire') s.fire = true;
-        }
-      } else if (mode === 'loads') {
-        presetSim(s, true, false);
       } else presetSim(s, true, false);
+      s.run = run;
+    }
+    /*
+     * Panel górny w scenie tylko pokazuje stan – przyciski wciska załoga według scenariusza zakładki, uruchamianego
+     * przyciskiem „Rozpocznij”.
+     */
+    if (s.run) {
+      s.scT += dt * TIME_K;
+      crewScript(s, mode, fault);
     }
     s.elecLoad = Number(params.load ?? 60);
     step(s, dt);
@@ -411,7 +481,11 @@ function Puffs({ sim, kind }: { sim: MutableRefObject<ApuSim>; kind: 'fire' | 'a
  * obciążeniowa (powietrze dla samolotu), wlot z klapą, sprężarka i turbina napędowa z komorą spalania, kanał wylotowy
  * z tłumikiem, przewód upustowy z zaworem, zbiornik oleju i butla gaśnicza. Obudowy są przecięte od strony kamery.
  */
-export function ApuModel({ sim, mode }: { sim: MutableRefObject<ApuSim>; mode: ApuMode }) {
+/**
+ * Model APU w stożku ogonowym. `section` – samo APU do przekroju w module kadłuba (bez wyściółki przedziału, grodzi,
+ * klapy wlotu i smug przepływu – te rysuje kadłub albo moduł APU).
+ */
+export function ApuModel({ sim, mode, section = false }: { sim: MutableRefObject<ApuSim>; mode: ApuMode; section?: boolean }) {
   const g = useMemo(() => {
     // gródź ogniowa: płyta dopasowana do przekroju stożka
     const ring: V3[] = Array.from({ length: 49 }, (_, i) => fp(X.wall, -Math.PI + (i / 48) * Math.PI * 2, 0.03));
@@ -503,11 +577,15 @@ export function ApuModel({ sim, mode }: { sim: MutableRefObject<ApuSim>; mode: A
   const M = (color: string, metal = 0.6, rough = 0.4) => <meshStandardMaterial color={color} metalness={metal} roughness={rough} side={THREE.DoubleSide} />;
   return (
     <group>
-      <mesh geometry={g.liner}>{M('#2a2f37', 0.2, 0.8)}</mesh>
-      <mesh geometry={g.wall}>{M('#8b8f94', 0.7, 0.35)}</mesh>
-      <group ref={flapG} position={hinge}>
-        <mesh geometry={g.flap}>{M('#e9edf1', 0.1, 0.35)}</mesh>
-      </group>
+      {!section && (
+        <>
+          <mesh geometry={g.liner}>{M('#2a2f37', 0.2, 0.8)}</mesh>
+          <mesh geometry={g.wall}>{M('#8b8f94', 0.7, 0.35)}</mesh>
+          <group ref={flapG} position={hinge}>
+            <mesh geometry={g.flap}>{M('#e9edf1', 0.1, 0.35)}</mesh>
+          </group>
+        </>
+      )}
       {/* rozrusznik-prądnica i skrzynka napędów */}
       <mesh geometry={g.gen}>
         <meshStandardMaterial ref={genMat} color="#5d6b7a" metalness={0.5} roughness={0.4} emissive="#ffd23a" emissiveIntensity={0} side={THREE.DoubleSide} />
@@ -564,7 +642,7 @@ export function ApuModel({ sim, mode }: { sim: MutableRefObject<ApuSim>; mode: A
       <mesh geometry={useMemo(() => tubeGeo([[X.wall + 0.1, AY + 0.48, -0.3], [33.8, AY + 0.52, -0.42], [34.6, AY + 0.45, -0.38], [34.9, AY - 0.35, -0.3], [33.9, AY - 0.42, -0.35], [X.wall + 0.1, AY - 0.4, -0.3]], 0.012, 60), [])}>{M('#e04b3a', 0.2, 0.5)}</mesh>
       <Puffs sim={sim} kind="fire" />
       <Puffs sim={sim} kind="agent" />
-      {mode !== 'loads' && <ApuFlowViz sim={sim} detailed={mode === 'flow'} />}
+      {mode !== 'loads' && !section && <ApuFlowViz sim={sim} detailed={mode === 'flow'} />}
     </group>
   );
 }
@@ -717,15 +795,15 @@ const STATION_POS: Record<string, V3> = {
 
 export const APU_PARTS: Record<string, { name: string; desc: string; pos: V3 }> = {
   wall: { name: 'gródź ogniowa', desc: 'Tytanowa przegroda oddziela przedział APU od reszty kadłuba. Gdyby w przedziale wybuchł pożar, gródź zatrzyma ogień, a gasi go butla gaśnicza po drugiej stronie.', pos: [X.wall, 0.42, 0.75] },
-  gen: { name: 'rozrusznik-prądnica', desc: 'Jedno urządzenie o dwóch rolach. Przy rozruchu jest silnikiem elektrycznym zasilanym z akumulatorów i kręci wirnikiem APU. Gdy APU pracuje, staje się prądnicą: daje 115 V prądu przemiennego o częstotliwości 400 Hz i mocy do 150 kVA na ziemi.', pos: [X.gen0 + 0.1, AY + 0.38, 0.3] },
+  gen: { name: 'rozrusznik-prądnica', desc: 'Jedno urządzenie o dwóch rolach. Przy rozruchu jest silnikiem elektrycznym zasilanym z akumulatorów i kręci wirnikiem APU. Gdy APU pracuje, staje się prądnicą i może zasilić cały samolot na ziemi.', pos: [X.gen0 + 0.1, AY + 0.38, 0.3] },
   gb: { name: 'skrzynka napędów', desc: 'Przekładnia zębata zmniejsza obroty wału (ok. 40 000 obr./min) do obrotów prądnicy i napędza pompy oleju i paliwa. Na niej wisi zbiornik oleju smarującego łożyska.', pos: [X.gb0 + 0.05, AY - 0.62, 0.42] },
-  lc: { name: 'sprężarka obciążeniowa', desc: 'Osobna sprężarka promieniowa na tym samym wale. Spręża powietrze tylko dla samolotu – do pakietów klimatyzacji i rozruchu silników – więc pobór powietrza nie zakłóca przepływu przez komorę spalania. Ilość powietrza ustawiają łopatki kierujące na jej wlocie.', pos: [X.lc0 + 0.12, AY + 0.55, 0.42] },
-  inlet: { name: 'wlot z klapą', desc: 'Powietrze wpada przez otwór w spodzie stożka ogonowego. Klapa otwiera się po włączeniu MASTER SW (ok. 20 s) i zamyka po zatrzymaniu wirnika, żeby w locie nie było zbędnego oporu.', pos: [33.86, 0.25, 0.75] },
-  pc: { name: 'sprężarka napędowa', desc: 'Dwa stopnie promieniowe sprężają powietrze ok. 4 razy przed komorą spalania. Ta część APU działa jak każdy silnik turbinowy – sprężarka, spalanie, turbina.', pos: [X.pc0 + 0.1, AY + 0.58, 0.3] },
+  lc: { name: 'sprężarka obciążeniowa', desc: 'Osobna sprężarka na tym samym wale. Ściska powietrze tylko dla samolotu – do klimatyzacji i uruchamiania silników – więc jego pobór nie przeszkadza w spalaniu. Ile powietrza daje, ustawiają ruchome łopatki na jej wlocie.', pos: [X.lc0 + 0.12, AY + 0.55, 0.42] },
+  inlet: { name: 'wlot z klapą', desc: 'Powietrze wpada przez otwór w spodzie stożka ogonowego. Klapa otwiera się po włączeniu APU głównym wyłącznikiem (MASTER SW, trwa to ok. 20 s) i zamyka po zatrzymaniu wirnika, żeby w locie nie było zbędnego oporu.', pos: [33.86, 0.25, 0.75] },
+  pc: { name: 'sprężarka napędowa', desc: 'Dwie sprężarki ściskają powietrze ok. 4 razy, zanim trafi do komory spalania. Ta część APU działa jak każdy silnik turbinowy – sprężarka, spalanie, turbina.', pos: [X.pc0 + 0.1, AY + 0.58, 0.3] },
   cb: { name: 'komora spalania', desc: 'Pierścieniowa komora z wtryskiwaczami paliwa i świecami zapłonowymi. Zapłon następuje przy ok. 7% obrotów; od tej chwili spalanie rozgrzewa gazy do ok. 1000 °C.', pos: [X.cb0 + 0.18, AY - 0.6, 0.38] },
-  tb: { name: 'turbina', desc: 'Dwa stopnie osiowe zamieniają energię gorących gazów na obroty wału, który napędza obie sprężarki i prądnicę. Za turbiną mierzy się EGT – najważniejszą temperaturę APU.', pos: [X.tb0 + 0.14, AY + 0.5, 0.25] },
+  tb: { name: 'turbina', desc: 'Dwa rzędy łopatek zamieniają energię gorących gazów na obroty wału, który napędza obie sprężarki i prądnicę. Za turbiną mierzy się temperaturę spalin (EGT) – najważniejszy wskaźnik pracy APU.', pos: [X.tb0 + 0.14, AY + 0.5, 0.25] },
   exh: { name: 'wylot z tłumikiem', desc: 'Kanał wylotowy prowadzi spaliny do otworu w końcu stożka ogonowego. Tłumik zmniejsza hałas na płycie lotniska, a strumień spalin zasysa przy okazji powietrze chłodzące przedział i chłodnicę oleju.', pos: [35.6, AY + 0.42, 0.15] },
-  bleed: { name: 'zawór upustowy', desc: 'Przepustnica na przewodzie z sprężarki obciążeniowej. Otwiera się po włączeniu APU BLEED, gdy APU jest gotowe (AVAIL). Przewód biegnie do przodu, do instalacji pneumatycznej samolotu.', pos: [33.3, AY + 0.86, 0.25] },
+  bleed: { name: 'zawór upustowy', desc: 'Zawór na rurze od sprężarki, która daje powietrze dla samolotu. Otwiera się, gdy pilot włączy APU BLEED, a APU jest gotowe (AVAIL). Rura biegnie do przodu – do klimatyzacji i rozruszników silników.', pos: [33.3, AY + 0.86, 0.25] },
   fire: { name: 'butla gaśnicza i czujnik pożaru', desc: 'Pętla czujnika biegnie wokół przedziału. Przy pożarze na ziemi APU wyłącza się samo, a butla wyładowuje środek gaśniczy po ok. 3 s. W locie robi to pilot przyciskami APU FIRE i AGENT.', pos: [32.3, 2.32, -0.25] },
 };
 const PART_COLOR: Record<string, string> = {
@@ -768,74 +846,27 @@ function Tag({ pos, color, children, onClick, active = false }: { pos: V3; color
 /** Fragment panelu górnego: APU (pożar, gaśnica, MASTER SW, START) oraz powietrze i prąd (APU BLEED, APU GEN, pakiety, rozruch silnika). */
 function Overhead({ sim, mode }: { sim: MutableRefObject<ApuSim>; mode: ApuMode }) {
   const s = sim.current;
-  const [, force] = useState(0);
-  const act = (f: () => void) => () => {
-    f();
-    force((n) => n + 1);
-  };
   const showAir = mode === 'loads' || mode === 'stop' || mode === 'start';
+  // tylko wskaźnik stanu – przyciski wciska załoga według scenariusza zakładki, nie da się ich kliknąć
   return (
-    <div style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }} onPointerDown={(e) => e.stopPropagation()}>
+    <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <PanelBox title="APU">
-          <Pb
-            label="APU FIRE"
-            guard
-            top={{ text: 'FIRE', color: AIRBUS.red, on: s.fire }}
-            bottom={{ text: 'PUSH', color: '#f2f4f6', on: s.firePb }}
-            onPress={act(() => {
-              s.firePb = true;
-              if (s.fuelOn) shutDown(s, s.fire ? 'POŻAR APU' : 'PRZYCISK APU FIRE');
-              if (s.agent === null) s.agent = 'armed';
-            })}
-          />
-          <Pb
-            label="AGENT"
-            top={{ text: 'SQUIB', color: '#f2f4f6', on: s.agent === 'armed' && s.firePb }}
-            bottom={{ text: 'DISCH', color: AIRBUS.amber, on: s.agent === 'disch' }}
-            disabled={!s.firePb && !s.fire}
-            onPress={act(() => {
-              if (s.agent === 'armed') s.agent = 'disch';
-            })}
-          />
-          <Pb
-            label="MASTER SW"
-            top={{ text: 'FAULT', color: AIRBUS.amber, on: s.masterFault }}
-            bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.master }}
-            onPress={act(() => {
-              s.master = !s.master;
-              // wyłączenie i ponowne włączenie kasuje lampkę FAULT
-              if (!s.master) s.masterFault = false;
-              if (s.master) s.autoShut = s.fire ? s.autoShut : null;
-            })}
-          />
-          <Pb
-            label="START"
-            top={{ text: 'AVAIL', color: AIRBUS.green, on: s.avail }}
-            bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.startReq }}
-            disabled={!s.master}
-            onPress={act(() => {
-              if (s.master && !s.avail && !s.fuelOn) s.startReq = true;
-            })}
-          />
+        <Pb label="APU FIRE" act={acting(s, 'APU FIRE')} guard top={{ text: 'FIRE', color: AIRBUS.red, on: s.fire }} bottom={{ text: 'PUSH', color: '#f2f4f6', on: s.firePb }} />
+        <Pb label="AGENT" top={{ text: 'SQUIB', color: '#f2f4f6', on: s.agent === 'armed' }} bottom={{ text: 'DISCH', color: AIRBUS.amber, on: s.agent === 'disch' }} />
+        <Pb label="MASTER SW" act={acting(s, 'MASTER SW')} top={{ text: 'FAULT', color: AIRBUS.amber, on: s.masterFault }} bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.master }} />
+        <Pb label="START" act={acting(s, 'START')} top={{ text: 'AVAIL', color: AIRBUS.green, on: s.avail }} bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.startReq || s.starter }} />
       </PanelBox>
       {showAir && (
         <PanelBox title="AIR · ELEC">
-            <Pb label="APU BLEED" top={{ text: 'FAULT', color: AIRBUS.amber, on: false }} bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.bleedSw }} onPress={act(() => (s.bleedSw = !s.bleedSw))} />
-            <Pb label="APU GEN" top={{ text: 'FAULT', color: AIRBUS.amber, on: s.avail && !s.genSw }} bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.genSw }} onPress={act(() => (s.genSw = !s.genSw))} />
-            {mode === 'loads' && (
-              <>
-                <Pb label="PACK 1" bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.packs[0] }} onPress={act(() => (s.packs = [!s.packs[0], s.packs[1]]))} />
-                <Pb label="PACK 2" bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.packs[1] }} onPress={act(() => (s.packs = [s.packs[0], !s.packs[1]]))} />
-                <Pb
-                  label="ENG 1 START"
-                  bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.engStart > 0 }}
-                  disabled={s.valve < 0.5}
-                  onPress={act(() => {
-                    if (s.valve >= 0.5) s.engStart = 40;
-                  })}
-                />
-              </>
-            )}
+          <Pb label="APU BLEED" act={acting(s, 'APU BLEED')} top={{ text: 'FAULT', color: AIRBUS.amber, on: false }} bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.bleedSw }} />
+          <Pb label="APU GEN" top={{ text: 'FAULT', color: AIRBUS.amber, on: s.avail && !s.genSw }} bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.genSw }} />
+          {mode === 'loads' && (
+            <>
+              <Pb label="PACK 1" act={acting(s, 'PACK 1')} bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.packs[0] }} />
+              <Pb label="PACK 2" act={acting(s, 'PACK 2')} bottom={{ text: 'OFF', color: '#f2f4f6', on: !s.packs[1] }} />
+              <Pb label="ENG 1 START" act={acting(s, 'ENG 1 START')} bottom={{ text: 'ON', color: AIRBUS.cyan, on: s.engStart > 0 }} />
+            </>
+          )}
         </PanelBox>
       )}
     </div>
@@ -950,6 +981,12 @@ export function ApuLab({ mode, sim }: { mode: ApuMode; sim: MutableRefObject<Apu
         {mode !== 'home' && (
           <>
             <div style={{ fontWeight: 700, color: s.fire ? '#ff6b5b' : s.avail ? '#3ee36b' : '#ffd36b' }}>{s.phase}</div>
+            {(mode === 'start' || mode === 'loads' || mode === 'stop') &&
+              (s.run ? (
+                s.crew && <div style={{ fontSize: 12, color: AIRBUS.cyan }}>{s.crew}</div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#facc15' }}>{mode === 'stop' ? 'Wybierz scenariusz i naciśnij „Rozpocznij”.' : 'Naciśnij „Rozpocznij”.'}</div>
+              ))}
             <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '2px 14px', fontSize: 13 }}>
               <span>obroty N</span>
               <b>{f1(s.n)} %</b>
@@ -1008,16 +1045,19 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
       camera: [39.2, 0.9, 7.4],
       target: [34.4, 1.0, 0.2],
       preset: { focus: 'apu', apu: 'start' },
+      controls: [
+        { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
+      ],
       body: (
         <>
           <p>
-            Samolot stoi na płycie bez zasilania z lotniska. Uruchom APU przyciskami <b>panelu górnego</b> (lewy dolny róg): najpierw <b>MASTER SW</b> – sterownik APU włącza pompę paliwa i otwiera <b>klapę wlotu</b> (ok. 20 s). Potem <b>START</b> – rozrusznik-prądnica, zasilany z akumulatorów, zaczyna kręcić wirnikiem.
+            Samolot stoi na płycie bez zasilania z lotniska. Naciśnij „Rozpocznij” i zobacz, jak załoga uruchamia APU. W lewym dolnym rogu jest fragment <b>panelu nad głowami pilotów</b> – wciskany przycisk jest podświetlony, a lampki zapalają się tak jak w prawdziwym kokpicie. Najpierw <b>MASTER SW</b> (główny wyłącznik APU): komputer APU włącza pompę paliwa i otwiera <b>klapkę wlotu powietrza</b> (trwa to ok. 20 s). Potem <b>START</b>: rozrusznik zasilany z akumulatorów zaczyna kręcić wirnikiem APU.
           </p>
           <p>
-            Przy ok. <b>7% obrotów</b> świece dają iskrę i zaczyna się wtrysk paliwa – na stronie APU w ECAM rośnie <b>EGT</b>. Przy rozruchu temperatura na chwilę skacze wysoko (ok. 800 °C), bo powietrza jest jeszcze mało. Od ok. <b>55%</b> rozrusznik się odłącza, a turbina sama przyspiesza do 100%.
+            Przy ok. <b>7% obrotów</b> świece dają iskrę i do komory trafia paliwo. Na ekranie APU w kokpicie rośnie <b>EGT</b> – temperatura spalin. Na chwilę skacze wysoko (ok. 800 °C), bo powietrza jest jeszcze mało. Od ok. <b>55%</b> obrotów rozrusznik się odłącza, a APU samo rozpędza się do pełnych obrotów.
           </p>
           <p>
-            Gdy obroty przekroczą <b>95%</b>, na przycisku START zapala się zielone <b>AVAIL</b>: APU jest gotowe do zasilania samolotu. Cały rozruch trwa w samolocie ok. minuty.
+            Gdy obroty przekroczą <b>95%</b>, na przycisku START zapala się zielony napis <b>AVAIL</b> (dostępne): APU jest gotowe zasilać samolot. W rzeczywistości cały rozruch trwa ok. minuty.
           </p>
         </>
       ),
@@ -1031,12 +1071,12 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
       body: (
         <>
           <p>
-            APU to mały silnik turbinowy, ale nie daje ciągu – cała moc idzie na wał. Powietrze wpada przez <b>klapę wlotu</b> do komory między sprężarkami i rozdziela się na dwie drogi.
+            APU to mały silnik turbinowy, ale nie pcha samolotu – cała jego moc idzie na obracanie wału. Powietrze wpada przez <b>klapkę wlotu</b> i dzieli się na dwie drogi.
           </p>
           <p>
-            <b>Sekcja napędowa</b> (żółte i czerwone smugi): dwie sprężarki promieniowe sprężają powietrze ok. 4 razy, w <b>komorze spalania</b> dochodzi paliwo, a gorące gazy kręcą <b>turbiną</b> i wylatują przez tłumik w końcu stożka. <b>Sprężarka obciążeniowa</b> (błękitne smugi) spręża osobny strumień – to powietrze dla samolotu.
+            <b>Droga do spalania</b> (żółte i czerwone smugi): dwie sprężarki ściskają powietrze ok. 4 razy, w <b>komorze spalania</b> dochodzi paliwo, a gorące gazy kręcą <b>turbiną</b> i wylatują przez tłumik na końcu ogona. <b>Druga sprężarka</b> (błękitne smugi) ściska osobny strumień – to sprężone powietrze dla samolotu, do klimatyzacji i uruchamiania silników.
           </p>
-          <p>Liczby przy stacjach to ciśnienie bezwzględne i temperatura w tej chwili. Za sprężarką powietrze jest gorące już od samego sprężania, a najgoręcej jest przed turbiną.</p>
+          <p>Liczby w różnych miejscach APU to ciśnienie i temperatura w tej chwili. Za sprężarką powietrze jest gorące od samego ściskania, a najgoręcej jest przed turbiną.</p>
         </>
       ),
     }),
@@ -1046,16 +1086,19 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
       camera: [46, 26, 40],
       target: [10, -0.5, 2],
       preset: { focus: 'apu', apu: 'loads' },
-      controls: [{ type: 'slider', key: 'load', label: 'Pobór prądu w samolocie', min: 0, max: 150, step: 5, default: 60, unit: 'kVA' }],
+      controls: [
+        { type: 'slider', key: 'load', label: 'Pobór prądu w samolocie', min: 0, max: 150, step: 5, default: 60, unit: 'kVA' },
+        { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
+      ],
       body: (
         <>
           <p>
-            APU pracuje (AVAIL). Jego <b>prądnica</b> daje 115 V, 400 Hz – do 150 kVA. Żółte smugi to prąd płynący do głównej rozdzielni pod kokpitem. Suwakiem zmieniasz pobór: kuchnie, oświetlenie, wyświetlacze, pompy.
+            APU pracuje (AVAIL). Jego <b>prądnica</b> może zasilić cały samolot na ziemi. Żółte smugi to prąd płynący do szaf rozdzielczych pod kokpitem. Suwakiem zmieniasz, ile prądu pobiera samolot: kuchnie, oświetlenie, ekrany, pompy.
           </p>
           <p>
-            Włącz <b>APU BLEED</b>, a potem <b>PACK 1</b> i <b>PACK 2</b>: powietrze z sprężarki obciążeniowej (błękitne smugi) płynie przez kadłub do pakietów klimatyzacji w owiewce. Przycisk <b>ENG 1 START</b> kieruje je do rozrusznika lewego silnika – to największy pobór.
+            Po „Rozpocznij” załoga włącza <b>APU BLEED</b> (pobór sprężonego powietrza z APU), a potem <b>PACK 1</b> i <b>PACK 2</b> – dwa urządzenia klimatyzacyjne. Powietrze z APU (błękitne smugi) płynie przez kadłub do klimatyzacji. Na koniec <b>ENG 1 START</b> kieruje je do rozrusznika lewego silnika – to największy pobór.
           </p>
-          <p>Obserwuj, jak każde obciążenie podnosi <b>EGT</b> i zużycie paliwa: regulator trzyma stałe obroty, więc pracę ponad bieg jałowy daje tylko więcej paliwa.</p>
+          <p>Zobacz, jak każde obciążenie podnosi temperaturę spalin (<b>EGT</b>) i zużycie paliwa. APU kręci się przez cały czas z tą samą prędkością, więc dodatkową pracę może wykonać tylko, spalając więcej paliwa.</p>
         </>
       ),
     }),
@@ -1069,26 +1112,27 @@ export function makeApuSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stageKey'
         {
           type: 'select',
           key: 'fault',
-          label: 'Usterka',
-          default: 'fire',
+          label: 'Scenariusz',
+          default: 'off',
           options: [
+            { value: 'off', label: 'zwykłe wyłączenie (MASTER SW)' },
             { value: 'fire', label: 'pożar w przedziale APU' },
             { value: 'overspeed', label: 'nadobroty (awaria regulatora)' },
             { value: 'oil', label: 'utrata ciśnienia oleju' },
             { value: 'egt', label: 'przegrzanie (EGT)' },
           ],
         },
-        { type: 'button', key: 'trig', label: 'Wywołaj usterkę', labelOn: 'Usuń usterkę', default: false },
+        { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
       ],
       body: (
         <>
           <p>
-            APU pracuje i zasila klimatyzację. Wyłącz je przyciskiem <b>MASTER SW</b>: AVAIL gaśnie, ale jeśli w ostatniej minucie brano powietrze, APU jeszcze ok. <b>60 s</b> pracuje bez obciążenia, żeby się wychłodzić. Dopiero potem sterownik odcina paliwo, wirnik zwalnia, a klapa wlotu się zamyka.
+            APU pracuje i zasila klimatyzację. Przy zwykłym wyłączeniu załoga wciska <b>MASTER SW</b>. Napis AVAIL gaśnie, ale jeśli APU przed chwilą dawało powietrze, pracuje jeszcze ok. <b>60 s</b> bez obciążenia, żeby ostygnąć. Dopiero potem komputer odcina paliwo, wirnik zwalnia, a klapka wlotu się zamyka.
           </p>
           <p>
-            Sterownik APU pilnuje go cały czas i przy <b>nadobrotach</b>, <b>przegrzaniu</b> albo <b>utracie ciśnienia oleju</b> sam je wyłącza – na przycisku MASTER SW zapala się FAULT. Przy <b>pożarze</b> na ziemi APU wyłącza się samo, a butla gaśnicza wyładowuje się po ok. 3 s. W locie pilot robi to ręcznie: wciska <b>APU FIRE</b>, a potem <b>AGENT</b>.
+            Komputer APU pilnuje go przez cały czas. Gdy APU kręci się za szybko, przegrzewa się albo traci ciśnienie oleju, komputer sam je wyłącza, a na przycisku MASTER SW zapala się FAULT (usterka). Przy <b>pożarze</b> na ziemi APU wyłącza się samo, a po ok. 3 sekundach butla wypuszcza środek gaśniczy. W locie robi to pilot: wciska przycisk <b>APU FIRE</b>, a potem <b>AGENT</b>, który uruchamia gaśnicę.
           </p>
-          <p>Wybierz usterkę i ją wywołaj. Śledź, co dzieje się na ECAM, na przyciskach i w przedziale APU.</p>
+          <p>Wybierz scenariusz i naciśnij „Rozpocznij”. Przy usterce załoga postępuje według listy na ekranie ECAM – wciskany przycisk jest podświetlony. Obserwuj ekran, przyciski i przedział APU.</p>
         </>
       ),
     }),

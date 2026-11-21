@@ -3,7 +3,9 @@
  * Łuk róży kursów u góry, przerywane okręgi zasięgu, żółty symbol samolotu, zielony przewidywany tor (prosty
  * albo łuk zakrętu o zadanym promieniu), w rogach prędkości GS/TAS, wiatr i kurs – tylko napisy jak w samolocie.
  */
-import { AIRBUS, cockpitFont, wrap360 } from './common';
+import { useContext } from 'react';
+import { useCockpitPref } from '../ui';
+import { AIRBUS, ScreenWidth, cockpitFont, wrap360 } from './common';
 
 export interface NdProps {
   /** Kurs (°). */
@@ -21,6 +23,13 @@ export interface NdProps {
   target?: string;
   /** Szerokość w pikselach. */
   width?: number;
+  /**
+   * Mapa lotniska (na ziemi, jak OANS w A350) – linie w układzie samolotu: [w prawo, do przodu] w milach morskich.
+   * Gdy jest podana, ND nie rysuje przewidywanego toru (na ziemi nie ma łuku zakrętu), tylko mapę.
+   */
+  map?: { pts: [number, number][]; color: string; width?: number; dash?: string; fill?: string }[];
+  /** Napisy na mapie lotniska (np. oznaczenie pasa) – położenie w NM w układzie samolotu i kierunek tekstu (punkt, ku któremu biegnie). */
+  mapLabels?: { text: string; at: [number, number]; toward?: [number, number]; color?: string; size?: number }[];
 }
 
 const W = 360;
@@ -28,7 +37,10 @@ const H = 330;
 /** Zasięgi (NM) – od małych, „lotniskowych” (kołowanie, zakręty na ziemi), do przelotowych. */
 const RANGES = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 40, 80, 160, 320];
 
-export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadiusNm = 0, range, target, width = 300 }: NdProps) {
+export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadiusNm = 0, range, target, width: widthProp = 300, map, mapLabels }: NdProps) {
+  // w doku kokpitu – wspólna szerokość ekranów (PFD i ND zawsze tej samej wielkości)
+  const width = useContext(ScreenWidth) ?? widthProp;
+  if (!useCockpitPref('screens')) return null;
   const cx = 180;
   const cy = 292;
   const R = 230; // promień łuku = zasięg
@@ -55,28 +67,29 @@ export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadius
           <rect x={0} y={0} width={W} height={H} />
         </clipPath>
       </defs>
-      {/* ---- rogi: prędkości, wiatr, cel ---- */}
-      <text x={10} y={18} fill={AIRBUS.white} fontSize={10}>
-        GS<tspan fill={AIRBUS.green} fontSize={14}> {Math.round(gs)}</tspan>
-        <tspan dx={6}>TAS</tspan>
-        <tspan fill={AIRBUS.green} fontSize={14}> {Math.round(tas)}</tspan>
-      </text>
-      <text x={10} y={34} fill={AIRBUS.green} fontSize={11}>
-        {String(wrap360(wind[0])).padStart(3, '0')}/{Math.round(wind[1])}
-      </text>
-      {wind[1] > 0 && (
-        <g transform={`translate(18 50) rotate(${wind[0] + 180 - heading})`}>
-          <line x1={0} y1={-8} x2={0} y2={8} stroke={AIRBUS.green} strokeWidth={1.6} />
-          <path d="M0,8 l-3,-5 h6 z" fill={AIRBUS.green} />
-        </g>
-      )}
-      <text x={W - 10} y={18} fill={AIRBUS.white} fontSize={11} textAnchor="end">
-        {target ?? 'HDG'}
-        <tspan fill={AIRBUS.green} dx={6} fontSize={14}>
-          {String(wrap360(heading)).padStart(3, '0')}°
-        </tspan>
-      </text>
       <g clipPath="url(#nd-view)">
+        {/* ---- mapa lotniska (na ziemi, pod okręgami zasięgu) ---- */}
+        {map?.map((m, i) => (
+          <path
+            key={i}
+            d={m.pts.map(([x, y], k) => `${k ? 'L' : 'M'}${cx + x * px},${cy - y * px}`).join(' ') + (m.fill ? ' Z' : '')}
+            fill={m.fill ?? 'none'}
+            stroke={m.color}
+            strokeWidth={m.width ?? 1.6}
+            strokeDasharray={m.dash}
+            strokeLinejoin="round"
+          />
+        ))}
+        {mapLabels?.map((l, i) => {
+          const x = cx + l.at[0] * px;
+          const y = cy - l.at[1] * px;
+          const ang = l.toward ? (Math.atan2(-(l.toward[1] - l.at[1]), l.toward[0] - l.at[0]) * 180) / Math.PI + 90 : 0;
+          return (
+            <text key={i} x={x} y={y} fill={l.color ?? AIRBUS.white} fontSize={l.size ?? 12} fontWeight={700} textAnchor="middle" dominantBaseline="middle" transform={`rotate(${ang} ${x} ${y})`}>
+              {l.text}
+            </text>
+          );
+        })}
         {/* ---- okręgi zasięgu ---- */}
         {[0.25, 0.5, 0.75].map((f) => (
           <g key={f}>
@@ -113,8 +126,32 @@ export function Nd({ heading = 0, gs = 280, tas = 280, wind = [0, 0], turnRadius
             );
           })}
         </g>
-        {/* ---- przewidywany tor ---- */}
-        <path d={track} fill="none" stroke={AIRBUS.green} strokeWidth={2.2} />
+        {/* ---- przewidywany tor (w locie; na ziemi z mapą lotniska go nie ma) ---- */}
+        {!map && <path d={track} fill="none" stroke={AIRBUS.green} strokeWidth={2.2} />}
+      </g>
+      {/* ---- rogi: prędkości, wiatr, cel – na wierzchu, nad mapą lotniska ---- */}
+      {/* czarna obwódka napisów – czytelne także na tle pasa */}
+      <g stroke={AIRBUS.bg} strokeWidth={3} strokeLinejoin="round" style={{ paintOrder: 'stroke' }}>
+        <text x={10} y={18} fill={AIRBUS.white} fontSize={10}>
+          GS<tspan fill={AIRBUS.green} fontSize={14}> {Math.round(gs)}</tspan>
+          <tspan dx={6}>TAS</tspan>
+          <tspan fill={AIRBUS.green} fontSize={14}> {Math.round(tas)}</tspan>
+        </text>
+        <text x={10} y={34} fill={AIRBUS.green} fontSize={11}>
+          {String(wrap360(wind[0])).padStart(3, '0')}/{Math.round(wind[1])}
+        </text>
+        {wind[1] > 0 && (
+          <g transform={`translate(18 50) rotate(${wind[0] + 180 - heading})`}>
+            <line x1={0} y1={-8} x2={0} y2={8} stroke={AIRBUS.green} strokeWidth={1.6} />
+            <path d="M0,8 l-3,-5 h6 z" fill={AIRBUS.green} />
+          </g>
+        )}
+        <text x={W - 10} y={18} fill={AIRBUS.white} fontSize={11} textAnchor="end">
+          {target ?? 'HDG'}
+          <tspan fill={AIRBUS.green} dx={6} fontSize={14}>
+            {String(wrap360(heading)).padStart(3, '0')}°
+          </tspan>
+        </text>
       </g>
       {/* znacznik kursu (stały, u góry łuku) */}
       <line x1={cx} x2={cx} y1={cy - R - 14} y2={cy - R + 6} stroke={AIRBUS.yellow} strokeWidth={2.6} />

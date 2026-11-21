@@ -48,11 +48,11 @@ const fitted = (base: V3, target: V3, f: number): V3 => [target[0] + (base[0] - 
 const inFrame = (p: V3, step: Step): V3 => (step.frame ? [step.frame.position[0] + p[0] * step.frame.scale, step.frame.position[1] + p[1] * step.frame.scale, step.frame.position[2] + p[2] * step.frame.scale] : p);
 
 /** Oddala kamerę, gdy scena jest węższa niż wysoka, żeby model zmieścił się w kadrze. */
-function FitCamera({ base, target }: { base: V3; target: V3 }) {
+function FitCamera({ base, target, fit = true }: { base: V3; target: V3; fit?: boolean }) {
   const camera = useThree((s) => s.camera);
   const { width, height } = useThree((s) => s.size);
   useEffect(() => {
-    camera.position.set(...fitted(base, target, fitFactor(width, height)));
+    camera.position.set(...fitted(base, target, fit ? fitFactor(width, height) : 1));
     camera.lookAt(target[0], target[1], target[2]);
     // tylko przy pierwszym ustawieniu i zmianie rozmiaru – nie walczymy z OrbitControls
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,7 +72,7 @@ const smootherstep = (u: number) => u * u * u * (u * (u * 6 - 15) + 10);
  * – złapanie modelu myszą przerywa przelot (bez walki z użytkownikiem).
  * Czas liczony jest niezależnie od pauzy animacji.
  */
-function CameraFlight({ base, target }: { base: V3; target: V3 }) {
+function CameraFlight({ base, target, fit = true }: { base: V3; target: V3; fit?: boolean }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as unknown as (THREE.EventDispatcher<{ start: object }> & { target: THREE.Vector3; update: () => void }) | null;
   const size = useThree((s) => s.size);
@@ -84,7 +84,7 @@ function CameraFlight({ base, target }: { base: V3; target: V3 }) {
       first.current = false;
       return;
     }
-    const p1 = new THREE.Vector3(...fitted(base, target, fitFactor(size.width, size.height)));
+    const p1 = new THREE.Vector3(...fitted(base, target, fit ? fitFactor(size.width, size.height) : 1));
     const t1 = new THREE.Vector3(...target);
     const p0 = camera.position.clone();
     const t0 = controls?.target.clone() ?? t1.clone();
@@ -251,7 +251,7 @@ function SpotAnchor({ step, children }: { step: Step; children: React.ReactNode 
  * migania). Bieżąca jest wyróżniona, następna lekko pulsuje – podpowiada, dokąd iść dalej.
  */
 function SpotMarkers({ nav }: { nav: SpotNav }) {
-  // numery są tylko na stronie głównej modułu (zakładka 0); w zakładkach zostają klikalne podpisy części
+  // numery są tylko na stronie głównej modułu (zakładka 0) – jak klikanie i podpisy części (useModuleHome)
   if (nav.index !== 0) return null;
   return (
     <>
@@ -385,8 +385,9 @@ function Stage3D({ step, params, active, spots, pauseSlot }: { step: Step; param
         <Canvas camera={{ position: base, fov: 45, near: 0.2, far: 600 }} dpr={[1, 2]} frameloop={active ? 'always' : 'never'}>
           <PauseContext.Provider value={paused}>
             <ViewShift panel={424} />
-            <FitCamera base={base} target={target} />
-            <CameraFlight base={base} target={target} />
+            {/* kamera we wnętrzu (np. w fotelu pasażera) nie odsuwa się na wąskim ekranie – wyszłaby poza model */}
+            <FitCamera base={base} target={target} fit={!cur.cameraInside} />
+            <CameraFlight base={base} target={target} fit={!cur.cameraInside} />
             <SwapWatch token={incoming?.key ?? ''} onReady={promote} />
             <FreezeClock paused={paused} />
             {(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV && <DevHandle />}
@@ -394,7 +395,7 @@ function Stage3D({ step, params, active, spots, pauseSlot }: { step: Step; param
               <SceneSlot key={e.key} entry={e} hidden={hidden} warm={warm} slot={slot} />
             ))}
             {spots && active && <SpotMarkers nav={spots} />}
-            <OrbitControls makeDefault target={orbitTarget} enableDamping dampingFactor={0.08} minDistance={1.5} maxDistance={140} />
+            <OrbitControls makeDefault target={orbitTarget} enableDamping dampingFactor={0.08} minDistance={1.5} maxDistance={260} />
           </PauseContext.Provider>
         </Canvas>
         <StatusBar paused={paused} onToggle={() => setPaused((p) => !p)} hint slot={active ? pauseSlot : null} />

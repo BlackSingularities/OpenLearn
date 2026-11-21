@@ -16,12 +16,13 @@
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
-import { Environment, Html, Lightformer } from '@react-three/drei';
+import { Environment, Html, Lightformer, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
-import { useSceneHidden, useTopicNav } from '../../lib/topicNav';
+import { useModuleHome, useSceneHidden, useTopicNav } from '../../lib/topicNav';
 import { EngineModel, type EngineModelProps } from './engineModel';
+import { AirportModel, STAND } from './runway';
 
-export type PlanePart = 'fuselage' | 'wing' | 'engine' | 'tail' | 'gear' | 'apu' | 'cockpit' | 'radar' | 'packs' | 'fuel' | 'lights' | 'doors';
+export type PlanePart = 'fuselage' | 'wing' | 'engine' | 'tail' | 'gear' | 'apu' | 'cockpit' | 'radar' | 'lights' | 'doors';
 /** Który moduł tematu otwiera kliknięcie podzespołu (null – moduł w przygotowaniu). */
 export const PART_MODULE: Record<PlanePart, string | null> = {
   fuselage: 'kadlub',
@@ -32,13 +33,11 @@ export const PART_MODULE: Record<PlanePart, string | null> = {
   apu: 'apu',
   cockpit: 'kokpit',
   radar: 'radar',
-  packs: 'klimatyzacja',
-  fuel: 'paliwo',
   lights: 'swiatla',
   doors: 'drzwi',
 };
 export const PART_NAME: Record<PlanePart, string> = {
-  fuselage: 'kadłub',
+  fuselage: 'kadłub i kabina',
   wing: 'skrzydło',
   engine: 'silnik',
   tail: 'usterzenie',
@@ -46,8 +45,6 @@ export const PART_NAME: Record<PlanePart, string> = {
   apu: 'APU',
   cockpit: 'kokpit',
   radar: 'radar pogodowy',
-  packs: 'klimatyzacja',
-  fuel: 'paliwo',
   lights: 'światła',
   doors: 'drzwi',
 };
@@ -75,6 +72,9 @@ const MATS: Record<string, { color: string; metal: number; rough: number; clear?
   seam: { color: '#3b4148', metal: 0.2, rough: 0.6 },
   cove: { color: '#4b535c', metal: 0.3, rough: 0.75 },
   glass: { color: '#0b1016', metal: 0.6, rough: 0.07, clear: 1 },
+  // okna kabiny z zewnątrz: szyba przyciemniana (granat z szarością) z mocnym połyskiem i jej głębia
+  winGlass: { color: '#2a3a4c', metal: 0.55, rough: 0.04, clear: 1 },
+  winDeep: { color: '#121a24', metal: 0.4, rough: 0.08, clear: 1 },
   primer: { color: '#9cb87e', metal: 0.25, rough: 0.6 },
   steel: { color: '#a4adb7', metal: 0.9, rough: 0.3 },
   // chromowane tłoczyska amortyzatorów: jasne, gładkie (odcinają się od szarej goleni nawet przy ciemnym tle)
@@ -133,13 +133,15 @@ function M({ k, side = THREE.FrontSide, opacity = 1, color, emit, matRef }: { k:
   const glow = useContext(GlowCtx);
   const glowColor = useContext(GlowColorCtx);
   const clip = useContext(ClipCtx);
-  const onCompile = useMemo(() => (clip ? clipShader(clip) : undefined), [clip]);
+  // bez przekroju też podajemy funkcje (no-op i stały klucz): wartość undefined nadpisałaby metody three.js
+  // i po przełączeniu z widoku z przekrojem renderowanie przerwałoby się błędem
+  const onCompile = useMemo(() => (clip ? clipShader(clip) : () => {}), [clip]);
   const m = MATS[k] ?? { color: k, metal: 0.2, rough: 0.5 };
   return (
     <meshPhysicalMaterial
       ref={matRef}
       onBeforeCompile={onCompile}
-      customProgramCacheKey={clip ? () => 'plane-clip' : undefined}
+      customProgramCacheKey={clip ? () => 'plane-clip' : () => 'plane'}
       color={color ?? m.color}
       metalness={m.metal}
       roughness={m.rough}
@@ -225,7 +227,29 @@ export type LampSector = { c: number; h: number; v?: number; vh?: number };
  */
 export type Blink = 'beacon' | 'strobe' | 'strobe1';
 const BLINK_T: Record<Blink, number> = { beacon: 1.0, strobe: 1.1, strobe1: 1.1 };
-function blinkLevel(b: Blink, time: number) {
+
+/**
+ * Stan świateł zewnętrznych podawany przez moduł świateł (obiekt zmieniany co klatkę, bez przerysowania Reacta).
+ * Z nim każda lampa świeci według swojego przełącznika, a reflektory, beacony i strobo naprawdę oświetlają samolot
+ * i ziemię (źródła światła w scenie). Bez niego lampy zachowują się jak dotąd (zależnie od fazy lotu).
+ */
+export type ExtLights = { nav: boolean; logo: boolean; beacon: boolean; strobe: boolean; land: boolean; taxi: boolean; to: boolean; turnoff: boolean; wing: boolean; night?: boolean };
+export type ExtLt = Exclude<keyof ExtLights, 'night'>;
+export const newExtLights = (night = false): ExtLights => ({ nav: false, logo: false, beacon: false, strobe: false, land: false, taxi: false, to: false, turnoff: false, wing: false, night });
+export const ExtLtCtx = createContext<ExtLights | null>(null);
+/**
+ * Najjaśniejszy poziom błysku między dwiema klatkami (t0…t1). Błysk strobo trwa ok. 0,04 s – przy mniejszej liczbie
+ * klatek na sekundę mógłby wypaść między klatkami i lampa mrugałaby nieregularnie. Tak każdy błysk jest widoczny
+ * w co najmniej jednej klatce, a rytm (beacon 60/min, strobo 2 błyski co 1,1 s) zostaje zachowany.
+ */
+export function blinkPeak(b: Blink, t0: number, t1: number) {
+  const a = Math.max(t0, t1 - 0.25);
+  if (t1 - a <= 0.012) return blinkLevel(b, t1);
+  let m = 0;
+  for (let t = t1; t > a; t -= 0.008) m = Math.max(m, blinkLevel(b, t));
+  return m;
+}
+export function blinkLevel(b: Blink, time: number) {
   const t = time % BLINK_T[b];
   if (b === 'beacon') return t < 0.03 ? t / 0.03 : Math.max(0, Math.exp(-(t - 0.03) / 0.06) - 0.02);
   const pulse = (a: number) => (t >= a && t < a + 0.04 ? 1 : 0);
@@ -267,7 +291,8 @@ function beamGeo(len: number, half: number) {
 }
 const _beamZ = new THREE.Vector3(0, 0, 1);
 
-function Lamp({ p, n = [0, 1, 0], color, r = 0.09, halo = 1.6, blink, on: onProp = true, isOn, rx = 1, bezel = true, sector, beam }: { p: V3; n?: V3; color: string; r?: number; halo?: number; blink?: Blink; on?: boolean; isOn?: () => boolean; rx?: number; bezel?: boolean; sector?: LampSector; beam?: { len: number; half: number; dir: V3 } }) {
+function Lamp({ p, n = [0, 1, 0], color, r = 0.09, halo = 1.6, blink, on: onProp = true, isOn, rx = 1, bezel = true, sector, beam, lt }: { p: V3; n?: V3; color: string; r?: number; halo?: number; blink?: Blink; on?: boolean; isOn?: () => boolean; rx?: number; bezel?: boolean; sector?: LampSector; beam?: { len: number; half: number; dir: V3 }; lt?: ExtLt }) {
+  const ext = useContext(ExtLtCtx);
   const beamRef = useRef<THREE.Mesh>(null);
   // wiązka ma własny kierunek (oś reflektora), niezależny od ustawienia szkła w poszyciu
   const qb = useMemo(() => (beam ? new THREE.Quaternion().setFromUnitVectors(_beamZ, new THREE.Vector3(...beam.dir).normalize()) : null), [beam?.dir[0], beam?.dir[1], beam?.dir[2]]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -278,9 +303,11 @@ function Lamp({ p, n = [0, 1, 0], color, r = 0.09, halo = 1.6, blink, on: onProp
   const v = useMemo(() => new THREE.Vector3(), []);
   const q = useMemo(() => new THREE.Quaternion().setFromUnitVectors(_lampZ, new THREE.Vector3(...n).normalize()), [n[0], n[1], n[2]]); // eslint-disable-line react-hooks/exhaustive-deps
   const cam = useMemo(() => new THREE.Vector3(), []);
+  const lastT = useRef(-1);
   useFrame(({ clock, camera }) => {
     // włączenie: z właściwości albo z funkcji (stan sceny zmieniany co klatkę, bez przerysowania)
-    const on = isOn ? isOn() : onProp;
+    // moduł świateł: każda lampa według swojego przełącznika
+    const on = ext && lt ? ext[lt] : isOn ? isOn() : onProp;
     if (beamRef.current) beamRef.current.visible = on;
     // poświata (sprite) nie podlega przycinaniu w shaderze – chowamy ją, gdy lampa jest poza widocznym fragmentem
     let inside = true;
@@ -314,8 +341,15 @@ function Lamp({ p, n = [0, 1, 0], color, r = 0.09, halo = 1.6, blink, on: onProp
         dirK *= 0.55 + 0.45 * Math.cos(el);
       }
     }
-    const lit = blink ? blinkLevel(blink, clock.elapsedTime) : 1;
+    const now = clock.elapsedTime;
+    const lit = blink ? blinkPeak(blink, lastT.current < 0 ? now : lastT.current, now) : 1;
+    lastT.current = now;
     if (mat.current) mat.current.emissiveIntensity = blink ? 0.25 + 2.4 * lit * Math.max(0.3, dirK) : 1.6 * Math.max(0.25, dirK);
+    // nocą z daleka (np. z drugiego samolotu) poświata nie maleje poniżej kilkunastu pikseli – jak prawdziwe światło
+    if (spr.current && ext?.night && grp.current) {
+      const sc = Math.max(halo, camera.position.distanceTo(grp.current.getWorldPosition(v)) * 0.013);
+      spr.current.scale.set(sc, sc, 1);
+    }
     if (spr.current) {
       (spr.current.material as THREE.SpriteMaterial).opacity = (blink ? lit : 0.85) * dirK;
       spr.current.visible = inside && dirK > 0.01 && (!blink || lit > 0.01);
@@ -352,6 +386,40 @@ function Lamp({ p, n = [0, 1, 0], color, r = 0.09, halo = 1.6, blink, on: onProp
   );
 }
 
+/**
+ * Prawdziwe źródło światła reflektora (moduł świateł): stożek SpotLight z lampy w kierunku `dir` – oświetla
+ * poszycie, pas i drogi kołowania. Zawsze w scenie (zmiana liczby świateł przebudowałaby wszystkie materiały),
+ * zgaszone przez jasność 0.
+ */
+function SpotLamp({ p, dir, lt, angle, dist, power, color = '#fff1d8', penumbra = 0.55 }: { p: V3; dir: V3; lt: ExtLt; angle: number; dist: number; power: number; color?: string; penumbra?: number }) {
+  const ext = useContext(ExtLtCtx);
+  const l = useRef<THREE.SpotLight>(null);
+  const tgt = useMemo(() => new THREE.Object3D(), []);
+  useFrame(() => {
+    if (l.current) l.current.intensity = ext && ext[lt] ? power : 0;
+  });
+  return (
+    <group position={p}>
+      <spotLight ref={l} position={[0, 0, 0]} target={tgt} angle={angle} penumbra={penumbra} distance={dist} decay={1.1} color={color} intensity={0} />
+      <primitive object={tgt} position={[dir[0] * 10, dir[1] * 10, dir[2] * 10]} />
+    </group>
+  );
+}
+
+/** Błysk beacona albo strobo oświetlający samolot (punktowe źródło światła migające w rytmie lampy). */
+function FlashLight({ p, lt, blink, color, power, dist }: { p: V3; lt: ExtLt; blink: Blink; color: string; power: number; dist: number }) {
+  const ext = useContext(ExtLtCtx);
+  const l = useRef<THREE.PointLight>(null);
+  const lastT = useRef(-1);
+  useFrame(({ clock }) => {
+    const now = clock.elapsedTime;
+    const lvl = blinkPeak(blink, lastT.current < 0 ? now : lastT.current, now);
+    lastT.current = now;
+    if (l.current) l.current.intensity = ext && ext[lt] ? power * lvl : 0;
+  });
+  return <pointLight ref={l} position={p} color={color} distance={dist} decay={1.2} intensity={0} />;
+}
+
 /** Kierunek od punktu a do b (znormalizowany) – normalna do ustawienia soczewki. */
 const dirOf = (a: V3, b: V3, tilt: V3 = [0, 0, 0]): V3 => {
   const d = new THREE.Vector3(b[0] - a[0] + tilt[0], b[1] - a[1] + tilt[1], b[2] - a[2] + tilt[2]).normalize();
@@ -375,7 +443,7 @@ const jag = (u: number, seed: number, amp: number, n = 26) => {
   return amp * (hash(i, seed) + (hash(i + 1, seed) - hash(i, seed)) * (f - i));
 };
 /** Podział odcinków między punktami granicznymi tak, by krawędzie części wypadały dokładnie na liniach siatki. */
-function refine(breaks: number[], step: number) {
+export function refine(breaks: number[], step: number) {
   const out: number[] = [];
   const b = [...new Set(breaks)].sort((p, q) => p - q);
   for (let i = 0; i < b.length - 1; i++) {
@@ -385,8 +453,48 @@ function refine(breaks: number[], step: number) {
   out.push(b[b.length - 1]);
   return out;
 }
+/**
+ * Kształt okna A350 (wysoki, zaokrąglony prostokąt – superelipsa) o promieniu r w jednostkach skali okna; z otworem
+ * o promieniu hole (> 0) – pierścień (uszczelka, rant). Drobne przesunięcie w z kładzie warstwy jedna nad drugą.
+ */
+function winShape(r: number, hole: number) {
+  const pts = (rr: number) =>
+    Array.from({ length: 48 }, (_, i) => {
+      const a = (i / 48) * Math.PI * 2;
+      const c = Math.cos(a);
+      const sn = Math.sin(a);
+      const e = 2 / 2.8;
+      return new THREE.Vector2(rr * Math.sign(c) * Math.pow(Math.abs(c), e), rr * Math.sign(sn) * Math.pow(Math.abs(sn), e));
+    });
+  const sh = new THREE.Shape(pts(r));
+  if (hole > 0) sh.holes.push(new THREE.Path(pts(hole).reverse()));
+  const g = new THREE.ShapeGeometry(sh);
+  // kolejność warstw: rant, uszczelka, szyba, głębia – każda o włos dalej od poszycia
+  g.translate(0, 0, hole > 0 ? (r > 1.15 ? 0 : 0.002) : r < 1 ? 0.006 : 0.004);
+  return g;
+}
+/** Łączy kilka siatek w jedną (pozycje i indeksy; normalne liczone na nowo); źródła są zwalniane. */
+export function mergeGeo(gs: THREE.BufferGeometry[]) {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  let off = 0;
+  for (const g of gs) {
+    const p = g.getAttribute('position');
+    for (let i = 0; i < p.count; i++) pos.push(p.getX(i), p.getY(i), p.getZ(i));
+    const ix = g.getIndex();
+    if (ix) for (let i = 0; i < ix.count; i++) idx.push(ix.getX(i) + off);
+    else for (let i = 0; i < p.count; i++) idx.push(i + off);
+    off += p.count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setIndex(idx);
+  out.computeVertexNormals();
+  return out;
+}
 /** Siatka powierzchni na listach parametrów u, v; trójkąty, których środek spełnia `skip`, są pomijane. */
-function grid(us: number[], vs: number[], fn: (u: number, v: number) => V3, skip?: (u: number, v: number) => boolean) {
+export function grid(us: number[], vs: number[], fn: (u: number, v: number) => V3, skip?: (u: number, v: number) => boolean) {
   const pos: number[] = [];
   const idx: number[] = [];
   for (const u of us) for (const v of vs) pos.push(...fn(u, v));
@@ -660,14 +768,14 @@ function fusSec900(x: number) {
 }
 const FUS_N = 2.2;
 /** Punkt na kadłubie: kąt θ od grzbietu (0) ku lewej burcie (+π/2); inset – odsunięcie do środka. */
-function fusPt(x: number, th: number, inset = 0): V3 {
+export function fusPt(x: number, th: number, inset = 0): V3 {
   const { yc, h, w } = fusSec(x);
   const c = Math.cos(th);
   const s = Math.sin(th);
   return [x, yc + Math.max(0.01, h - inset) * Math.sign(c) * Math.pow(Math.abs(c), 2 / FUS_N), Math.max(0.01, w - inset) * Math.sign(s) * Math.pow(Math.abs(s), 2 / FUS_N)];
 }
 /** Kąt θ, pod którym burta kadłuba w x ma wysokość y (lewa burta). */
-function fusTheta(x: number, y: number) {
+export function fusTheta(x: number, y: number) {
   let a = 0;
   let b = Math.PI;
   for (let i = 0; i < 30; i++) {
@@ -691,10 +799,47 @@ const fusNormal = (x: number, th: number) => {
  */
 export const APU_HATCH = { x0: 32.4, x1: 35.9, th0: 0.3, th1: 2.05 };
 const APU_CUT = (x: number, th: number) => x > APU_HATCH.x0 && x < APU_HATCH.x1 && th > APU_HATCH.th0 && th < APU_HATCH.th1;
+/**
+ * Styk owiewki radaru (radomu) z kadłubem: przed nim jest sama owiewka, za nim przednia gródź ciśnieniowa. W module
+ * radaru kadłub kończy się tutaj – owiewkę i radar rysuje moduł radaru (otwierana do góry na zawiasach).
+ */
+export const RADOME_X = -35.1;
+const RADOME_CUT = (x: number) => x < RADOME_X;
 /** Przekrój kadłuba w x (środek yc, półwysokość h, półszerokość w) – do rozmieszczenia wyposażenia w stożku ogonowym. */
 export const fuselageSection = (x: number) => fusSec(x);
-const FUS_X = [...new Set([...refine([-33.4 - PF, -33.2 - PF, -32.6 - PF, -31.9 - PF, -29 - PF, -27 - PF, -24.5 - PF, -22.5, 6 + PA, 15, 22 + PA, 30 + PA, APU_HATCH.x0, APU_HATCH.x1, 33 + PA, 33.4 + PA], 0.45), ...refine([-31.8 - PF, -29.4 - PF], 0.05), ...refine([-29.3 - PF, -27.5 - PF], 0.08)])].sort((a, b) => a - b);
-const FUS_TH = [...new Set([...refine([-Math.PI, -0.35, 0, 1.32, Math.PI], 0.05), ...refine([-0.75, 0.75], 0.016), ...refine([Math.PI - 0.45, Math.PI], 0.015), ...refine([-Math.PI, -Math.PI + 0.45], 0.015)])].sort((a, b) => a - b);
+/**
+ * Drzwi ładowni w prawej burcie (A350: ok. 2,7 × 1,7 m): x środka drzwi przedniej i tylnej ładowni, pół szerokości,
+ * dolna i górna krawędź (y). Krawędzie dochodzą do siatki poszycia, żeby otwór miał równe brzegi.
+ */
+/*
+ * Drzwi ładowni (prawa burta), układ jak w A350: przednie między drzwiami 1 a 2, przed skrzydłem; tylne tuż za
+ * owiewką centropłata, za drzwiami 3. Szerokość ok. 2,7 m; górna krawędź (zawias) pod belkami podłogi kabiny,
+ * dolna równo z podłogą ładowni (próg) – kontener LD3 (1,1 m w modelu) mieści się z zapasem.
+ */
+const CARGO_DOOR = { xs: [-19.6, 10.6], hw: 1.35, yb: -2.47, yt: -1.27 };
+/**
+ * Drzwi pasażerskie A350-1000 (typ A, po cztery z każdej strony): środki w x, połowa szerokości otworu i jego dół/góra
+ * (y; podłoga kabiny −1,15). Otwór ok. 1,07 × 1,93 m.
+ */
+export const PAX_DOOR = { xs: [-26.9 - 3.5, -16.4, 7.4, 18.6 + 3.49], hw: 0.535, yb: -1.15 + 0.05, yt: -1.15 + 1.98 };
+/** Zakresy kąta θ otworów (drzwi ładowni – prawa burta, drzwi pasażerskie – obie) na wręgu x. */
+function openingGaps(x: number): [number, number][] {
+  const out: [number, number][] = [];
+  if (CARGO_DOOR.xs.some((xd) => Math.abs(x - xd) < CARGO_DOOR.hw + 0.02)) out.push([-fusTheta(x, CARGO_DOOR.yb), -fusTheta(x, CARGO_DOOR.yt)]);
+  if (PAX_DOOR.xs.some((xd) => Math.abs(x - xd) < PAX_DOOR.hw + 0.02)) {
+    const a = fusTheta(x, PAX_DOOR.yt);
+    const b = fusTheta(x, PAX_DOOR.yb);
+    out.push([a, b], [-b, -a]);
+  }
+  return out.sort((p, q) => p[0] - q[0]);
+}
+/** Zakres kąta θ (prawa burta) otworu drzwi ładowni na wręgu x; null – wręg nie przechodzi przez otwór. */
+function cargoGap(x: number): [number, number] | null {
+  if (!CARGO_DOOR.xs.some((xd) => Math.abs(x - xd) < CARGO_DOOR.hw + 0.02)) return null;
+  return [-fusTheta(x, CARGO_DOOR.yb), -fusTheta(x, CARGO_DOOR.yt)];
+}
+const FUS_X = [...new Set([...CARGO_DOOR.xs.flatMap((x) => [x - CARGO_DOOR.hw, x + CARGO_DOOR.hw]), ...PAX_DOOR.xs.flatMap((x) => [x - PAX_DOOR.hw, x + PAX_DOOR.hw]), ...refine([-33.4 - PF, -33.2 - PF, -32.6 - PF, -31.9 - PF, -29 - PF, -27 - PF, -24.5 - PF, -22.5, 6 + PA, 15, 22 + PA, 30 + PA, APU_HATCH.x0, APU_HATCH.x1, 33 + PA, 33.4 + PA], 0.45), RADOME_X, ...refine([-31.8 - PF, -29.4 - PF], 0.05), ...refine([-29.3 - PF, -27.5 - PF], 0.08)])].sort((a, b) => a - b);
+const FUS_TH = [...new Set([...[CARGO_DOOR.yb, CARGO_DOOR.yt, PAX_DOOR.yb, PAX_DOOR.yt].flatMap((y) => [fusTheta(0, y), -fusTheta(0, y)]), ...refine([-Math.PI, -0.35, 0, 1.32, Math.PI], 0.05), ...refine([-0.75, 0.75], 0.016), ...refine([Math.PI - 0.45, Math.PI], 0.015), ...refine([-Math.PI, -Math.PI + 0.45], 0.015)])].sort((a, b) => a - b);
 
 /* ---------- brzuch: owiewka centropłata i wnęki podwozia ---------- */
 
@@ -716,11 +861,11 @@ const secBottom = (yc: number, h: number, w: number, n: number, z: number) => {
   const sn = Math.pow(Math.min(1, Math.abs(z) / w), n / 2);
   return yc - h * Math.pow(Math.sqrt(Math.max(0, 1 - sn * sn)), 2 / n);
 };
-const fairBottom = (x: number, z: number, out = 0) => {
+export const fairBottom = (x: number, z: number, out = 0) => {
   const { yc, h, w } = fairSec(x);
   return secBottom(yc, h + out, w + out, FAIR_N, z);
 };
-const fusBottom = (x: number, z: number, out = 0) => {
+export const fusBottom = (x: number, z: number, out = 0) => {
   const { yc, h, w } = fusSec(x);
   return secBottom(yc, h + out, w + out, FUS_N, z);
 };
@@ -837,8 +982,8 @@ const inPoly = (q: P2, poly: P2[]) => {
 const CK_POLYS = CK_PANES.map((p) => ckPoly(p, 0));
 /** Czy punkt poszycia (x, θ) leży w otworze szyby kokpitu (obie burty). */
 const COCKPIT = (x: number, th: number) => CK_POLYS.some((poly) => inPoly([x, Math.abs(th) * CK_R], poly));
-const DOORS = [-26.9 - PF, -16.4, 7.4, 18.6 + PA];
-const FLOOR = -1.15;
+const DOORS = PAX_DOOR.xs;
+export const FLOOR = -1.15;
 const WIN_Y = 0.15;
 
 /* ================= pamięć geometrii ================= */
@@ -873,23 +1018,23 @@ function useShared(src: THREE.BufferGeometry, index: THREE.BufferAttribute) {
 
 /** Opisy elementów skrzydła, które można kliknąć w zbliżeniu konstrukcji. */
 export const WING_PART_INFO: Record<string, { name: string; desc: string }> = {
-  skin: { name: 'poszycie', desc: 'Zewnętrzna „skóra” skrzydła z kompozytu węglowego, przy kadłubie grubości kilkunastu milimetrów. Przenosi część obciążeń i tworzy szczelną ścianę zbiornika paliwa. Tu górne poszycie zdjęliśmy, żeby zajrzeć do środka.' },
-  spar: { name: 'dźwigary', desc: 'Dwie główne belki biegnące wzdłuż całego skrzydła: przedni (ok. 15% cięciwy) i tylny (ok. 60%). Przenoszą zginanie od siły nośnej – w locie koniec skrzydła unosi się o kilka metrów. Razem z poszyciem i żebrami tworzą keson.' },
-  rib: { name: 'żebra', desc: 'Poprzeczne ścianki co ok. 0,7 m. Nadają skrzydłu kształt profilu, usztywniają poszycie i dzielą zbiornik na komory, żeby paliwo nie przelewało się gwałtownie przy manewrach. Mają otwory na przewody i przepływ paliwa.' },
-  stringer: { name: 'podłużnice', desc: 'Długie, wąskie profile przyklejone od środka do poszycia. Chronią je przed wyboczeniem (pofalowaniem) pod ściskaniem – górne poszycie w locie jest ściskane, dolne rozciągane.' },
-  fuel: { name: 'paliwo w kesonie', desc: 'Keson jest zbiornikiem integralnym: szczelne poszycie, dźwigary i żebra same tworzą zbiornik. W skrzydłach i centropłacie mieści się ok. 140 000 litrów. Paliwo w skrzydłach odciąża je – jego ciężar działa przeciwnie do siły nośnej.' },
-  droop: { name: 'nosek opuszczany', desc: 'Część krawędzi natarcia przy kadłubie, która przy starcie i lądowaniu opuszcza się w dół bez otwierania szczeliny. Zwiększa wygięcie profilu, a gładka powierzchnia nie zaburza przepływu przed silnikiem.' },
-  slat: { name: 'sloty', desc: 'Ruchome segmenty krawędzi natarcia. Wysuwają się do przodu i w dół, otwierając szczelinę: szybki strumień spod skrzydła zasila górną powierzchnię i opóźnia oderwanie, więc skrzydło znosi większy kąt natarcia.' },
-  flap: { name: 'klapy', desc: 'Klapy typu Fowlera na krawędzi spływu. Wysuwają się po szynach do tyłu i w dół: zwiększają powierzchnię i wygięcie skrzydła. Przy starcie wychylają się trochę, przy lądowaniu – maksymalnie.' },
-  spoiler: { name: 'spojlery', desc: 'Płyty na górnej powierzchni przed klapami. Podniesione psują opływ: w locie hamują i pomagają lotkom w przechylaniu, a po przyziemieniu gaszą siłę nośną, żeby koła mocno docisnęły pas i hamulce działały.' },
-  aileron: { name: 'lotki', desc: 'Powierzchnie sterowe na zewnętrznej części krawędzi spływu. Wychylają się przeciwnie na obu skrzydłach: jedna zwiększa siłę nośną, druga zmniejsza – samolot się przechyla.' },
-  canoe: { name: 'owiewki prowadnic klap', desc: 'Opływowe osłony pod skrzydłem, potocznie „kajaki”. Kryją szyny i mechanizmy, po których wysuwają się klapy. Ich kształt dobiera się tak, by przy okazji zmniejszały opór przy dużej prędkości.' },
-  winglet: { name: 'winglet', desc: 'Zagięta w górę końcówka skrzydła. Osłabia wir brzegowy – przelewanie się powietrza spod skrzydła na górę – i zmniejsza opór indukowany, co daje kilka procent oszczędności paliwa.' },
-  dis: { name: 'wyładowniki statyczne', desc: 'Cienkie pręciki na krawędzi spływu. Odprowadzają do powietrza ładunek elektryczny gromadzony przez tarcie powietrza o samolot, który inaczej zakłócałby łączność radiową.' },
-  panel: { name: 'włazy rewizyjne zbiorników', desc: 'Owalne pokrywy w dolnym poszyciu, między dźwigarami. Po opróżnieniu i przewietrzeniu zbiornika mechanik zdejmuje je i wchodzi do kesonu, żeby obejrzeć konstrukcję, pompy i czujniki paliwa. Owal nie ma narożników, w których mogłyby zaczynać się pęknięcia.' },
-  vent: { name: 'wlot odpowietrzenia zbiornika', desc: 'Płaski, zagłębiony wlot typu NACA pod końcem skrzydła. Łączy zbiorniki z atmosferą, żeby przy tankowaniu, zużywaniu paliwa i zmianie wysokości ciśnienie w nich nie rosło ani nie spadało. Kształt NACA wpuszcza powietrze, prawie nie zwiększając oporu.' },
-  walk: { name: 'pas do chodzenia', desc: 'Obrysowany obszar na górze skrzydła przy kadłubie. Tylko tu poszycie jest przygotowane na ciężar człowieka – np. przy przeglądach albo ewakuacji przez wyjście nad skrzydłem. Poza nim widnieje napis NO STEP.' },
-  light: { name: 'światła zewnętrzne', desc: 'Na krawędzi natarcia końcówki: światła pozycyjne (czerwone po lewej, zielone po prawej) i białe strobo; na krawędzi spływu – białe pozycyjne. Przy kadłubie, w krawędzi natarcia pod przezroczystą osłoną – dwa reflektory lądowania, zapalane przy starcie i podejściu.' },
+  skin: { name: 'poszycie', desc: 'Zewnętrzna „skóra” skrzydła z kompozytu węglowego – przy kadłubie ma kilkanaście milimetrów grubości. Razem ze szkieletem przenosi obciążenia i tworzy szczelne ściany zbiornika paliwa. Górną część poszycia zdjęliśmy, żeby zajrzeć do środka.' },
+  spar: { name: 'dźwigary', desc: 'Dwie główne belki biegnące wzdłuż całego skrzydła – przednia i tylna. To one dźwigają ciężar samolotu: w locie skrzydło wygina się w górę, a jego koniec unosi się o kilka metrów. Razem z poszyciem i żebrami tworzą sztywną skrzynię – serce skrzydła.' },
+  rib: { name: 'żebra', desc: 'Poprzeczne ścianki co ok. 70 cm. Nadają skrzydłu kształt, usztywniają poszycie i dzielą zbiornik na komory, żeby paliwo nie chlupotało gwałtownie przy manewrach. Mają otwory na przewody i na przepływ paliwa.' },
+  stringer: { name: 'podłużnice', desc: 'Długie, wąskie listwy przyklejone od środka do poszycia. Nie pozwalają mu się pofałdować. W locie górne poszycie jest ściskane, a dolne rozciągane – bez listew cienka górna „skóra” wygięłaby się jak zgnieciona kartka.' },
+  fuel: { name: 'paliwo w kesonie', desc: 'Skrzydło samo jest zbiornikiem: jego szczelne poszycie, belki i żebra tworzą ściany zbiornika, bez osobnego „baku” w środku. W skrzydłach i środkowej części mieści się ok. 159 000 litrów paliwa. Paliwo w skrzydłach je odciąża – jego ciężar ciągnie w dół, a siła nośna w górę.' },
+  droop: { name: 'nosek opuszczany', desc: 'Część przedniej krawędzi skrzydła przy kadłubie, która przy starcie i lądowaniu pochyla się w dół. Skrzydło staje się bardziej wygięte i lepiej niesie przy małej prędkości. Nie otwiera przy tym szczeliny, więc nie zaburza powietrza wpadającego do silnika.' },
+  slat: { name: 'sloty', desc: 'Ruchome części przedniej krawędzi skrzydła. Przy starcie i lądowaniu wysuwają się do przodu i w dół, otwierając wąską szczelinę. Szybki strumień powietrza spod skrzydła przepływa nią na górę i pomaga mu „przylegać” do skrzydła. Dzięki temu samolot może lecieć wolniej, z nosem wyżej, i nie traci siły nośnej.' },
+  flap: { name: 'klapy', desc: 'Duże ruchome części tylnej krawędzi skrzydła. Wysuwają się po szynach do tyłu i w dół – skrzydło robi się większe i bardziej wygięte, więc niesie samolot przy mniejszej prędkości. Przy starcie wysuwają się trochę, przy lądowaniu – najbardziej.' },
+  spoiler: { name: 'spojlery', desc: 'Płyty na górze skrzydła, przed klapami. Podniesione psują przepływ powietrza nad skrzydłem. W locie hamują i pomagają przechylać samolot, a po przyziemieniu „gaszą” siłę nośną – samolot mocno dociska koła do pasa i hamulce działają skuteczniej.' },
+  aileron: { name: 'lotki', desc: 'Ruchome części tylnej krawędzi, bliżej końca skrzydła. Na obu skrzydłach wychylają się w przeciwne strony: jedno skrzydło unosi się mocniej, drugie słabiej – i samolot się przechyla, np. do zakrętu.' },
+  canoe: { name: 'owiewki prowadnic klap', desc: 'Opływowe osłony pod skrzydłem, nazywane „kajakami”. Kryją szyny i mechanizmy, po których wysuwają się klapy. Mają taki kształt, żeby przy dużej prędkości przy okazji trochę zmniejszały opór.' },
+  winglet: { name: 'winglet', desc: 'Zagięta w górę końcówka skrzydła. Pod skrzydłem ciśnienie jest wyższe niż nad nim, więc na końcu powietrze „przelewa się” spod spodu na górę i zawija w wir, który hamuje samolot. Winglet osłabia ten wir i daje kilka procent oszczędności paliwa.' },
+  dis: { name: 'wyładowniki statyczne', desc: 'Cienkie pręciki na tylnej krawędzi. W locie samolot elektryzuje się od tarcia o powietrze – pręciki oddają ten ładunek do powietrza, żeby iskrzenie nie zakłócało łączności radiowej.' },
+  panel: { name: 'włazy rewizyjne zbiorników', desc: 'Owalne pokrywy w spodzie skrzydła. Gdy zbiornik zostanie opróżniony i przewietrzony, mechanik zdejmuje pokrywę i wchodzi do środka skrzydła, żeby obejrzeć konstrukcję, pompy i czujniki paliwa. Kształt jest owalny, bo w ostrych narożnikach łatwiej zaczynają się pęknięcia.' },
+  vent: { name: 'wlot odpowietrzenia zbiornika', desc: 'Płaski, zagłębiony wlot pod końcem skrzydła. Łączy zbiorniki z powietrzem na zewnątrz, żeby przy tankowaniu, zużywaniu paliwa i zmianie wysokości ciśnienie w nich nie rosło ani nie spadało – tak jak otwór w zakrętce kanistra. Jego kształt wpuszcza powietrze, prawie nie zwiększając oporu.' },
+  walk: { name: 'pas do chodzenia', desc: 'Obrysowany obszar na górze skrzydła przy kadłubie. Tylko tu poszycie wytrzyma ciężar człowieka – np. przy przeglądach albo ewakuacji przez wyjście nad skrzydłem. Poza nim widnieje napis NO STEP („nie stawać”).' },
+  light: { name: 'światła zewnętrzne', desc: 'Na przedniej krawędzi końca skrzydła są światła pozycyjne (czerwone po lewej, zielone po prawej) i białe błyskające stroboskopy, a na tylnej – białe światło pozycyjne. Przy kadłubie, pod przezroczystą osłoną w przedniej krawędzi, są dwa reflektory lądowania, zapalane przy starcie i lądowaniu.' },
 };
 
 /**
@@ -969,7 +1114,7 @@ const shown = (o: THREE.Object3D | null): boolean => {
   return true;
 };
 
-function Lbl({ pos, children, color = '#e2e8f0', sub = false, link = false, occlude = false, onClick, onHover, active = false }: { pos: V3; children: ReactNode; color?: string; sub?: boolean; link?: boolean; occlude?: boolean; onClick?: () => void; onHover?: (on: boolean) => void; active?: boolean }) {
+export function Lbl({ pos, children, color = '#e2e8f0', sub = false, link = false, occlude = false, onClick, onHover, active = false }: { pos: V3; children: ReactNode; color?: string; sub?: boolean; link?: boolean; occlude?: boolean; onClick?: () => void; onHover?: (on: boolean) => void; active?: boolean }) {
   const hidden = useSceneHidden();
   const anchor = useRef<THREE.Group>(null);
   const span = useRef<HTMLSpanElement>(null);
@@ -1015,7 +1160,8 @@ function Lbl({ pos, children, color = '#e2e8f0', sub = false, link = false, occl
 }
 
 /** Kadłub: poszycie, owiewka centropłata, okna, drzwi, kokpit; w trybie „kadłub” – przekrój z wnętrzem. */
-function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
+function Fuselage({ open, apu = false, radar = false, view = 'home', labels = true, pick, doorsOpen = false }: { open: boolean; apu?: boolean; radar?: boolean; view?: FusView; labels?: boolean; pick?: WingPick; doorsOpen?: boolean }) {
+  const ext = useContext(ExtLtCtx);
   const g = useMemo(() => cached('fuselage', () => {
     // otwory w poszyciu: szyby kokpitu i wnęka koła przedniego (zamknięte drzwi wnęki leżą równo z poszyciem)
     const ckHole = (x: number, th: number) => COCKPIT(x, th) || (Math.cos(th) < -0.5 && inNoseBay(x, fusPt(x, th)[2]));
@@ -1027,6 +1173,25 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
     const apuG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => APU_CUT(x, th) || ckHole(x, th));
     const apuCut = apuG.getIndex()!.clone();
     apuG.dispose();
+    const cargoG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => {
+      if (ckHole(x, th)) return true;
+      if (th > 0) return false;
+      const y = fusPt(x, th)[1];
+      return y > CARGO_DOOR.yb && y < CARGO_DOOR.yt && CARGO_DOOR.xs.some((xd) => Math.abs(x - xd) < CARGO_DOOR.hw);
+    });
+    const cargoCut = cargoG.getIndex()!.clone();
+    cargoG.dispose();
+    // moduł drzwi: otwory drzwi pasażerskich po obu burtach (drzwi są osobnymi bryłami, otwierają się na zewnątrz)
+    const paxG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => {
+      if (ckHole(x, th)) return true;
+      const y = fusPt(x, th)[1];
+      return y > PAX_DOOR.yb && y < PAX_DOOR.yt && PAX_DOOR.xs.some((xd) => Math.abs(x - xd) < PAX_DOOR.hw);
+    });
+    const doorCut = paxG.getIndex()!.clone();
+    paxG.dispose();
+    const radG = grid(FUS_X, FUS_TH, (x, th) => fusPt(x, th), (x, th) => RADOME_CUT(x) || ckHole(x, th));
+    const radarCut = radG.getIndex()!.clone();
+    radG.dispose();
     // szyby kokpitu w 3D: czarna ramka na poszyciu, ścianki wnęki i szkło cofnięte o ok. 4 cm
     const densify = (P: P2[], k = 4): P2[] =>
       P.flatMap((p, i) => {
@@ -1068,7 +1233,8 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
     const ckWall = merge(wallG);
     const ckFrame = merge(frameG);
     // ciemne wnętrze kabiny pilotów widoczne przez szyby
-    const ckTub = grid(refine([CK_TIP + 1.3, CK_TIP + 4.6], 0.15), refine([-Math.PI, Math.PI], 0.12), (x, th) => fusPt(x, th, 0.14));
+    // od grodzi ciśnieniowej (za owiewką radaru) – szyby zaczynają się dopiero za nią, a w module radaru nos jest otwarty
+    const ckTub = grid(refine([RADOME_X + 0.05, CK_TIP + 4.6], 0.15), refine([-Math.PI, Math.PI], 0.12), (x, th) => fusPt(x, th, 0.14));
     const ckBoxes = [
       box([CK_TIP + 2.85, -0.05, 0], [0.7, 0.5, 2.4], [0, 0, -0.45]), // pulpit z ekranami
       box([CK_TIP + 2.6, 0.27, 0], [0.4, 0.1, 2.0], [0, 0, -0.2]), // osłona przeciwodblaskowa
@@ -1146,12 +1312,27 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
       // szczelina w boku owiewki: brzeg wzdłuż x u góry (a1) i boki wzdłuż kąta; od strony wnęki kół bez ścianki
       const aOf = (a: number) => (sg > 0 ? a : Math.PI * 2 - a);
       const sideEdge = (x: number) => refine([FAIR_A.a1, FAIR_A.a2], 0.04).map((a) => fairPt(x, aOf(a), -0.002));
-      /** Ścianka od brzegu w owiewce w górę i do środka (do z ≤ 2,9) – cała zostaje wewnątrz owiewki. */
+      /** Półszerokość owiewki w x na wysokości y (0 poza nią). */
+      const fairHalf = (x: number, y: number) => {
+        const { yc, h, w } = fairSec(x);
+        const c = Math.abs(y - yc) / h;
+        return c >= 1 ? 0 : w * Math.pow(1 - Math.pow(c, FAIR_N), 1 / FAIR_N);
+      };
+      /** Półszerokość kadłuba w x na wysokości y. */
+      const fusHalf = (x: number, y: number) => Math.abs(fusPt(x, fusTheta(x, y))[2]);
+      /**
+       * Ścianka od brzegu w owiewce w górę i do środka – do krawędzi wnęki kół (z = BAY_MAIN.z1). Każdy punkt zostaje
+       * wewnątrz owiewki albo kadłuba: inaczej ciemna ścianka wystawałaby nad owiewką przy nasadzie skrzydła.
+       */
       const wallIn = (edge: V3[], topY: number) =>
-        grid([0, 1], edge.map((_, i) => i), (v, i) => {
+        grid(refine([0, 1], 0.05), edge.map((_, i) => i), (v, i) => {
           const q = edge[i];
-          const zi = Math.sign(q[2]) * Math.min(Math.abs(q[2]), 2.9);
-          return [q[0], q[1] + (topY - q[1]) * v, q[2] + (zi - q[2]) * v];
+          const zi = Math.sign(q[2]) * Math.min(Math.abs(q[2]), B.z1);
+          const y = q[1] + (topY - q[1]) * v;
+          const z = q[2] + (zi - q[2]) * v;
+          if (v === 0) return [q[0], y, z];
+          const lim = Math.max(fairHalf(q[0], y) - 0.004, fusHalf(q[0], y) - 0.03);
+          return [q[0], y, Math.sign(z) * Math.min(Math.abs(z), lim)];
         });
       const zTop = fairPt(F.x0, FAIR_A.a1)[2];
       return [
@@ -1167,7 +1348,7 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
         wallIn(refine([F.x0, F.x1], 0.1).map((x) => fairPt(x, aOf(FAIR_A.a1), -0.002)), -0.75),
         wallIn(sideEdge(F.x0), -0.75),
         wallIn(sideEdge(F.x1), -0.75),
-        roofAt(F.x0, F.x1, zz(B.z1 - 0.05), zz(Math.min(zTop, 2.9)), -0.75),
+        roofAt(F.x0, F.x1, zz(B.z1 - 0.05), zz(Math.min(zTop, B.z1)), -0.75),
       ];
     });
     const wingSlots = [1, -1].flatMap((sg) => {
@@ -1209,7 +1390,7 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
         const p = fusPt(x, th * side, -0.006);
         const n = fusNormal(x, th * side);
         o.position.set(...p);
-        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+        o.quaternion.copy(uprightQuat(n));
         o.scale.set(0.17, 0.24, 1);
         o.updateMatrix();
         wins.push(o.matrix.clone());
@@ -1239,11 +1420,9 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
       return ribbon(path, (p) => new THREE.Vector3(0, 0.1 * Math.sign(p[1]), Math.sign(p[2])).normalize(), w, 0.01);
     };
     // luki bagażowe na prawej burcie: przedni i tylny (kontenery LD3) oraz mały luk bagażu luzem
-    for (const [cx, hw, hgt] of [
-      [-20.5, 1.4, 1.62],
-      [12.8, 1.4, 1.62],
-      [16.6 + PA, 0.5, 0.95],
-    ]) {
+    // obrys luków LD3 dokładnie wokół otworu drzwi (tuż poza krawędzią – zostaje na poszyciu, gdy drzwi są otwarte)
+    for (const xd of CARGO_DOOR.xs) doorLines.push(outline(xd, CARGO_DOOR.hw + 0.03, CARGO_DOOR.yb - 0.03, CARGO_DOOR.yt + 0.03, 0.04, -1, 0.03));
+    for (const [cx, hw, hgt] of [[16.6 + PA, 0.5, 0.95]]) {
       const bot = fusSec(cx).yc - fusSec(cx).h;
       const y0 = Math.max(-2.75, bot + 0.42);
       doorLines.push(outline(cx, hw, y0, Math.min(FLOOR - 0.2, y0 + hgt), 0.12, -1, 0.03));
@@ -1255,7 +1434,7 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
         const p = fusPt(dx, th * side, -0.006);
         const n = fusNormal(dx, th * side);
         o.position.set(...p);
-        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+        o.quaternion.copy(uprightQuat(n));
         o.scale.set(0.12, 0.17, 1);
         o.updateMatrix();
         doorWins.push(o.matrix.clone());
@@ -1325,12 +1504,20 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
     }
     // zawór wylotowy ciśnienia w kabinie: prostokątna klapka na spodzie tylnej części kadłuba (prawa strona)
     const outflow = [flat(15.2 + PA, -(Math.PI - 0.5), [0.55, 0.012, 0.4])];
-    return { shell, full, cut, apuCut, cockpit, ckWall, ckFrame, ckTub, ckBoxes, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: new THREE.CircleGeometry(1, 28), frame: new THREE.RingGeometry(1.0, 1.28, 28) };
+    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTub, ckBoxes, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
   }), []);
-  const shell = useShared(g.shell, open ? g.cut : apu ? g.apuCut : g.full);
+  // moduł kadłuba: poszycie całe – samolot przecina płaszczyzna symetrii (przycinanie w shaderze), nie wyrwa w burcie
+  const shell = useShared(g.shell, apu ? g.apuCut : radar ? g.radarCut : open && view === 'cargo' ? g.cargoCut : doorsOpen ? g.doorCut : g.full);
   const unit = cached('unit-box', () => new THREE.BoxGeometry(1, 1, 1));
+  // zakładka o ciśnieniu: kadłub pęcznieje pod różnicą ciśnień (naprawdę o ok. 2–3 mm – tu przesadzone)
+  const body = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (!body.current) return;
+    const k = view === 'press' ? 1 + 0.035 * FUS_LIVE.dp : 1;
+    body.current.scale.set(1, k, k);
+  });
   return (
-    <group>
+    <group ref={body}>
       <mesh geometry={shell}>
         <M k="paint" side={THREE.DoubleSide} />
       </mesh>
@@ -1355,9 +1542,12 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
         <M k="#8d96a0" side={THREE.DoubleSide} />
       </mesh>
       {/* wnęki podwozia: ciemne wnętrza widoczne tylko przez otwarte drzwi */}
-      <mesh geometry={g.bays} raycast={() => null}>
-        <M k="#15191e" side={THREE.DoubleSide} />
-      </mesh>
+      {/* w przekroju (moduł kadłuba) bez ścianek wnęk – zasłaniałyby schowane podwozie */}
+      {!open && (
+        <mesh geometry={g.bays} raycast={() => null}>
+          <M k="#15191e" side={THREE.DoubleSide} />
+        </mesh>
+      )}
       <mesh geometry={g.legBays} raycast={() => null}>
         <M k="cove" side={THREE.DoubleSide} />
       </mesh>
@@ -1367,34 +1557,20 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
       <mesh geometry={g.joints}>
         <M k="#c8cdd3" side={THREE.DoubleSide} />
       </mesh>
-      <Inst geo={g.win} mats={g.wins} k="glass" />
-      <Inst geo={g.frame} mats={g.wins} k="#aab2bb" />
-      <Inst geo={g.win} mats={g.doorWins} k="glass" />
+      {/* okna z zewnątrz: przyciemniana szyba z odbiciami, głębiej ciemniejsza (wnęka i wewnętrzna szyba), gumowa
+          uszczelka i delikatny rant poszycia wokół */}
+      <Inst geo={g.lip} mats={g.wins} k="#c3cad2" />
+      <Inst geo={g.frame} mats={g.wins} k="#30363e" />
+      <Inst geo={g.win} mats={g.wins} k="winGlass" />
+      <Inst geo={g.winDepth} mats={g.wins} k="winDeep" />
+      {/* okienka drzwi: w module drzwi są na samych drzwiach (otwierają się razem z nimi) */}
+      {!doorsOpen && <Inst geo={g.win} mats={g.doorWins} k="glass" />}
       <Inst geo={unit} mats={g.ant} k="#c3c9d0" />
       {/* drobne elementy poszycia: porty statyczne, maszty odpływowe, wloty klimatyzacji, zawór wylotowy */}
       <Inst geo={cached('disc', () => new THREE.CylinderGeometry(0.5, 0.5, 1, 28))} mats={g.statics} k="#3b4048" />
       <Inst geo={unit} mats={g.masts} k="#9aa3ad" />
       <Inst geo={unit} mats={g.ramAir} k="#262b31" />
       <Inst geo={unit} mats={g.outflow} k="#5b636c" />
-      {open && (
-        <>
-          <Lbl pos={fusPt(CK_TIP + 5.7, fusTheta(CK_TIP + 5.7, -0.4), -0.6)} sub>
-            porty ciśnienia statycznego
-          </Lbl>
-          <Lbl pos={[-30.4 - PF, -1.6, 3.0]} sub>
-            rurki Pitota i czujniki kąta natarcia
-          </Lbl>
-          <Lbl pos={[-6.6, -4.7, 1.6]} sub>
-            wloty powietrza klimatyzacji
-          </Lbl>
-          <Lbl pos={[-19.5 - PF, -3.6, 0.6]} sub>
-            maszt odpływowy
-          </Lbl>
-          <Lbl pos={[15.2 + PA, -2.6, -2.2]} sub>
-            zawór wylotowy kabiny
-          </Lbl>
-        </>
-      )}
       {g.probes.map((pr, i) => (
         <group key={i}>
           <Strut a={pr.a} b={pr.b} r={0.022} />
@@ -1402,16 +1578,27 @@ function Fuselage({ open, apu = false }: { open: boolean; apu?: boolean }) {
         </group>
       ))}
       {/* światła antykolizyjne (czerwone, migające) na grzbiecie i pod owiewką oraz białe strobo w stożku ogonowym */}
-      <Lamp p={fusPt(-1.5, 0)} n={[0, 1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" />
-      <Lamp p={[-3.0, -4.4, 0]} n={[0, -1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" />
-      <Lamp p={[33.1 + PA, 1.62, 0]} n={[1, 0.05, 0]} color="#ffffff" r={0.09} halo={4.4} blink="strobe1" sector={SECTOR.tailStrobe} />
-      {open && <Interior />}
+      <Lamp p={fusPt(-1.5, 0)} n={[0, 1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" lt="beacon" />
+      <Lamp p={[-3.0, -4.4, 0]} n={[0, -1, 0]} color="#ff2a1a" r={0.16} halo={2.4} blink="beacon" lt="beacon" />
+      <Lamp p={[33.1 + PA, 1.62, 0]} n={[1, 0.05, 0]} color="#ffffff" r={0.09} halo={4.4} blink="strobe1" sector={SECTOR.tailStrobe} lt="strobe" />
+      {ext?.night && (
+        <>
+          <FlashLight p={[fusPt(-1.5, 0)[0], fusPt(-1.5, 0)[1] + 0.6, 0]} lt="beacon" blink="beacon" color="#ff3020" power={28} dist={28} />
+          <FlashLight p={[-3.0, -5.0, 0]} lt="beacon" blink="beacon" color="#ff3020" power={28} dist={22} />
+          <FlashLight p={[33.6 + PA, 1.62, 0]} lt="strobe" blink="strobe1" color="#eef4ff" power={140} dist={40} />
+        </>
+      )}
+      {open && <Interior view={view} labels={labels} pick={pick} />}
+      {/* moduł drzwi: przez otwarte drzwi widać kabinę */}
+      {doorsOpen && !open && <Interior view="home" labels={false} doorHoles />}
+      {open && view === 'cargo' && <CargoOps />}
+      {open && view === 'decomp' && <DecompFx />}
     </group>
   );
 }
 
 /** Wiele jednakowych brył w jednym wywołaniu rysowania. */
-function Inst({ geo, mats, k, side }: { geo: THREE.BufferGeometry; mats: THREE.Matrix4[]; k: string; side?: THREE.Side }) {
+function Inst({ geo, mats, k, side, emit }: { geo: THREE.BufferGeometry; mats: THREE.Matrix4[]; k: string; side?: THREE.Side; emit?: string }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useEffect(() => {
     const m = ref.current;
@@ -1422,9 +1609,37 @@ function Inst({ geo, mats, k, side }: { geo: THREE.BufferGeometry; mats: THREE.M
   }, [mats]);
   return (
     <instancedMesh ref={ref} args={[geo, undefined, mats.length]}>
-      <M k={k} side={side} />
+      <M k={k} side={side} emit={emit} />
     </instancedMesh>
   );
+}
+
+/**
+ * Bryły z własnymi materiałami (opony, tarcze hamulców) nie są przycinane w shaderze. Przy przekroju kadłuba chowamy
+ * każdą taką bryłę, której środek leży w zdjętej połowie samolotu (poza zakresem przycinania).
+ */
+function ClipCull({ children }: { children: ReactNode }) {
+  const clip = useContext(ClipCtx);
+  const ref = useRef<THREE.Group>(null);
+  const v = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    if (!clip || !ref.current) return;
+    const lo = clip.uClip.value.x;
+    const hi = clip.uClip.value.y;
+    ref.current.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry) return;
+      // bryły z materiałem przycinanym shaderem (np. drzwi wnęki) przycina sam materiał – nie chowamy ich w całości
+      if (m.userData.noCull) return;
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      v.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld).applyMatrix4(clip.uInv.value);
+      // tylko chowamy – widoczność pozostałych brył zostaje taka, jak ustawia ją samo podwozie
+      // krawędź cięcia jest poszarpana w pasie lo…lo+amp – wszystko ze środkiem przed nim (prawa połowa) znika
+      const amp = clip.uClip.value.z;
+      if ((lo > -50 && v.z < lo + amp) || (hi < 50 && v.z > hi - amp)) m.visible = false;
+    });
+  });
+  return <group ref={ref}>{children}</group>;
 }
 
 const box = (p: V3, s: V3, rot: V3 = [0, 0, 0]) => {
@@ -1437,128 +1652,1027 @@ const box = (p: V3, s: V3, rot: V3 = [0, 0, 0]) => {
 };
 
 /** Wnętrze kadłuba (tylko w trybie „kadłub”): kokpit, kabina, luki, centropłat, wnęka podwozia, gródź. */
-function Interior() {
-  const d = useMemo(() => cached('interior', () => {
+/**
+ * Widok modułu kadłuba: strona główna (pełny przekrój z wyposażeniem), konstrukcja (sam szkielet), ciśnienie w kabinie
+ * (kadłub „oddycha”) i ładownie (załadunek kontenerów).
+ */
+export type FusView = 'home' | 'struct' | 'press' | 'decomp' | 'water' | 'fire' | 'cargo';
+/**
+ * Stan sceny modułu kadłuba zmieniany co klatkę przez zakładki (bez przerysowania React): różnica ciśnień 0…1
+ * (kadłub pęcznieje – pokazowo przesadzone) i postęp załadunku ładowni (liczba kontenerów na miejscu, ułamkowa).
+ */
+/** cargoT – czas scenariusza załadunku (s; −1 – przed „Rozpocznij”: kontenery na wózkach, drzwi zamknięte). */
+/** fog – gęstość mgły w kabinie 0…1, masks – postęp wypadania masek tlenowych 0…1, maskAge – czas od wypadnięcia (s). */
+export const FUS_LIVE = { dp: 0, cargo: 99, outflow: 1, cargoT: 1e9, fog: 0, masks: 0, maskAge: 0 };
+
+/** Ładownie pod podłogą: podłoga i zakres w x. */
+const CARGO_Y = -2.45;
+const HOLDS: [number, number][] = [
+  // od przodu: zbiorniki wody pitnej; z tyłu, przed kesonem centropłata – mieszalnik klimatyzacji i recyrkulacja
+  [-24.6, -10.2],
+  // tylny luk kończy się tam, gdzie spód kadłuba zaczyna się podnosić ku ogonowi (dalej kontenery wystawałyby z poszycia)
+  [4.6, 12.2],
+];
+/** Drzwi ładowni (prawa burta): przednie i tylne – stąd kontenery wjeżdżają do luku. */
+const CARGO_DOORS = CARGO_DOOR.xs;
+export const CARGO_DOOR_X = CARGO_DOOR.xs;
+/** Miejsca kontenerów LD3 w kolejności załadunku (przednia ładownia od przodu, potem tylna). */
+export const CARGO_SLOTS: { x: number; z: number; hold: number; j: number }[] = HOLDS.flatMap(([a, b], hold) => {
+  const out: { x: number; z: number; hold: number; j: number }[] = [];
+  for (let x = a + 0.85; x <= b - 0.8; x += 1.66) for (const z of [0.82, -0.82]) out.push({ x, z, hold, j: 0 });
+  // kolejność wjazdu (j): od miejsc najdalej od drzwi, w każdym rzędzie najpierw pas dalszy od drzwi (lewa burta)
+  const door = CARGO_DOOR.xs[hold];
+  [...out].sort((p, q) => Math.abs(q.x - door) - Math.abs(p.x - door) || q.z - p.z).forEach((sl, j) => (sl.j = j));
+  return out;
+});
+
+/** Grupy części kadłuba (kolory podpisów na stronie głównej modułu). */
+export const FUS_GROUPS: { id: string; name: string; color: string }[] = [
+  { id: 'nose', name: 'kokpit i elektronika', color: '#7dd3fc' },
+  { id: 'cabin', name: 'kabina', color: '#fde68a' },
+  { id: 'cargo', name: 'ładownie i zbiorniki', color: '#fdba74' },
+  { id: 'struct', name: 'konstrukcja', color: '#bef264' },
+  { id: 'sys', name: 'instalacje', color: '#c4b5fd' },
+  { id: 'skin', name: 'na poszyciu', color: '#e2e8f0' },
+];
+const fusGroupColor = (g: string) => FUS_GROUPS.find((x) => x.id === g)?.color ?? '#e2e8f0';
+/**
+ * Części kadłuba z opisami – klikane podpisy na stronie głównej modułu. Podpisy stoją przy lewej połowie samolotu,
+ * blisko płaszczyzny przekroju (z ≈ 0,3), więc nie zasłania ich poszycie.
+ */
+export const FUS_PART_INFO: Record<string, { name: string; group: string; pos: V3; sub?: boolean; desc: string }> = {
+  radar: { name: 'radar pogodowy', group: 'nose', pos: [RADOME_X - 0.5, -0.35, 0.3], desc: 'Pod opływową osłoną z materiału przepuszczającego fale radiowe obraca się płyta anteny. Przeszukuje przestrzeń przed samolotem i pokazuje opady na ekranie nawigacyjnym w kokpicie. Pod nią, na ścianie kadłuba, są dwa nadajniki-odbiorniki. Więcej – w module radaru.' },
+  fwdBulk: { name: 'gródź przednia', group: 'struct', pos: [RADOME_X + 0.1, 0.4, 0.3], sub: true, desc: 'Płaska, usztywniona ściana, od której z przodu zaczyna się szczelna część kadłuba (ta, w której utrzymuje się ciśnienie). Przed nią, pod osłoną radaru, jest zwykłe ciśnienie zewnętrzne, więc w przelocie na każdy metr kwadratowy grodzi naciska kilka ton. Sięga do podłogi kokpitu – niżej, za nią, jest nieszczelna wnęka podwozia przedniego.' },
+  avionics: { name: 'przedział awioniki', group: 'nose', pos: [-28.75, -2.8, 0.3], desc: 'Pod podłogą, tuż za wnęką podwozia przedniego, stoją regały z komputerami samolotu: do sterowania, nawigacji, łączności i prowadzenia lotu. Każdy komputer to skrzynka, którą wsuwa się na półkę i wymienia w kilka minut. Chłodzi je powietrze tłoczone kanałami wzdłuż regałów. Mechanicy wchodzą tu po drabince przez właz w spodzie kadłuba.' },
+  restF: { name: 'odpoczynek pilotów', group: 'cabin', pos: [-28.8, 2.75, 0.3], sub: true, desc: 'Na długich lotach na pokładzie jest dodatkowa załoga, a piloci odpoczywają na zmianę. Mają mały przedział z dwiema kojami nad kabiną, tuż za kokpitem. Wchodzi się do niego po stromych schodach od strony pierwszych drzwi. W środku są koje z pościelą, zasłony i lampki do czytania.' },
+  business: { name: 'klasa biznes', group: 'cabin', pos: [-23.0, 0.9, 0.3], desc: 'Fotele w układzie 1-2-1 (cztery w rzędzie), ustawione skośnie jak jodełka – z każdego można wyjść prosto do przejścia, bez przechodzenia nad sąsiadem. Fotel rozkłada się w płaskie łóżko. Od sąsiada oddziela go wysoka osłona ze schowkiem, obok jest lampka i panel do ustawiania fotela, a przed nim – duży ekran. Rzędy są co ok. 2 m.' },
+  economy: { name: 'klasa ekonomiczna 3-3-3', group: 'cabin', pos: [0.5, 0.75, 0.3], desc: 'Dziewięć foteli w rzędzie (3-3-3), rzędy co ok. 81 cm. Szeroki kadłub A350 mieści też ciaśniejszy układ – dziesięć foteli w rzędzie (3-4-3). Nad fotelami są schowki na bagaż podręczny: po bokach i pośrodku.' },
+  galley: { name: 'kuchnie i toalety', group: 'cabin', pos: [DOORS[2] - 1.0, FLOOR + 2.3, 0.3], sub: true, desc: 'Przy drzwiach są kuchnie – z wózkami, piekarnikami i chłodziarkami – oraz toalety. Toalety są podciśnieniowe: różnica ciśnień między kabiną a powietrzem na zewnątrz zasysa ścieki rurą do zbiorników z tyłu kadłuba.' },
+  restA: { name: 'odpoczynek personelu pokładowego', group: 'cabin', pos: [12.8 + PA, 2.65, 0.3], sub: true, desc: 'Nad tylną częścią kabiny są koje dla personelu pokładowego. Na lotach trwających kilkanaście godzin stewardesy i stewardzi pracują na zmiany.' },
+  duct: { name: 'kanał klimatyzacji i wiązki kabli', group: 'sys', pos: [-6, 2.85, 0.3], sub: true, desc: 'Nad sufitem biegnie główny kanał klimatyzacji – okrągła rura owinięta izolacją, podwieszona do szkieletu kadłuba. Co kilka metrów odchodzą od niej odgałęzienia do nawiewów nad schowkami, a zużyte powietrze uchodzi z kabiny kratkami przy podłodze. Po bokach, w korytkach, biegną wiązki kabli: zasilania i przesyłu danych (niebieska to światłowód). Kable z lewej i prawej strony prowadzi się osobno, żeby jedno uszkodzenie nie przecięło obu zapasowych kopii instalacji.' },
+  floor: { name: 'podłoga i belki podłogi', group: 'struct', pos: [-12.5, FLOOR - 0.35, 0.3], sub: true, desc: 'Płyty podłogi leżą na poprzecznych belkach, podpartych od spodu słupkami. W podłodze są szyny do mocowania foteli – linia lotnicza może więc zmienić układ kabiny.' },
+  fwdHold: { name: 'ładownia przednia', group: 'cargo', pos: [-17.0, -2.1, 0.3], desc: 'Kontenery z bagażem wjeżdżają przez drzwi w prawym boku i jadą po rolkach w podłodze. Ładownia jest szczelna i ogrzewana, więc można w niej przewozić np. zwierzęta. Ma czujniki dymu i instalację gaśniczą.' },
+  water: { name: 'woda pitna', group: 'cargo', pos: [-25.3, -1.55, 0.3], sub: true, desc: 'Zbiorniki wody do kuchni i umywalek. Przed lotem napełnia się je z cysterny przez zawór w spodzie kadłuba, a do kranów wodę wypycha sprężone powietrze.' },
+  centre: { name: 'centropłat (zbiornik centralny)', group: 'struct', pos: [-4.6, -0.55, 0.3], desc: 'Środkowa część skrzydła – mocna skrzynia, która przechodzi przez kadłub pod podłogą kabiny i łączy oba skrzydła. Przenosi na kadłub siłę, z jaką skrzydła niosą samolot, a w środku mieści centralny zbiornik paliwa. Więcej – w module skrzydła i w zakładce o tankowaniu w module silnika.' },
+  bay: { name: 'wnęka podwozia i belka kilowa', group: 'struct', pos: [2.4, -3.6, 0.3], desc: 'Za środkową częścią skrzydła chowają się koła podwozia głównego. Wnęka to wielki otwór w spodzie kadłuba, więc obciążenia przejmuje mocna belka biegnąca pod nią (belka kilowa), a nad kołami jest szczelna płyta. Więcej – w module podwozia.' },
+  aftHold: { name: 'ładownia tylna', group: 'cargo', pos: [7.0, -2.1, 0.3], desc: 'Druga ładownia na kontenery, za wnęką podwozia, z własnymi drzwiami w prawym boku. Od tego, jak rozłoży się ładunek między ładowniami, zależy położenie środka ciężkości samolotu.' },
+  bulkHold: { name: 'bagaż luzem · zbiorniki ścieków', group: 'cargo', pos: [11.6 + PA, -1.15, 0.3], sub: true, desc: 'Za tylną ładownią jest miejsce na bagaż bez kontenerów: spóźnione walizki, wózki dziecięce, sprzęt sportowy. Obok stoją zbiorniki ścieków z toalet, opróżniane na ziemi przez zawór w spodzie kadłuba.' },
+  rearBulk: { name: 'gródź ciśnieniowa', group: 'struct', pos: [20.8 + PA, 0.55, 0.3], desc: 'Kopuła, która z tyłu zamyka szczelną część kadłuba. Jest wypukła jak dno puszki z napojem – taki kształt najlepiej znosi ciśnienie. Za nią, w zwężającym się ogonie, nie ma już ciśnienia kabiny.' },
+  jack: { name: 'śruba trymera statecznika', group: 'sys', pos: [26.2 + PA, 2.05, 0.3], sub: true, desc: 'Cały statecznik poziomy (mniejsze „skrzydło” na ogonie) może się powoli obracać – przestawia go długa śruba z napędem hydraulicznym. Tak samolot jest wyważany przy różnych prędkościach i różnym rozłożeniu ładunku, żeby stery wysokości nie musiały być przez cały czas wychylone.' },
+  apu: { name: 'APU', group: 'sys', pos: [33.6 + 0.0, 1.35, 0.3], desc: 'Mały silnik turbinowy w samym końcu kadłuba, za ścianą ogniową (APU – pomocniczy zespół napędowy). Na ziemi daje prąd i sprężone powietrze do klimatyzacji i uruchamiania silników, w locie może być zapasowym źródłem prądu. Powietrze wpada przez klapkę w boku kadłuba, a spaliny wylatują na samym końcu ogona. Więcej – w module APU.' },
+  fireWall: { name: 'gródź ogniowa APU', group: 'struct', pos: [APU_HATCH.x0 - 0.5, 1.15, 0.3], sub: true, desc: 'Tytanowa ściana oddziela przedział APU od reszty ogona, żeby ewentualny pożar nie przeszedł dalej. W przedziale są czujniki ognia i dysze, przez które butla wypuszcza środek gaśniczy. Więcej – w module APU.' },
+  statics: { name: 'porty ciśnienia statycznego', group: 'skin', pos: fusPt(CK_TIP + 5.7, fusTheta(CK_TIP + 5.7, -0.4), -0.6), sub: true, desc: 'Małe otworki w poszyciu, równo z powierzchnią. Mierzą ciśnienie powietrza wokół samolotu – na tej podstawie komputery liczą wysokość lotu i to, jak szybko samolot się wznosi albo zniża.' },
+  pitot: { name: 'rurki Pitota i czujniki kąta natarcia', group: 'skin', pos: [-30.4 - PF, -1.6, 3.0], sub: true, desc: 'Rurki Pitota to rurki skierowane do przodu, w które wpada pęd powietrza – z jego nacisku komputery liczą prędkość samolotu. Obracające się łopatki obok mierzą, pod jakim kątem powietrze napływa na samolot (kąt natarcia). Wszystkie są podgrzewane, żeby nie oblodziły się w chmurach.' },
+  mast: { name: 'maszt odpływowy', group: 'skin', pos: [-19.5 - PF, -3.6, 0.6], sub: true, desc: 'Wystający, podgrzewany maszt pod kadłubem. Wyrzuca na zewnątrz wodę z umywalek i kuchni (nie ścieki z toalet) – daleko od poszycia, żeby nie zamarzała na kadłubie.' },
+  ram: { name: 'wloty powietrza klimatyzacji', group: 'skin', pos: [-6.6, -4.7, 1.6], sub: true, desc: 'Wloty w osłonie pod kadłubem. Doprowadzają zimne powietrze z zewnątrz do chłodnic klimatyzacji. W locie ich klapki się przymykają, żeby zmniejszyć opór.' },
+  outflow: { name: 'zawór wylotowy kabiny', group: 'skin', pos: [15.2 + PA, -2.9, 0.3], sub: true, desc: 'Klapka w prawym boku kadłuba za skrzydłem (w przekroju zdjęta razem z prawą połową samolotu). Wypuszcza powietrze z kabiny – to, jak bardzo jest otwarta, decyduje o ciśnieniu w środku. Zobacz zakładkę „Ciśnienie i klimatyzacja”.' },
+};
+
+/** Klikane podpisy części kadłuba (strona główna modułu). */
+function FuselageLabels({ pick }: { pick?: WingPick }) {
+  return (
+    <>
+      {Object.entries(FUS_PART_INFO).map(([id, p]) => {
+        const on = pick?.selected === id;
+        return (
+          <Lbl key={id} pos={p.pos} sub={p.sub} color={on ? '#ffffff' : fusGroupColor(p.group)} active={on} onClick={pick ? () => pick.onSelect(on ? null : id) : undefined}>
+            {p.name}
+          </Lbl>
+        );
+      })}
+    </>
+  );
+}
+
+/** Grupa jednakowych brył wyposażenia: kształt, kolor, ewentualna poświata (lampki, ekrany). */
+type DetailGroup = { g: 'box' | 'capsule' | 'cylX' | 'cylV' | 'cone' | 'ringH' | 'sphere'; k: string; e?: string; m: THREE.Matrix4[] };
+/**
+ * Szczegóły wnętrza kadłuba (przekrój w module kadłuba): kuchnie z wózkami, piekarnikami i schowkami, toalety
+ * w przekroju (muszla, umywalka, lustro), zbiorniki wody pitnej i ścieków z rurami, wyposażenie foteli, oświetlenie
+ * kabiny, regały awioniki z modułami i drobiazgi kokpitu.
+ */
+function interiorDetail(half: (y: number, x?: number) => number, cutaway = true): DetailGroup[] {
+  const groups = new Map<string, DetailGroup>();
+  const add = (g: DetailGroup['g'], k: string, m: THREE.Matrix4, e?: string) => {
+    const key = `${g}|${k}|${e ?? ''}`;
+    if (!groups.has(key)) groups.set(key, { g, k, e, m: [] });
+    groups.get(key)!.m.push(m);
+  };
+  const B = (k: string, p: V3, s: V3, rot?: V3, e?: string) => add('box', k, box(p, s, rot), e);
+  /** Półszerokość wnętrza kadłuba na wysokości y w x (0, gdy y jest poza przekrojem) – ogon szybko się zwęża. */
+  const hw = (y: number, x: number) => Math.max(0, half(y, x) + 0.2);
+
+  // ---------- kuchnie: za każdymi drzwiami, przodem do drzwi ----------
+  const Bmain = B;
+  DOORS.forEach((dx) => {
+    const f = dx + 0.75; // front kuchni
+    // szerokość kuchni dopasowana do przekroju przy jej tylnej ścianie (współrzędne z mnożone przez gw)
+    const gw = Math.min(1, (Math.min(hw(FLOOR + 0.02, dx + 1.65), hw(FLOOR + 2.0, dx + 1.65)) - 0.3) / 1.2);
+    const B0 = Bmain;
+    const B = (k: string, p: V3, sz: V3, rot?: V3, e?: string) => B0(k, [p[0], p[1], p[2] * gw], [sz[0], sz[1], sz[2] * gw], rot, e);
+    B('#e7e2d6', [dx + 1.2, FLOOR + 1.0, 0], [0.9, 2.0, 2.4]);
+    B('#2b3036', [f - 0.005, FLOOR + 0.53, 0], [0.01, 1.04, 2.3]); // wnęka na wózki
+    for (const z of [-0.88, -0.44, 0, 0.44, 0.88]) {
+      B('#c3c8ce', [f - 0.02, FLOOR + 0.52, z], [0.04, 0.98, 0.42]); // wózek
+      B('#4b5563', [f - 0.05, FLOOR + 0.95, z], [0.02, 0.035, 0.32]); // uchwyt
+      B('#dc2626', [f - 0.045, FLOOR + 0.1, z + 0.13], [0.02, 0.05, 0.07]); // hamulec wózka
+    }
+    B('#9aa1a9', [f + 0.05, FLOOR + 1.07, 0], [0.3, 0.05, 2.36]); // blat
+    for (const z of [-0.6, 0.6]) {
+      B('#d1d5db', [f - 0.015, FLOOR + 1.42, z], [0.03, 0.42, 0.52]); // piekarnik
+      B('#111827', [f - 0.03, FLOOR + 1.44, z], [0.01, 0.22, 0.36]); // szyba piekarnika
+    }
+    B('#9ca3af', [f - 0.02, FLOOR + 1.3, 0], [0.05, 0.38, 0.32]); // ekspres do kawy
+    B('#1f2937', [f - 0.05, FLOOR + 1.16, 0], [0.05, 0.1, 0.12]); // dzbanek
+    for (const z of [-0.9, -0.45, 0, 0.45, 0.9]) B('#d6d1c4', [f - 0.01, FLOOR + 1.85, z], [0.02, 0.3, 0.43]); // schowki górne
+    B('#fff7e0', [f - 0.02, FLOOR + 1.66, 0], [0.02, 0.025, 2.3], undefined, '#fff2cc'); // oświetlenie blatu
+    // fotel personelu przy drzwiach (jumpseat): składany, na panelu ściennym obok kuchni, z szelkami;
+    // obok słuchawka interkomu i latarka w uchwycie (lampka ładowania)
+    const jz = Math.min(1.62, hw(FLOOR + 0.05, dx + 0.8) - 0.35) / gw;
+    B('#e7e2d6', [dx + 0.79, FLOOR + 1.0, jz], [0.08, 2.0, 0.62]); // panel ścienny
+    B('#334155', [dx + 0.72, FLOOR + 0.93, jz], [0.07, 0.55, 0.44]); // oparcie
+    B('#334155', [dx + 0.72, FLOOR + 1.33, jz], [0.07, 0.2, 0.3]); // zagłówek
+    B('#334155', [dx + 0.55, FLOOR + 0.56, jz], [0.34, 0.07, 0.44]); // siedzisko (rozłożone)
+    for (const dz of [0.23, -0.23]) B('#9ca3af', [dx + 0.6, FLOOR + 0.52, jz + dz], [0.3, 0.04, 0.02]); // wsporniki siedziska
+    for (const dz of [0.1, -0.1]) B('#64748b', [dx + 0.68, FLOOR + 0.95, jz + dz], [0.02, 0.52, 0.05]); // szelki
+    B('#64748b', [dx + 0.53, FLOOR + 0.61, jz], [0.02, 0.05, 0.44]); // pas biodrowy
+    B('#d1d5db', [dx + 0.52, FLOOR + 0.64, jz], [0.03, 0.08, 0.08]); // klamra
+    B('#1f2937', [dx + 0.745, FLOOR + 1.6, jz + 0.22], [0.04, 0.18, 0.07]); // słuchawka interkomu
+    B('#f59e0b', [dx + 0.745, FLOOR + 0.25, jz + 0.22], [0.05, 0.2, 0.07]); // latarka
+    B('#22c55e', [dx + 0.72, FLOOR + 0.37, jz + 0.22], [0.01, 0.02, 0.02], undefined, '#22c55e');
+  });
+
+  // ---------- toalety: przed drzwiami 2, 3 i 4, po obu burtach ----------
+  // moduł toalety: muszla przy tylnej ścianie (siada się przodem do kierunku lotu), umywalka z szafką przy przedniej;
+  // od strony przejścia (lewa burta – w przekroju widać do środka) drzwi składane, otwarte
+  const C = (g: DetailGroup['g'], k: string, p: V3, sz: V3, e?: string) => add(g, k, box(p, sz), e);
+  DOORS.slice(1).forEach((dx) => {
+    const lx = dx - 1.25;
+    for (const s of [1, -1]) {
+      const zc = Math.min(1.7, Math.min(hw(FLOOR + 0.02, lx + 0.5), hw(FLOOR + 2.1, lx + 0.5)) - 0.65) * s;
+      const zo = zc + 0.46 * s; // ściana od strony burty
+      const zi = zc - 0.475 * s; // strona przejścia
+      // ściany, sufit, podłoga
+      B('#e8e3d8', [lx - 0.5, FLOOR + 1.05, zc], [0.04, 2.1, 0.95]);
+      B('#e8e3d8', [lx + 0.5, FLOOR + 1.05, zc], [0.04, 2.1, 0.95]);
+      B('#e8e3d8', [lx, FLOOR + 1.05, zo + 0.02 * s], [1.0, 2.1, 0.04]);
+      B('#e8e3d8', [lx, FLOOR + 2.1, zc], [1.0, 0.04, 0.95]);
+      B('#64748b', [lx, FLOOR + 0.01, zc], [0.98, 0.02, 0.93]);
+      // w przekroju lewa toaleta jest otwarta (widać do środka); w pełnej kabinie obie mają ściany od przejścia
+      if (s < 0 || !cutaway) B('#e8e3d8', [lx, FLOOR + 1.05, zi], [1.0, 2.1, 0.04]);
+      if (s > 0 && cutaway) {
+        // otwarte drzwi składane przy przedniej ścianie i nadproże z lampką „wolne”
+        B('#e7e2d6', [lx - 0.43, FLOOR + 0.98, zi + 0.2 * s], [0.04, 1.9, 0.4], [0, 0.35 * s, 0]);
+        B('#d6d1c4', [lx - 0.3, FLOOR + 0.98, zi + 0.36 * s], [0.04, 1.9, 0.02]);
+        B('#e8e3d8', [lx, FLOOR + 2.0, zi], [1.0, 0.2, 0.04]);
+        B('#22c55e', [lx - 0.25, FLOOR + 2.0, zi - 0.025 * s], [0.12, 0.06, 0.01], undefined, '#22c55e');
+      }
+      // muszla: obudowa, misa, deska, podniesiona klapa, przycisk spłukiwania próżniowego
+      B('#e5e7eb', [lx + 0.27, FLOOR + 0.2, zc], [0.44, 0.4, 0.42]);
+      C('cone', '#f8fafc', [lx + 0.22, FLOOR + 0.43, zc], [0.4, 0.07, 0.34]);
+      C('cylV', '#334155', [lx + 0.22, FLOOR + 0.462, zc], [0.24, 0.005, 0.19]);
+      C('ringH', '#f1f5f9', [lx + 0.22, FLOOR + 0.475, zc], [0.38, 0.38, 0.32]);
+      B('#f1f5f9', [lx + 0.455, FLOOR + 0.72, zc], [0.03, 0.48, 0.36]);
+      B('#2563eb', [lx + 0.475, FLOOR + 1.12, zc - 0.25 * s], [0.01, 0.06, 0.1]);
+      B('#cbd5e1', [lx + 0.25, FLOOR + 0.68, zo - 0.03 * s], [0.14, 0.12, 0.04]); // papier
+      B('#9ca3af', [lx + 0.1, FLOOR + 1.0, zo - 0.03 * s], [0.42, 0.03, 0.03]); // uchwyt
+      // umywalka: szafka z drzwiczkami, blat z wpuszczoną misą, kran, lustro w ramie z lampą
+      B('#ded8cc', [lx - 0.33, FLOOR + 0.42, zc], [0.32, 0.84, 0.72]);
+      for (const dz of [0.18, -0.18]) {
+        B('#ece7dc', [lx - 0.165, FLOOR + 0.42, zc + dz], [0.01, 0.74, 0.33]);
+        B('#9ca3af', [lx - 0.155, FLOOR + 0.66, zc + dz * 0.15], [0.01, 0.12, 0.015]);
+      }
+      B('#f1f5f9', [lx - 0.33, FLOOR + 0.86, zc], [0.34, 0.04, 0.74]);
+      C('cylV', '#94a3b8', [lx - 0.32, FLOOR + 0.875, zc], [0.24, 0.02, 0.36]);
+      C('cylV', '#d1d5db', [lx - 0.46, FLOOR + 0.95, zc], [0.035, 0.14, 0.035]);
+      B('#d1d5db', [lx - 0.41, FLOOR + 1.0, zc], [0.1, 0.02, 0.022]);
+      B('#9ca3af', [lx - 0.482, FLOOR + 1.45, zc], [0.01, 0.68, 0.7]);
+      B('#bfdbfe', [lx - 0.476, FLOOR + 1.45, zc], [0.01, 0.6, 0.62]);
+      B('#fff7e0', [lx - 0.47, FLOOR + 1.82, zc], [0.02, 0.03, 0.6], undefined, '#fff2cc');
+      B('#d1d5db', [lx - 0.25, FLOOR + 1.25, zo - 0.04 * s], [0.24, 0.3, 0.06]); // ręczniki papierowe
+      B('#9ca3af', [lx - 0.25, FLOOR + 0.55, zo - 0.03 * s], [0.2, 0.14, 0.02]); // klapka kosza
+      // sufit: lampa, czujka dymu, maski tlenowe
+      B('#fff7e0', [lx, FLOOR + 2.07, zc], [0.4, 0.01, 0.2], undefined, '#fff2cc');
+      C('cylV', '#f8fafc', [lx + 0.25, FLOOR + 2.06, zc + 0.2 * s], [0.1, 0.03, 0.1]);
+      B('#d6d1c4', [lx - 0.2, FLOOR + 2.07, zc - 0.2 * s], [0.22, 0.01, 0.14]);
+    }
+  });
+
+  // ---------- woda pitna: dwa zbiorniki pod podłogą, za przednią ładownią; rura do kuchni i toalet ----------
+  const WX = -25.3;
+  for (const z of [0.55, -0.55]) {
+    add('capsule', '#dbeafe', box([WX, -2.12, z], [0.62, 0.72, 0.72]));
+    for (const dx of [-0.38, 0.38]) {
+      B('#64748b', [WX + dx, -2.5, z], [0.08, 0.14, 0.62]); // siodło
+      B('#475569', [WX + dx, -2.12, z], [0.03, 0.75, 0.75]); // opaska
+    }
+  }
+  B('#38bdf8', [WX, (FLOOR - 0.5 - 1.76) / 2, 0.55], [0.05, -1.76 - (FLOOR - 0.5), 0.05]); // pion od zbiornika
+  const WEND = 19.5; // dalej spód kadłuba podchodzi pod samą podłogę
+  B('#38bdf8', [(DOORS[0] + 0.6 + WEND) / 2, FLOOR - 0.5, 0.95], [WEND - DOORS[0] - 0.6, 0.05, 0.05]); // magistrala pod podłogą
+  B('#38bdf8', [WX, FLOOR - 0.5, (0.55 + 0.95) / 2], [0.05, 0.05, 0.45]);
+  DOORS.forEach((dx, i) => {
+    if (dx + 1.2 < WEND) B('#38bdf8', [dx + 1.2, FLOOR - 0.25, 0.95], [0.05, 0.5, 0.05]); // do kuchni
+    if (i > 0 && dx - 1.0 < WEND) B('#38bdf8', [dx - 1.0, FLOOR - 0.25, 0.95], [0.05, 0.5, 0.05]); // do umywalek
+  });
+  // ---------- ścieki: toalety próżniowe – rura podciśnieniowa do zbiorników za tylną ładownią ----------
+  const SX = 15.5;
+  for (const z of [0.45, -0.45]) {
+    add('capsule', '#a8a29e', box([SX, -1.78, z], [0.66, 0.8, 0.8]));
+    for (const dx of [-0.42, 0.42]) B('#57534e', [SX + dx, -2.2, z], [0.08, 0.12, 0.7]);
+  }
+  B('#b45309', [(DOORS[1] - 1.25 + SX) / 2, FLOOR - 0.6, 1.3], [SX - DOORS[1] + 1.25, 0.07, 0.07]);
+  B('#b45309', [SX, (FLOOR - 0.6 - 1.4) / 2, 1.3], [0.07, -1.4 - (FLOOR - 0.6) + 0.1, 0.07]);
+  DOORS.slice(1).forEach((dx) => dx - 1.03 < SX && B('#b45309', [dx - 1.03, FLOOR - 0.3, 1.3], [0.07, 0.6, 0.07]));
+
+  // ---------- kabina: podłokietniki, ekrany w oparciach, panele nad fotelami, oświetlenie ----------
+  const zs = [-2.42, -1.95, -1.48, -0.47, 0, 0.47, 1.48, 1.95, 2.42];
+  for (let x = -14.2; x <= 16.5 + PA; x += 0.81) {
+    if (DOORS.some((dd) => x > dd - 1.95 && x < dd + 1.85)) continue; // przy drzwiach: toalety (przed) i kuchnia (za)
+    const k = Math.min(1, half(FLOOR + 0.6, x) / 2.75);
+    // fotel (pasażer patrzy w stronę nosa, −x): wałek siedziska, boczki zagłówka, tył oparcia ze stolikiem,
+    // ekranem i kieszenią, podłokietniki po obu stronach (w rzędzie trzech – wspólne), klamra pasa
+    zs.forEach((dz, i) => {
+      const z = dz * k;
+      const tilt: V3 = [0, 0, -0.14];
+      B('#2c4f86', [x - 0.24, FLOOR + 0.42, z], [0.06, 0.08, 0.44]); // wałek z przodu siedziska
+      for (const w of [0.2, -0.2]) B('#e5e7eb', [x + 0.29, FLOOR + 1.03, z + w], [0.11, 0.17, 0.05], tilt); // boczki zagłówka
+      B('#94a3b8', [x + 0.3, FLOOR + 0.84, z], [0.015, 0.3, 0.34], tilt); // stolik (złożony)
+      B('#64748b', [x + 0.302, FLOOR + 0.97, z], [0.015, 0.03, 0.08], tilt); // zatrzask stolika
+      B('#0f172a', [x + 0.31, FLOOR + 1.08, z], [0.02, 0.15, 0.24], tilt, '#0b1d33'); // ekran w oparciu
+      B('#33415c', [x + 0.27, FLOOR + 0.6, z], [0.02, 0.18, 0.36], tilt); // kieszeń
+      B('#d1d5db', [x - 0.05, FLOOR + 0.5, z + 0.12], [0.06, 0.02, 0.05]); // klamra pasa
+      const first = i === 0 || i === 3 || i === 6; // pierwszy fotel w grupie trzech – podłokietnik także z drugiej strony
+      for (const side of first ? [0.235, -0.235] : [0.235]) {
+        B('#3f4a5a', [x + 0.02, FLOOR + 0.64, z + side], [0.42, 0.05, 0.05]); // podłokietnik
+        B('#64748b', [x + 0.2, FLOOR + 0.5, z + side], [0.04, 0.24, 0.04]); // wspornik podłokietnika
+      }
+    });
+    // nogi foteli stoją na szynach w podłodze; kamizelka ratunkowa pod siedziskiem (żółta zakładka)
+    for (const g of [-1.95, 0, 1.95]) B('#facc15', [x - 0.18, FLOOR + 0.33, g * k], [0.02, 0.04, 0.12]);
+    // panel nad fotelami (PSU): dla każdego fotela lampka do czytania i dysza nawiewu, przycisk wezwania personelu,
+    // a w środku znaki „zapiąć pasy” i „zakaz palenia” oraz klapka masek tlenowych
+    for (const sg of [1, -1]) {
+      const pz = 1.95 * sg * k;
+      B('#e5e7eb', [x, 0.97, pz], [0.6, 0.05, 1.2]);
+      B('#d6d1c4', [x + 0.12, 0.945, pz], [0.3, 0.01, 1.05]); // klapka masek
+      for (const dz of [-0.47, 0, 0.47]) {
+        add('cylV', '#fff7e0', box([x - 0.16, 0.94, pz + dz * k - 0.08], [0.07, 0.02, 0.07]), '#fff2cc'); // lampka
+        add('cylV', '#9ca3af', box([x - 0.16, 0.94, pz + dz * k + 0.08], [0.06, 0.03, 0.06])); // nawiew
+        B('#60a5fa', [x - 0.22, 0.943, pz + dz * k], [0.03, 0.01, 0.03], undefined, '#3b82f6'); // wezwanie personelu
+      }
+      B('#fde68a', [x + 0.2, 0.943, pz - 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zapiąć pasy”
+      B('#fde68a', [x + 0.2, 0.943, pz + 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zakaz palenia”
+    }
+    // schowki nad głowami: uchwyt klapy i zatrzask (boczne – od strony przejścia, środkowe – z obu stron)
+    for (const sg of [1, -1]) B('#475569', [x, 1.02, 1.93 * sg * k], [0.28, 0.035, 0.04]);
+    for (const sg of [1, -1]) B('#475569', [x, 1.54, 0.56 * sg], [0.28, 0.035, 0.04]);
+  }
+  // listwa pod oknami (półka przy burcie, na wysokości podłokietników) wzdłuż całej kabiny
+  for (let x = -28.1; x < 20.6; x += 0.62) {
+    if (DOORS.some((dd) => Math.abs(dd - (x + 0.31)) < 0.75)) continue;
+    const zl = half(FLOOR + 0.66, x + 0.31) + 0.07;
+    for (const sg of [1, -1]) B('#e9e4d8', [x + 0.31, FLOOR + 0.66, zl * sg], [0.62, 0.035, 0.1]);
+  }
+  // ---------- klasa biznes: apartamenty w układzie 1-2-1, „jodełka” (każdy fotel skośnie, przodem do przejścia) ----------
+  // układ fotela: dx – wzdłuż fotela (pasażer patrzy w stronę −dx), dz – w bok (+dz – osłona prywatności)
+  {
+    const LEATHER = '#6b4f3f';
+    const SHELL = '#ddd5c6';
+    const WOOD = '#8b6b4a';
+    for (let x = -24.6 - PF; x <= -19.5; x += 2.0)
+      for (const z of [-2.05, -0.45, 0.45, 2.05]) {
+        const th = Math.sign(z) * (Math.abs(z) > 1 ? -0.36 : 0.36);
+        // dz w lustrzanym odbiciu po obu stronach kadłuba: +dz zawsze ku burcie (osłona), −dz ku przejściu (konsola)
+        const at = (dx: number, dy: number, dz0: number): V3 => {
+          const dz = dz0 * Math.sign(z);
+          return [x + dx * Math.cos(th) + dz * Math.sin(th), FLOOR + dy, z - dx * Math.sin(th) + dz * Math.cos(th)];
+        };
+        const R = (rz = 0): V3 => [0, th, rz];
+        // przy oknie osłona krótsza – skośna, dłuższa wchodziłaby końcem w burtę przy podłodze
+        const win = Math.abs(z) > 1;
+        const shL = win ? 1.5 : 2.0;
+        const shX = win ? 0.12 : -0.1;
+        // fotel: podstawa, siedzisko, oparcie lekko odchylone, zagłówek z pokrowcem, podłokietnik od przejścia
+        B('#3b2f28', at(0.15, 0.13, 0), [1.0, 0.26, 0.56], R());
+        B(LEATHER, at(0.12, 0.44, 0), [0.62, 0.12, 0.54], R());
+        B(LEATHER, at(0.06, 0.38, 0), [0.66, 0.05, 0.56], R()); // lamówka siedziska
+        B(LEATHER, at(0.56, 0.86, 0), [0.13, 0.78, 0.54], R(-0.22));
+        B('#e7e2d6', at(0.68, 1.33, 0), [0.11, 0.24, 0.44], R(-0.22));
+        B(LEATHER, at(0.2, 0.64, -0.33), [0.62, 0.08, 0.1], R());
+        // podnóżek w zagłębieniu na nogi i ekran na ściance przed fotelem
+        B('#4a3a30', at(-0.78, 0.33, 0), [0.44, 0.36, 0.5], R());
+        B(LEATHER, at(-0.78, 0.52, 0), [0.42, 0.04, 0.48], R());
+        B('#cfc7b8', at(-1.02, 0.55, 0), [0.05, 1.1, 0.66], R()); // ścianka przednia (tył fotela przed nami)
+        B('#1f2937', at(-0.995, 0.98, 0), [0.02, 0.42, 0.62], R());
+        B('#0f172a', at(-0.985, 0.98, 0), [0.01, 0.36, 0.56], R(), '#12304f'); // ekran
+        // osłona prywatności: ściana, listwa z drewna, schowek z lusterkiem
+        B(SHELL, at(shX, 0.62, 0.37), [shL, 1.24, 0.05], R());
+        B(WOOD, at(shX, 1.25, 0.37), [shL, 0.035, 0.1], R());
+        B('#cfc7b8', at(0.62, 0.92, 0.31), [0.32, 0.26, 0.1], R());
+        B('#c7d2fe', at(0.62, 0.92, 0.255), [0.24, 0.18, 0.01], R());
+        // konsola boczna od przejścia: blat z drewna, lampka, panel sterowania fotelem
+        B(SHELL, at(0.55, 0.36, -0.42), [0.55, 0.72, 0.2], R());
+        B(WOOD, at(0.55, 0.735, -0.42), [0.57, 0.03, 0.22], R());
+        add('cylV', '#9ca3af', box(at(0.72, 0.85, -0.44), [0.03, 0.2, 0.03]));
+        add('cylV', '#fff7e0', box(at(0.72, 0.97, -0.44), [0.1, 0.05, 0.1]), '#fff2cc');
+        B('#1f2937', at(0.32, 0.69, -0.34), [0.14, 0.01, 0.06], R());
+        B('#60a5fa', at(0.32, 0.696, -0.34), [0.1, 0.005, 0.04], R(), '#3b82f6');
+        // pościel: poduszka na oparciu, złożony koc na podnóżku; co trzeci apartament zajęty
+        B('#f1f5f9', at(0.45, 0.63, 0), [0.12, 0.22, 0.38], R(-0.25));
+        B('#475569', at(-0.78, 0.57, 0), [0.36, 0.05, 0.44], R());
+      }
+    // ciepła wykładzina w kabinie biznes
+    B('#5a4a42', [(-29.0 + -19.0) / 2, FLOOR + 0.003, 0], [10.0, 0.004, 2 * (half(FLOOR, -24) - 0.05)]);
+  }
+
+  // ---------- zasłonki między klasami (za kuchnią przy drzwiach 2) i znaki EXIT nad drzwiami ----------
+  for (const sg of [1, -1]) {
+    B('#9ca3af', [-14.68, FLOOR + 1.98, 0.97 * sg], [0.03, 0.03, 0.6]); // szyna
+    B('#2b3a55', [-14.68, FLOOR + 1.0, (0.97 + 0.17) * sg], [0.03, 1.94, 0.26]); // zasłonka (odsunięta)
+  }
+  DOORS.forEach((dx) => {
+    for (const sg of [1, -1]) {
+      const zs0 = Math.max(0.4, hw(FLOOR + 2.0, dx) - 0.7) * sg;
+      B('#e5e7eb', [dx + 0.02, FLOOR + 2.0, zs0], [0.03, 0.15, 0.38]);
+      B('#16a34a', [dx, FLOOR + 2.0, zs0], [0.03, 0.12, 0.34], undefined, '#22c55e');
+    }
+  });
+
+  // podłoga kabiny: chodniki w przejściach (inny kolor wykładziny) i szyny foteli
+  {
+    const ex0 = -14.6;
+    const ex1 = 19.8;
+    for (const sg of [1, -1]) B('#3b4a63', [(ex0 + ex1) / 2, FLOOR + 0.004, 0.97 * sg], [ex1 - ex0, 0.004, 0.52]);
+    for (const zr of [-2.2, -1.7, -1.2, -0.25, 0.25, 1.2, 1.7, 2.2]) B('#9ca3af', [(-28 + 12) / 2, FLOOR + 0.006, zr], [40, 0.006, 0.03]);
+  }
+  const cx0 = -27.5;
+  const cx1 = 19.5 + PA;
+  for (const s of [1, -1]) B('#dbeafe', [(cx0 + cx1) / 2, 1.62, 1.72 * s], [cx1 - cx0, 0.03, 0.05], undefined, '#bfdbfe'); // światło nad schowkami
+  B('#dbeafe', [(cx0 + cx1) / 2, 2.12, 0], [cx1 - cx0, 0.02, 0.28], undefined, '#93c5fd'); // światło sufitu
+  for (const s of [1, -1]) B('#fde68a', [(cx0 + cx1) / 2, FLOOR + 0.01, 0.95 * s], [cx1 - cx0, 0.01, 0.03], undefined, '#facc15'); // ścieżka ewakuacyjna
+
+  // ---------- instalacje nad sufitem ----------
+  // główny kanał klimatyzacji: okrągły, w izolacji, z odcinków łączonych kołnierzami, podwieszony do wręg;
+  // co drugi odcinek odgałęzienia w dół, do nawiewów nad schowkami po obu stronach
+  const D0 = -27;
+  const D1 = 21.5;
+  const DY = 2.42;
+  const DR = 0.22;
+  const cyl = (k: string, x: number, y: number, z: number, len: number, d: number, e?: string) => add('cylX', k, box([x, y, z], [len, d, d]), e);
+  let seg = 0;
+  // nad odpoczynkiem personelu pokładowego (x ok. 14–18,9) kanał biegnie wyżej, pod samym grzbietem, bez odgałęzień
+  for (let x = D0; x < D1 - 0.6; x += 1.24, seg++) {
+    const xm = x + 0.62;
+    const top = fusSec(xm).yc + fusSec(xm).h;
+    const up = xm > 12.8 + PA - 2.6 && xm < 12.8 + PA + 2.6;
+    const y = up ? top - 0.36 : DY;
+    cyl('#c3ced6', xm, y, 0, 1.2, 2 * DR); // odcinek kanału (izolacja)
+    cyl('#7b8a96', x, y, 0, 0.05, 2 * DR + 0.05); // kołnierz
+    for (const z of [0.16, -0.16]) B('#8b939c', [xm, (y + DR + top - 0.08) / 2, z], [0.025, Math.max(0.02, top - 0.08 - y - DR), 0.025]); // wieszak
+    B('#8b939c', [xm, y + DR + 0.01, 0], [0.05, 0.02, 0.4]); // obejma
+    if (seg % 2 === 0 && !up)
+      for (const s of [1, -1]) {
+        // odgałęzienie: skośnie w dół ku burcie, zakończone nawiewem nad schowkami
+        B('#c3ced6', [x + 0.62, DY - 0.17, 0.55 * s], [0.13, 0.13, 0.75], [0.5 * s, 0, 0]);
+        B('#c3ced6', [x + 0.62, 2.0, 0.92 * s], [0.13, 0.22, 0.13]);
+        B('#9ca3af', [x + 0.62, 1.88, 0.98 * s], [0.42, 0.04, 0.16]); // nawiew
+      }
+  }
+  // korytka kablowe po obu stronach: otwarte, na wspornikach co dwie wręgi; w nich wiązki zasilania i danych
+  const T0 = -29.5;
+  const T1 = 19.8;
+  for (const s of [1, -1]) {
+    const z = 1.32 * s;
+    B('#6b7280', [(T0 + T1) / 2, 2.15, z], [T1 - T0, 0.015, 0.3]); // dno korytka
+    for (const dz of [0.15, -0.15]) B('#6b7280', [(T0 + T1) / 2, 2.19, z + dz], [T1 - T0, 0.08, 0.012]); // burty
+    const bundles: [number, number, string][] = [
+      [-0.08, 0.06, '#d1d5db'], // zasilanie
+      [0, 0.07, '#4b5563'],
+      [0.08, 0.05, '#e5e7eb'],
+      [0.03, 0.035, '#3b82f6'], // sieć danych (światłowód) – cieńsza, na wierzchu
+    ];
+    for (const [dz, d, k] of bundles) cyl(k, (T0 + T1) / 2, 2.19 + (k === '#3b82f6' ? 0.05 : 0), z + dz * s, T1 - T0, d);
+    for (let x = T0 + 0.3; x < T1; x += 1.24) B('#9ca3af', [x, 2.27, z], [0.03, 0.26, 0.34]); // wspornik
+  }
+
+  // ---------- odpoczynek załóg: przedziały nad kabiną (podłoga, sufit, ściany, koje z pościelą, lampki) ----------
+  const crewRest = (x0: number, x1: number, yf: number, yc: number, bunkXs: number[]) => {
+    const xm = (x0 + x1) / 2;
+    const h = yc - yf;
+    B('#c8c2b6', [xm, yf, 0], [x1 - x0, 0.06, 2.3]); // podłoga
+    B('#e8e3d8', [xm, yc, 0], [x1 - x0, 0.04, 2.3]); // sufit
+    for (const x of [x0, x1]) B('#e8e3d8', [x, yf + h / 2, 0], [0.04, h, 2.3]); // ściany końcowe
+    B('#e8e3d8', [xm, yf + h / 2, 1.15], [x1 - x0, h, 0.04]); // ściana od burty
+    for (const bx of bunkXs)
+      for (const z of [0.55, -0.55]) {
+        B('#4f6b8a', [bx, yf + 0.1, z], [1.95, 0.12, 0.72]); // rama koi
+        B('#e2e8f0', [bx, yf + 0.19, z], [1.9, 0.07, 0.68]); // materac
+        B('#f8fafc', [bx - 0.78, yf + 0.26, z], [0.3, 0.08, 0.5]); // poduszka
+        B('#1e3a8a', [bx + 0.3, yf + 0.235, z], [1.2, 0.025, 0.7]); // koc
+        B('#475569', [bx + 0.9, yf + h / 2, z > 0 ? 0.2 : -0.2], [0.22, h - 0.12, 0.05]); // zasłona (odsunięta)
+        B('#fff7e0', [bx - 0.6, yc - 0.03, z], [0.1, 0.02, 0.1], undefined, '#fff2cc'); // lampka do czytania
+      }
+  };
+  // pilotów: nad wejściem do kabiny za kokpitem; wchodzi się stromymi schodami z przestrzeni przy drzwiach 1
+  crewRest(-30.2, -27.4, 1.72, 2.52, [-28.8]);
+  // personelu pokładowego: nad tylną częścią kabiny, cztery koje
+  crewRest(14.0, 18.7, 1.6, 2.38, [15.2, 17.4]);
+  {
+    const xb = -31.9;
+    const xt = -30.3;
+    const rise = 1.72 - FLOOR;
+    const run = xt - xb;
+    for (let i = 1; i <= 11; i++) B('#9ca3af', [xb + (run * i) / 11.5, FLOOR + (rise * i) / 11.5, 1.0], [0.2, 0.035, 0.55]); // stopnie
+    const len = Math.hypot(run, rise);
+    const ang = Math.atan2(rise, run);
+    for (const z of [0.71, 1.29]) B('#6b7280', [(xb + xt) / 2, (FLOOR + 1.72) / 2, z], [len, 0.07, 0.04], [0, 0, ang]); // policzki schodów
+    B('#d1d5db', [(xb + xt) / 2, (FLOOR + 1.72) / 2 + 0.7, 1.3], [len, 0.03, 0.03], [0, 0, ang]); // poręcz
+    B('#e7e2d6', [xt + 0.02, 2.12, 1.0], [0.04, 0.8, 0.6]); // obramowanie włazu w podłodze przedziału
+  }
+
+  // ---------- awionika: regały (słupki, półki), moduły LRU z uchwytami i diodami, chłodzenie, pomost ----------
+  for (let x = -30.1; x <= -27.4; x += 0.65)
+    for (const sg of [1, -1]) {
+      const z = 1.05 * sg;
+      const face = z - 0.255 * sg; // przód regału (od przejścia)
+      for (const dx of [-0.26, 0.26]) for (const dz of [-0.23, 0.23]) B('#9ca3af', [x + dx, -2.05, z + dz], [0.03, 0.9, 0.03]);
+      for (const y of [-2.48, -2.18, -1.88]) {
+        B('#6b7280', [x, y, z], [0.55, 0.02, 0.5]);
+        for (const dx of [-0.13, 0.13]) {
+          B('#3f4752', [x + dx, y + 0.13, z], [0.24, 0.24, 0.44]);
+          B('#4b5563', [x + dx, y + 0.13, face], [0.24, 0.24, 0.01]);
+          B('#9ca3af', [x + dx, y + 0.2, face - 0.012 * sg], [0.14, 0.02, 0.015]);
+          B(dx < 0 ? '#22c55e' : '#f59e0b', [x + dx + 0.08, y + 0.06, face - 0.01 * sg], [0.025, 0.025, 0.01], undefined, dx < 0 ? '#22c55e' : '#f59e0b');
+        }
+      }
+      B('#c3ced6', [x, -1.7, z - 0.1 * sg], [0.08, 0.12, 0.08]); // odgałęzienie chłodzenia
+    }
+  for (const sg of [1, -1]) add('cylX', '#c3ced6', box([-28.75, -1.7, 0.85 * sg], [3.0, 0.16, 0.16])); // kanał chłodzenia
+  B('#4b5563', [-28.75, -2.5, 0], [3.0, 0.02, 1.05]); // pomost
+  for (let i = 0; i < 4; i++) B('#9ca3af', [-27.15, -2.62 - i * 0.12, 0], [0.04, 0.02, 0.45]); // drabinka do luku w spodzie
+
+  // ---------- gródź przednia: usztywnienia (pionowe i poziome) ----------
+  {
+    const gx = RADOME_X + 0.09;
+    for (const z of [-0.6, 0, 0.6]) {
+      const top = fusPt(gx, fusTheta(gx, 0.2) * (z === 0 ? 0.01 : Math.abs(z) / 1.2))[1] - 0.12;
+      B('#7f9a63', [gx, (FLOOR + top) / 2, z], [0.05, top - FLOOR, 0.07]);
+    }
+    for (const y of [-0.55, 0.2]) B('#7f9a63', [gx, y, 0], [0.05, 0.07, 2 * half(y, gx) + 0.2]);
+  }
+
+  // ---------- ściana kokpitu z pancernymi drzwiami ----------
+  {
+    const XW = -32.1;
+    const fl = Math.min(hw(FLOOR + 0.05, XW), hw(FLOOR + 2.1, XW)) - 0.05;
+    for (const sg of [1, -1]) B('#9aa1a9', [XW, FLOOR + 1.05, sg * (0.43 + fl) / 2], [0.08, 2.1, fl - 0.43]);
+    B('#9aa1a9', [XW, FLOOR + 2.02, 0], [0.08, 0.16, 0.86]); // nadproże
+    B('#6b7280', [XW + 0.02, FLOOR + 0.97, 0], [0.06, 1.94, 0.84]); // drzwi
+    B('#d1d5db', [XW + 0.06, FLOOR + 1.0, 0.3], [0.02, 0.03, 0.14]); // klamka
+    B('#1f2937', [XW + 0.06, FLOOR + 1.35, 0.55], [0.02, 0.16, 0.1]); // panel kodu
+    B('#22c55e', [XW + 0.07, FLOOR + 1.4, 0.55], [0.01, 0.02, 0.03], undefined, '#22c55e');
+  }
+
+  return [...groups.values()];
+}
+
+/** Kontener LD3: profil ze skosem od strony burty (pasuje do zaokrąglenia kadłuba), wysokość ok. 1,1 m w skali modelu. */
+function ld3Geo() {
+  const sh = new THREE.Shape();
+  sh.moveTo(-0.775, 0);
+  sh.lineTo(0.285, 0);
+  sh.lineTo(0.775, 0.55);
+  sh.lineTo(0.775, 1.1);
+  sh.lineTo(-0.775, 1.1);
+  sh.closePath();
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 1.56, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 1 });
+  g.translate(0, 0, -0.78);
+  // profil w płaszczyźnie (z, y), długość wzdłuż x; skos po stronie +z (lewa burta)
+  g.rotateY(-Math.PI / 2);
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Detale kontenera LD3 w jego układzie (długość w x ±0,78, profil w z: pełna ściana przy z = −0,775, skos przy +z):
+ * aluminiowe krawędzie i narożniki, ciemna podstawa z rantem, plandeka drzwi na pełnej ścianie z pasami i tabliczka
+ * z numerem. Rysowane jako osobne instancje, ustawiane razem z kontenerem.
+ */
+const CAN_PARTS: { k: string; mats: THREE.Matrix4[] }[] = (() => {
+  const slLen = Math.hypot(0.49, 0.55);
+  const slAng = Math.atan2(0.49, 0.55);
+  const edge = (x: number) => [
+    box([x, 0.55, -0.775], [0.05, 1.12, 0.05]),
+    box([x, 0.825, 0.775], [0.05, 0.57, 0.05]),
+    box([x, 1.1, 0], [0.05, 0.05, 1.6]),
+    box([x, 0.275, 0.53], [0.05, slLen, 0.05], [slAng, 0, 0]),
+    box([x, 0.01, -0.245], [0.05, 0.05, 1.1]),
+  ];
+  return [
+    { k: '#9aa2ab', mats: [box([0, 1.1, -0.775], [1.62, 0.05, 0.05]), box([0, 1.1, 0.775], [1.62, 0.05, 0.05]), box([0, 0.55, 0.775], [1.62, 0.05, 0.05]), ...edge(-0.78), ...edge(0.78)] },
+    // podstawa (płyta z rantem) i żebra na dachu
+    { k: '#4b535c', mats: [box([0, 0.02, -0.245], [1.64, 0.04, 1.12]), ...[-0.4, 0, 0.4].map((x) => box([x, 1.11, 0], [0.04, 0.025, 1.5]))] },
+    // plandeka drzwi na pełnej ścianie
+    { k: '#2c4a73', mats: [box([0, 0.58, -0.792], [1.44, 0.92, 0.012])] },
+    { k: '#18263a', mats: [...[-0.48, 0, 0.48].map((x) => box([x, 0.58, -0.8], [0.05, 0.94, 0.01])), box([0, 0.13, -0.8], [1.44, 0.05, 0.01])] },
+    // tabliczka z numerem (biała z ciemnym napisem)
+    { k: '#eef2f6', mats: [box([0.42, 1.0, -0.79], [0.32, 0.1, 0.012])] },
+    { k: '#111317', mats: [box([0.42, 1.0, -0.798], [0.24, 0.028, 0.006])] },
+  ];
+})();
+
+/**
+ * Kontrola w trybie deweloperskim: czy jakaś bryła wyposażenia wystaje poza poszycie kadłuba (narożniki prostopadłościanu
+ * otaczającego sprawdzane względem przekroju superelipsy w danym x). Wypisuje listę w konsoli – do poprawiania modelu.
+ */
+function checkInside(lists: Record<string, { geo: THREE.BufferGeometry; mats: THREE.Matrix4[] }>) {
+  const out: string[] = [];
+  const v = new THREE.Vector3();
+  for (const [name, { geo, mats }] of Object.entries(lists)) {
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const bb = geo.boundingBox!;
+    mats.forEach((m) => {
+      let worst = 0;
+      let at: V3 = [0, 0, 0];
+      for (const cx of [bb.min.x, bb.max.x])
+        for (const cy of [bb.min.y, bb.max.y])
+          for (const cz of [bb.min.z, bb.max.z]) {
+            v.set(cx, cy, cz).applyMatrix4(m);
+            const sec = fusSec(v.x);
+            const r = Math.pow(Math.abs(v.y - sec.yc) / Math.max(0.05, sec.h - 0.03), FUS_N) + Math.pow(Math.abs(v.z) / Math.max(0.05, sec.w - 0.03), FUS_N);
+            if (r > 1 + worst) {
+              worst = r - 1;
+              at = [v.x, v.y, v.z];
+            }
+          }
+      if (worst > 0.002) out.push(`${name} @ x=${at[0].toFixed(2)} y=${at[1].toFixed(2)} z=${at[2].toFixed(2)} (+${(worst * 100).toFixed(1)}%)`);
+    });
+  }
+  (window as unknown as { __fusCheck?: string[] }).__fusCheck = out;
+  // eslint-disable-next-line no-console
+  console.info(`[kadłub] wystające bryły: ${out.length}\n` + out.join('\n'));
+}
+
+/**
+ * Obrót osi z na kierunek n z „górą” możliwie pionowo (pion rzutowany na płaszczyznę prostopadłą do n). W zwężającym
+ * się ogonie normalna poszycia jest pochylona – sam obrót z osi z (setFromUnitVectors) obracałby okna wokół środka.
+ */
+function uprightQuat(n: THREE.Vector3) {
+  const z = n.clone().normalize();
+  const y = new THREE.Vector3(0, 1, 0).addScaledVector(z, -z.y).normalize();
+  const x = new THREE.Vector3().crossVectors(y, z).normalize();
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+}
+
+/** Okna kabiny od środka: x okien (co wręgę, bez drzwi) i wymiary otworu w wykładzinie (pół szerokości, pół wysokości). */
+const CABIN_WINS: number[] = (() => {
+  const out: number[] = [];
+  for (let x = -24.3 - PF; x <= 19.9 + PA; x += 0.635) if (!DOORS.some((dd) => Math.abs(dd - x) < 0.9)) out.push(x);
+  return out;
+})();
+const WIN_HOLE = { hx: 0.15, hy: 0.22 };
+/** Zaokrąglony prostokąt (środek w 0,0) – okna A350 są duże i prawie prostokątne. */
+function roundRect(w: number, h: number, r: number, path: THREE.Path = new THREE.Shape()) {
+  const x = -w / 2;
+  const y = -h / 2;
+  path.moveTo(x + r, y);
+  path.lineTo(x + w - r, y);
+  path.quadraticCurveTo(x + w, y, x + w, y + r);
+  path.lineTo(x + w, y + h - r);
+  path.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  path.lineTo(x + r, y + h);
+  path.quadraticCurveTo(x, y + h, x, y + h - r);
+  path.lineTo(x, y + r);
+  path.quadraticCurveTo(x, y, x + r, y);
+  return path;
+}
+
+function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { view?: FusView; labels?: boolean; pick?: WingPick; doorHoles?: boolean }) {
+  const furnished = view !== 'struct';
+  const d = useMemo(() => cached('interior2', () => {
     const unit = new THREE.BoxGeometry(1, 1, 1);
-    const liner = grid(
-      refine([-28.6 - PF, 21 + PA], 0.45),
-      FUS_TH,
-      (x, th) => fusPt(x, th, 0.16),
-      FUS_CUT,
-    );
-    // wręgi co ok. 0,6 m (pierścienie o kształcie przekroju)
-    const ring = new THREE.TorusGeometry(1, 0.03, 4, 72);
+    const XA = -32.1; // tył kokpitu (ściana z drzwiami kokpitu)
+    const XB = 20.6 + PA; // tylna gródź ciśnieniowa
+    // wykładzina kabiny z otworami na okna: dodatkowe podziały siatki na krawędziach okien
+    const linerX = [...new Set([...refine([-28.6 - PF, 21 + PA], 0.45), ...CABIN_WINS.flatMap((wx) => [wx - WIN_HOLE.hx, wx + WIN_HOLE.hx]), ...CARGO_DOOR.xs.flatMap((xd) => [xd - CARGO_DOOR.hw, xd + CARGO_DOOR.hw]), ...PAX_DOOR.xs.flatMap((xd) => [xd - PAX_DOOR.hw, xd + PAX_DOOR.hw])])].sort((a, b) => a - b);
+    const linerTh = [...new Set([...FUS_TH, ...refine([1.15, 2.0], 0.015), ...refine([-2.0, -1.15], 0.015)])].sort((a, b) => a - b);
+    const liner = grid(linerX, linerTh, (x, th) => fusPt(x, th, 0.16), (x, th) => {
+      const y = fusPt(x, th, 0.16)[1];
+      // otwory drzwi ładowni w prawej burcie
+      if (th < 0 && y > CARGO_DOOR.yb - 0.1 && y < CARGO_DOOR.yt + 0.1 && cargoGap(x)) return true;
+      return Math.abs(y - WIN_Y) < WIN_HOLE.hy && CABIN_WINS.some((wx) => Math.abs(x - wx) < WIN_HOLE.hx);
+    });
+    // wykładzina z otworami drzwi pasażerskich (moduł drzwi – przez otwór widać kabinę)
+    const linerDoors = grid(linerX, linerTh, (x, th) => fusPt(x, th, 0.16), (x, th) => {
+      const y = fusPt(x, th, 0.16)[1];
+      if (y > PAX_DOOR.yb && y < PAX_DOOR.yt && PAX_DOOR.xs.some((xd) => Math.abs(x - xd) < PAX_DOOR.hw)) return true;
+      if (th < 0 && y > CARGO_DOOR.yb - 0.1 && y < CARGO_DOOR.yt + 0.1 && cargoGap(x)) return true;
+      return Math.abs(y - WIN_Y) < WIN_HOLE.hy && CABIN_WINS.some((wx) => Math.abs(x - wx) < WIN_HOLE.hx);
+    });
+    const half = (y: number, x = 0) => fusPt(x, fusTheta(x, y), 0)[2] - 0.2;
+    // ---------- konstrukcja ----------
+    // wręgi co ok. 0,62 m (pierścienie o kształcie przekroju) – od grodzi przedniej po stożek ogonowy
+    // rurka pierścienia skaluje się razem z przekrojem (ok. ×3) – cienka, żeby wręgi nie przebijały wykładziny
+    const ring = new THREE.TorusGeometry(1, 0.012, 4, 72);
+    // w zakładce o konstrukcji wręgi grubsze (bez wykładziny nic ich nie zasłania)
+    const ringThick = new THREE.TorusGeometry(1, 0.022, 4, 96);
+    ringThick.rotateY(Math.PI / 2);
     ring.rotateY(Math.PI / 2);
     const frames: THREE.Matrix4[] = [];
-    for (let x = -28 - PF; x <= 20.5 + PA; x += 0.62) {
+    const cutFrameXs: number[] = [];
+    // wręgi w rytmie okien (co 0,635 m), w połowie odstępu między oknami – żaden wręg nie przechodzi przez okno
+    const FR = 0.635;
+    const fr0 = -24.3 - PF + FR / 2;
+    for (let x = fr0 - Math.floor((fr0 - (RADOME_X + 0.3)) / FR) * FR; x <= 31.5; x += FR) {
       const { yc, h, w } = fusSec(x);
-      frames.push(box([x, yc, 0], [1, h - 0.08, w - 0.08]));
+      if (w < 0.5) continue;
+      // wręgi przecięte otworami drzwi (ładowni i pasażerskich) – rysowane osobno, jako łuki z przerwami
+      if (openingGaps(x).length) {
+        cutFrameXs.push(x);
+        continue;
+      }
+      frames.push(box([x, yc, 0], [1, h - 0.07, w - 0.07]));
     }
-    const half = (y: number, x = 0) => {
-      const th = fusTheta(x, y);
-      return fusPt(x, th)[2] - 0.2;
+    /*
+     * Otwory drzwi ładowni (prawa burta): przecięte wręgi (środnik i pas) z przerwą na otwór oraz wzmocniona rama
+     * otworu – grube wręgi krawędziowe i progi górny i dolny na całą głębokość konstrukcji kadłuba.
+     */
+    const frameArc = (x: number, gaps: [number, number][], depth: number, flange: number) => {
+      // łuki między przerwami (przerwy posortowane po kącie)
+      const parts: [number, number][] = [];
+      let a0 = -Math.PI;
+      for (const [g0, g1] of gaps) {
+        if (g0 > a0) parts.push([a0, g0]);
+        a0 = Math.max(a0, g1);
+      }
+      if (a0 < Math.PI) parts.push([a0, Math.PI]);
+      return parts.flatMap(([a, b]) => {
+        const ths = refine([a, b], 0.03);
+        return [grid(ths, [0.005, depth], (th, o) => fusPt(x, th, o)), grid(ths, [x - flange / 2, x + flange / 2], (th, xx) => fusPt(xx, th, depth))];
+      });
     };
+    const cutFrames = mergeGeo(cutFrameXs.flatMap((x) => frameArc(x, openingGaps(x), 0.11, 0.05)));
+    const cargoSurround = mergeGeo(
+      CARGO_DOOR.xs.flatMap((xd) => {
+        const x0 = xd - CARGO_DOOR.hw;
+        const x1 = xd + CARGO_DOOR.hw;
+        const xs = refine([x0 - 0.08, x1 + 0.08], 0.1);
+        const sill = (y: number) => [
+          grid(xs, [0.005, 0.17], (x, o) => fusPt(x, -fusTheta(x, y), o)),
+          grid(xs, [-0.04, 0.04], (x, dy) => fusPt(x, -fusTheta(x, y + dy), 0.17)),
+        ];
+        return [...frameArc(x0, [], 0.17, 0.09), ...frameArc(x1, [], 0.17, 0.09), ...sill(CARGO_DOOR.yt), ...sill(CARGO_DOOR.yb)];
+      }),
+    );
+    // podłużnice: listwy wzdłuż poszycia (pokazane rzadziej niż w samolocie) – odcinki między wręgami
+    const stringers: THREE.Matrix4[] = [];
+    const ths = Array.from({ length: 65 }, (_, i) => -Math.PI + (i / 64) * Math.PI * 2);
+    // zaczynają się za kokpitem – dalej do przodu są szyby i gęste wręgi nosa
+    for (let x = -31.9; x < 30; x += 0.62) {
+      if (fusSec(x).w < 0.6) continue;
+      for (const th of ths) {
+        const a = new THREE.Vector3(...fusPt(x, th, 0.05));
+        const b = new THREE.Vector3(...fusPt(x + 0.62, th, 0.05));
+        const ym = (a.y + b.y) / 2;
+        // pas okien: tu zamiast podłużnic są wzmocnione ramy okien
+        if (Math.abs(ym - WIN_Y) < WIN_HOLE.hy + 0.06 && x > -24.5 - PF && x < 20.3 + PA) continue;
+        // otwory drzwi (obie burty): od podłogi do nadproża
+        if (ym > FLOOR - 0.05 && ym < FLOOR + 2.1 && DOORS.some((dd) => x + 0.62 > dd - 0.6 && x < dd + 0.6)) continue;
+        // otwory drzwi ładowni (prawa burta)
+        if (th < 0 && ym > CARGO_DOOR.yb - 0.05 && ym < CARGO_DOOR.yt + 0.05 && CARGO_DOOR.xs.some((xd) => x + 0.62 > xd - CARGO_DOOR.hw && x < xd + CARGO_DOOR.hw)) continue;
+        const o = new THREE.Object3D();
+        o.position.copy(a).add(b).multiplyScalar(0.5);
+        o.lookAt(b);
+        o.scale.set(0.03, 0.05, a.distanceTo(b));
+        o.updateMatrix();
+        stringers.push(o.matrix.clone());
+      }
+    }
+    // obramowania drzwi: wzmocnione wręgi przy krawędziach otworu i progi nad i pod drzwiami
+    const doorFrames: THREE.Matrix4[] = [];
+    const doorSills: THREE.Matrix4[] = [];
+    for (const dd of DOORS) {
+      for (const xe of [dd - 0.62, dd + 0.62]) {
+        const { yc, h, w } = fusSec(xe);
+        doorFrames.push(box([xe, yc, 0], [1, h - 0.06, w - 0.06]));
+      }
+      for (const y of [FLOOR + 0.02, FLOOR + 2.05])
+        for (const sg of [1, -1]) {
+          const p = fusPt(dd, fusTheta(dd, y) * sg, 0.07);
+          doorSills.push(box([dd, p[1], p[2]], [1.3, 0.1, 0.1]));
+        }
+    }
+    // belki podłogi (poprzeczne, przy każdej wrędze) i podłoga kabiny
+    /** Półszerokość wnętrza na wysokości y w x (bez marginesu). */
+    const hw = (y: number, x: number) => Math.max(0, half(y, x) + 0.2);
+    // belki: wysokość ograniczona spodem kadłuba (w ogonie spód podchodzi pod podłogę), długość – przekrojem
+    const beams: THREE.Matrix4[] = [];
+    for (let x = XA; x <= XB - 0.3; x += 0.62) {
+      const sec = fusSec(x);
+      // nad wnęką podwozia głównego belki są płytkie – pod nimi jest płyta ciśnieniowa i schowane koła
+      const overBay = x > BAY_MAIN.x0 - 0.3 && x < BAY_MAIN.x1 + 0.3;
+      const hb = Math.min(overBay ? 0.14 : 0.36, FLOOR - 0.08 - (sec.yc - sec.h) - 0.12);
+      if (hb < 0.12) continue;
+      const yb = FLOOR - 0.08 - hb;
+      // nad drzwiami ładowni belki kończą się przed ramą otworu (nie wchodzą w otwór drzwi)
+      const bw = 2 * (Math.min(hw(yb, x), hw(FLOOR - 0.08, x)) - 0.12) - (cargoGap(x) ? 0.25 : 0);
+      beams.push(box([x, FLOOR - 0.08 - hb / 2, cargoGap(x) ? 0.125 : 0], [0.07, hb, bw]));
+    }
+    // podłoga z odcinków – szerokość za każdym razem dopasowana do przekroju
     const fl = half(FLOOR);
-    const floor = [box([-4.2 + (PA - PF) / 2, FLOOR - 0.06, 0], [48.6 + PF + PA, 0.12, 2 * fl])];
-    // kokpit: podłoga, fotele pilotów, pulpit
-    const cockpit = [box([-30.2 - PF, FLOOR + 0.05, 0], [3.2, 0.1, 2.6]), box([-31.0 - PF, FLOOR + 0.95, 0], [0.5, 0.35, 2.2], [0, 0, -0.5])];
-    const pilotSeats = [-0.55, 0.55].flatMap((z) => [box([-30.1 - PF, FLOOR + 0.55, z], [0.55, 0.12, 0.5]), box([-29.82 - PF, FLOOR + 0.95, z], [0.1, 0.75, 0.5], [0, 0, -0.18])]);
-    // klasa biznes 1-2-1: fotele-łóżka ustawione skośnie („jodełka”), każdy przodem do swojego przejścia,
-    // w kabinie z osłoną prywatności; rozstaw rzędów ok. 2 m. Klasa ekonomiczna 3-3-3.
-    const seatJ: THREE.Matrix4[] = [];
-    for (let x = -24.6 - PF; x <= -17.4; x += 2.0)
-      for (const z of [-2.15, -0.45, 0.45, 2.15]) {
-        // fotel przy oknie patrzy skośnie ku przejściu, środkowe – ku przejściu po swojej stronie
-        const th = Math.sign(z) * (Math.abs(z) > 1 ? -0.36 : 0.36);
-        // punkt w układzie fotela (dx – do przodu/tyłu, dz – w bok) → układ kadłuba
-        const at = (dx: number, dy: number, dz: number): V3 => [x + dx * Math.cos(th) + dz * Math.sin(th), FLOOR + dy, z - dx * Math.sin(th) + dz * Math.cos(th)];
-        seatJ.push(box(at(0, 0.45, 0), [1.25, 0.18, 0.6], [0, th, 0])); // siedzisko z podnóżkiem
-        seatJ.push(box(at(0.58, 0.9, 0), [0.14, 0.95, 0.6], [0, th, -0.12])); // oparcie
-        seatJ.push(box(at(-0.05, 0.62, 0.38), [1.5, 0.75, 0.06], [0, th, 0])); // osłona prywatności od strony okna/sąsiada
-        seatJ.push(box(at(0.35, 0.68, -0.4), [0.5, 0.42, 0.18], [0, th, 0])); // konsola z podłokietnikiem od przejścia
-      }
-    const seatY: THREE.Matrix4[] = [];
-    const heads: THREE.Matrix4[] = [];
-    const zs = [-2.42, -1.95, -1.48, -0.47, 0, 0.47, 1.48, 1.95, 2.42];
-    for (let x = -14.2; x <= 16.5 + PA; x += 0.81) {
-      if (DOORS.some((dd) => Math.abs(dd - x) < 1.1)) continue;
-      for (const dz of zs) {
-        const z = dz * Math.min(1, half(FLOOR + 0.6, x) / 2.75);
-        seatY.push(box([x, FLOOR + 0.44, z], [0.46, 0.1, 0.44]));
-        seatY.push(box([x + 0.24, FLOOR + 0.78, z], [0.09, 0.62, 0.44], [0, 0, -0.14]));
-        heads.push(box([x + 0.285, FLOOR + 1.03, z], [0.1, 0.17, 0.445], [0, 0, -0.14]));
-      }
+    const floor: THREE.Matrix4[] = [];
+    for (let x = XA; x < XB - 0.01; x += 0.62) {
+      const x1 = Math.min(XB, x + 0.62);
+      floor.push(box([(x + x1) / 2, FLOOR - 0.04, 0], [x1 - x, 0.08, 2 * (Math.min(hw(FLOOR - 0.08, x), hw(FLOOR - 0.08, x1)) - 0.16)]));
     }
-    // schowki nad głowami i kuchnie/toalety przy drzwiach
-    const bins: THREE.Matrix4[] = [];
-    for (let x = -24.4 - PF; x <= 17 + PA; x += 1.72) {
-      bins.push(box([x, 1.2, 2.2], [1.64, 0.42, 0.62], [0.35, 0, 0]));
-      bins.push(box([x, 1.2, -2.2], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
-      if (x > -16) bins.push(box([x, 1.72, 0], [1.64, 0.4, 1.1]));
+    // słupki podpierające belki podłogi od spodu (po bokach ładowni) i belka kilowa pod wnęką podwozia
+    const struts: THREE.Matrix4[] = [];
+    for (let x = XA + 0.3; x <= XB - 0.6; x += 1.24) {
+      const zs = Math.min(1.62, hw(-2.3, x) - 0.12);
+      if (zs < 1.0) continue;
+      for (const sg of [1, -1]) struts.push(box([x, -1.85, zs * sg], [0.05, 0.9, 0.05]));
     }
-    const galleys = DOORS.flatMap((dx) => [box([dx + 1.15, FLOOR + 1.0, 0], [1.0, 2.0, 2.4])]);
-    // luk bagażowy: podłoga i kontenery LD3 po dwa obok siebie
-    const CARGO = -2.45;
-    const ch = half(CARGO + 0.1) + 0.05;
-    const holds: [number, number][] = [
-      [-22.5 - PF, -8.0],
-      // tylny luk kończy się tam, gdzie spód kadłuba zaczyna się podnosić ku ogonowi (dalej kontenery wystawałyby z poszycia)
-      [4.6, 9.6 + PA],
-    ];
-    const cargoFloor = holds.map(([a, b]) => box([(a + b) / 2, CARGO - 0.05, 0], [b - a, 0.1, 2 * ch]));
-    const cans: THREE.Matrix4[] = [];
-    for (const [a, b] of holds)
-      for (let x = a + 0.85; x <= b - 0.8; x += 1.66)
-        for (const z of [-0.82, 0.82]) cans.push(box([x, CARGO + 0.55, z * Math.min(1, ch / 1.75)], [1.56, 1.1, 1.55]));
-    // centropłat (keson między dźwigarami przy kadłubie) i wnęka podwozia głównego
-    const xF = wLE(W_SIDE) + S_FS * (wTE(W_SIDE) - wLE(W_SIDE));
-    const xR = wLE(W_SIDE) + S_RS * (wTE(W_SIDE) - wLE(W_SIDE));
-    const centre = [box([(xF + xR) / 2, W_Y0 + 0.05, 0], [xR - xF, 1.45, 2 * W_SIDE + 0.3])];
-    const bay = [box([1.8, -2.4, 0], [5.2, 1.3, 4.6])];
-    // tylna gródź ciśnieniowa – kopuła zamykająca kabinę
+    const keel = [box([1.8, -2.84, 0], [6.4, 0.3, 0.36])];
+    // grodzie: przednia (za owiewką radaru), tylna kopuła i gródź ogniowa APU w stożku ogonowym
     const bulk = new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2.6);
     bulk.rotateZ(-Math.PI / 2);
     const bs = fusSec(21.2 + PA);
     const bulkM = [box([20.6 + PA, bs.yc, 0], [1.2, bs.h - 0.15, bs.w - 0.15])];
-    return { unit, liner, ring, frames, floor, cockpit, pilotSeats, seatJ, seatY, heads, bins, galleys, cargoFloor, cans, centre, bay, bulk, bulkM };
+    const disc = new THREE.CircleGeometry(1, 48);
+    disc.rotateY(Math.PI / 2);
+    // gródź przednia: płyta od podłogi kokpitu w górę – niżej, za nią, jest niehermetyczna wnęka podwozia przedniego
+    const fwdPlate = (() => {
+      const gx = RADOME_X + 0.05;
+      const tf = fusTheta(gx, FLOOR);
+      const sh = new THREE.Shape();
+      for (let i = 0; i <= 48; i++) {
+        const th = -tf + (2 * tf * i) / 48;
+        const p = fusPt(gx, th, 0.03);
+        if (i === 0) sh.moveTo(p[2], p[1]);
+        else sh.lineTo(p[2], p[1]);
+      }
+      sh.closePath();
+      const g = new THREE.ShapeGeometry(sh, 4);
+      g.rotateY(-Math.PI / 2);
+      g.translate(gx, 0, 0);
+      return g;
+    })();
+    const fw = fusSec(APU_HATCH.x0 - 0.5);
+    const fireWall = [box([APU_HATCH.x0 - 0.5, fw.yc, 0], [1, fw.h - 0.04, fw.w - 0.04])];
+    // centropłat (keson między dźwigarami przy kadłubie – zbiornik centralny) i wnęka podwozia głównego
+    const xF = wLE(W_SIDE) + S_FS * (wTE(W_SIDE) - wLE(W_SIDE));
+    const xR = wLE(W_SIDE) + S_RS * (wTE(W_SIDE) - wLE(W_SIDE));
+    // keson leży pod belkami podłogi kabiny (góra ok. 0,45 m pod podłogą)
+    // szerokość kesonu wewnątrz kadłuba – ograniczona dolnym narożnikiem (spód przekroju się zaokrągla)
+    const cw = 2 * (Math.min(hw(-2.56, xF), hw(-2.56, xR)) - 0.04);
+    const centre = [box([(xF + xR) / 2, -2.07, 0], [xR - xF, 0.92, cw])];
+    const spars = [xF, xR].map((x) => box([x, -2.07, 0], [0.08, 0.98, cw - 0.06]));
+    // strop wnęki podwozia głównego (hermetyczna płyta nad kołami) – samą wnękę zajmuje schowane podwozie
+    const bay = [box([1.3, -1.355, 0], [5.2, 0.03, 4.6])];
+    // radar pogodowy (uproszczony): płyta anteny na jarzmie, silniki obrotu i nadajniki-odbiorniki na grodzi
+    const ry = fusSec(-35.6).yc;
+    const radar = [box([RADOME_X - 0.5, ry, 0], [0.06, 0.76, 0.76])];
+    const radarMech = [box([RADOME_X - 0.3, ry, 0], [0.36, 0.1, 0.1]), box([RADOME_X - 0.12, ry, 0], [0.2, 0.42, 0.34]), box([RADOME_X - 0.14, ry - 0.62, 0.3], [0.26, 0.28, 0.32]), box([RADOME_X - 0.14, ry - 0.62, -0.3], [0.26, 0.28, 0.32])];
+    // ---------- kabina ----------
+    // klasa biznes 1-2-1: fotele-łóżka ustawione skośnie („jodełka”), każdy przodem do swojego przejścia,
+    // w kabinie z osłoną prywatności; rozstaw rzędów ok. 2 m. Klasa ekonomiczna 3-3-3.
+    const seatJ: THREE.Matrix4[] = [];
+    // fotele biznes (apartamenty z osłonami, konsolą, ekranem i podnóżkiem) buduje interiorDetail
+    const seatY: THREE.Matrix4[] = [];
+    const heads: THREE.Matrix4[] = [];
+    const legs: THREE.Matrix4[] = [];
+    const zs = [-2.42, -1.95, -1.48, -0.47, 0, 0.47, 1.48, 1.95, 2.42];
+    for (let x = -14.2; x <= 16.5 + PA; x += 0.81) {
+      if (DOORS.some((dd) => x > dd - 1.95 && x < dd + 1.85)) continue; // przy drzwiach: toalety (przed) i kuchnia (za)
+      const k = Math.min(1, half(FLOOR + 0.6, x) / 2.75);
+      for (const dz of zs) {
+        const z = dz * k;
+        seatY.push(box([x, FLOOR + 0.44, z], [0.46, 0.1, 0.44]));
+        seatY.push(box([x + 0.24, FLOOR + 0.78, z], [0.09, 0.62, 0.44], [0, 0, -0.14]));
+        heads.push(box([x + 0.285, FLOOR + 1.03, z], [0.1, 0.17, 0.445], [0, 0, -0.14]));
+      }
+      // nogi foteli przy podłodze – tam kadłub jest węższy niż na wysokości siedzisk
+      const kl = Math.min(k, (hw(FLOOR + 0.02, x + 0.25) - 0.2) / 2.6);
+      for (const z of [-1.95, 0, 1.95]) legs.push(box([x, FLOOR + 0.2, z * kl], [0.05, 0.38, 1.3 * kl]));
+    }
+    // schowki nad głowami
+    const bins: THREE.Matrix4[] = [];
+    for (let x = -24.4 - PF; x <= 17 + PA; x += 1.72) {
+      // schowki boczne przy burcie – w zwężającym się ogonie bliżej osi
+      const zb = Math.min(2.2, Math.min(hw(1.45, x - 0.82), hw(1.45, x + 0.82)) - 0.36);
+      bins.push(box([x, 1.2, zb], [1.64, 0.42, 0.62], [0.35, 0, 0]));
+      bins.push(box([x, 1.2, -zb], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
+      if (x > -16) bins.push(box([x, 1.72, 0], [1.64, 0.4, 1.1]));
+    }
+    // kuchnie, toalety, zbiorniki wody i ścieków, oświetlenie, awionika i drobiazgi kokpitu – interiorDetail
+    const detail = interiorDetail(half);
+    // okna kabiny od środka – w tych samych miejscach co szyby w poszyciu (co wręgę, bez drzwi):
+    // owalne obramowanie w wykładzinie, szyba z jasnym niebem i roleta (część opuszczona do połowy)
+    // okna od środka: jasne obramowanie w wykładzinie, głęboka wnęka (tunel do szyby w poszyciu), szyba z jasnym
+    // niebem, rolety w różnym położeniu (z uchwytem) i kratki powrotu powietrza przy podłodze pod oknami
+    const winSurround: THREE.Matrix4[] = [];
+    const winReveal: THREE.Matrix4[] = [];
+    const winPane: THREE.Matrix4[] = [];
+    const winShade: THREE.Matrix4[] = [];
+    const winHandle: THREE.Matrix4[] = [];
+    const grilles: THREE.Matrix4[] = [];
+    {
+      const o = new THREE.Object3D();
+      const bx = new THREE.Vector3();
+      const by = new THREE.Vector3();
+      const basis = new THREE.Matrix4();
+      const put = (list: THREE.Matrix4[], x: number, th: number, inset: number, sy = 1, dy = 0) => {
+        const p = fusPt(x, th, inset);
+        const n = fusNormal(x, th).multiplyScalar(-1); // do środka kabiny
+        // „góra” okna zawsze pionowo (pion rzutowany na płaszczyznę poszycia) – w zwężającym się ogonie normalna jest
+        // pochylona i sam obrót z osi z obracałby okna wokół ich środka
+        by.set(0, 1, 0).addScaledVector(n, -n.y).normalize();
+        bx.crossVectors(by, n).normalize();
+        basis.makeBasis(bx, by, n);
+        o.position.set(p[0], p[1] + dy, p[2]);
+        o.quaternion.setFromRotationMatrix(basis);
+        o.scale.set(1, sy, 1);
+        o.updateMatrix();
+        list.push(o.matrix.clone());
+      };
+      const shades = [0, 0, 0.19, 0, 0.33, 0, 0.12, 0];
+      CABIN_WINS.forEach((x, k) => {
+        const th = fusTheta(x, WIN_Y);
+        const thG = fusTheta(x, FLOOR + 0.2);
+        for (const side of [1, -1]) {
+          put(winSurround, x, th * side, 0.158);
+          put(winReveal, x, th * side, 0.158);
+          put(winPane, x, th * side, 0.158);
+          const L = shades[(k * 3 + (side > 0 ? 0 : 5)) % shades.length];
+          if (L > 0) {
+            put(winShade, x, th * side, 0.158, L, 0.185);
+            put(winHandle, x, th * side, 0.158, 1, 0.185 - L);
+          }
+          put(grilles, x, thG * side, 0.157);
+        }
+      });
+    }
+    const winSurroundGeo = (() => {
+      const sh = roundRect(0.44, 0.58, 0.15) as THREE.Shape;
+      sh.holes.push(roundRect(WIN_HOLE.hx * 2 + 0.01, WIN_HOLE.hy * 2 + 0.01, 0.12, new THREE.Path()));
+      const g = new THREE.ShapeGeometry(sh, 6);
+      g.translate(0, 0, 0.004);
+      return g;
+    })();
+    const winRevealGeo = (() => {
+      const sh = roundRect(WIN_HOLE.hx * 2 + 0.02, WIN_HOLE.hy * 2 + 0.02, 0.12) as THREE.Shape;
+      sh.holes.push(roundRect(0.25, 0.37, 0.1, new THREE.Path()));
+      const g = new THREE.ExtrudeGeometry(sh, { depth: 0.13, bevelEnabled: false, curveSegments: 6 });
+      g.translate(0, 0, -0.13); // wnęka biegnie od wykładziny na zewnątrz, do szyby
+      return g;
+    })();
+    const winPaneGeo = (() => {
+      const g = new THREE.ShapeGeometry(roundRect(0.26, 0.38, 0.1) as THREE.Shape, 6);
+      g.translate(0, 0, -0.12);
+      return g;
+    })();
+    // roleta: pas od górnej krawędzi szyby w dół (długość przez skalę y), tuż przed szybą
+    const winShadeGeo = new THREE.PlaneGeometry(0.25, 1);
+    winShadeGeo.translate(0, -0.5, -0.1);
+    const winHandleGeo = new THREE.BoxGeometry(0.12, 0.018, 0.02);
+    winHandleGeo.translate(0, 0, -0.095);
+    const grilleGeo = new THREE.BoxGeometry(0.34, 0.06, 0.012);
+    const capsule = new THREE.CapsuleGeometry(0.5, 1, 6, 20);
+    // walec wzdłuż kadłuba: długość 1, średnica 1 (kanały, wiązki kabli)
+    const cylX = new THREE.CylinderGeometry(0.5, 0.5, 1, 20);
+    cylX.rotateZ(Math.PI / 2);
+    // walec pionowy, misa (zwężająca się ku dołowi) i płaski pierścień (deska sedesu) – średnica 1, wysokość 1
+    const cylV = new THREE.CylinderGeometry(0.5, 0.5, 1, 24);
+    const sphere = new THREE.SphereGeometry(0.5, 16, 12);
+    const cone = new THREE.CylinderGeometry(0.5, 0.36, 1, 24);
+    const ringH = new THREE.TorusGeometry(0.4, 0.09, 8, 28);
+    ringH.rotateX(Math.PI / 2);
+    capsule.rotateZ(Math.PI / 2);
+    const ld3 = ld3Geo();
+    // instalacje nad sufitem: główny kanał klimatyzacji wzdłuż grzbietu i wiązki kabli po obu stronach
+    // ---------- ładownie ----------
+    const ch = half(CARGO_Y + 0.1) + 0.05;
+    const cargoFloor = HOLDS.map(([a, b]) => box([(a + b) / 2, CARGO_Y - 0.05, 0], [b - a, 0.1, 2 * (Math.min(hw(CARGO_Y - 0.1, a), hw(CARGO_Y - 0.1, b)) - 0.14)]));
+    const rollers: THREE.Matrix4[] = [];
+    for (const [a, b] of HOLDS) for (let x = a + 0.2; x < b; x += 0.4) for (const z of [-0.82, 0.82]) rollers.push(box([x, CARGO_Y + 0.02, z], [0.05, 0.05, 1.2]));
+    // ładownia na bagaż luzem za tylną ładownią
+    const bulkBags: THREE.Matrix4[] = [];
+    // ładownia luzem: za tylną ładownią, na własnej podłodze (spód kadłuba jest tu już wyżej); torby i walizki w stosie
+    const BY = -2.42;
+    for (let i = 0; i < 14; i++) bulkBags.push(box([12.55 + (i % 5) * 0.42, BY + 0.2 + Math.floor(i / 5) * 0.3, 0.15 + ((i * 7) % 5) * 0.1 - 0.2], [0.38, 0.28, 0.5], [0, i * 0.4, 0]));
+    cargoFloor.push(box([13.4, BY - 0.03, 0], [2.4, 0.06, 2 * (Math.min(hw(BY - 0.06, 12.2), hw(BY - 0.06, 14.6)) - 0.12)]));
+    // stożek ogonowy: śruba trymera statecznika poziomego
+    const jack = [box([26.2 + PA, 0.75, 0], [0.16, 1.5, 0.16]), box([26.2 + PA, 1.55, 0], [0.4, 0.3, 0.4])];
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+      const U = { geo: unit };
+      const can = new THREE.Object3D();
+      checkInside({
+        beams: { ...U, mats: beams }, floor: { ...U, mats: floor }, struts: { ...U, mats: struts }, keel: { ...U, mats: keel },
+        centre: { ...U, mats: centre }, spars: { ...U, mats: spars }, bay: { ...U, mats: bay }, radar: { ...U, mats: radar },
+        radarMech: { ...U, mats: radarMech }, seatJ: { ...U, mats: seatJ }, seatY: { ...U, mats: seatY }, heads: { ...U, mats: heads },
+        legs: { ...U, mats: legs }, bins: { ...U, mats: bins }, cargoFloor: { ...U, mats: cargoFloor }, rollers: { ...U, mats: rollers },
+        bulkBags: { ...U, mats: bulkBags }, jack: { ...U, mats: jack },
+        ld3: { geo: ld3, mats: CARGO_SLOTS.map((sl) => { can.position.set(sl.x, CARGO_Y + 0.03, 0); can.scale.set(1, 1, sl.z < 0 ? -1 : 1); can.position.z = sl.z; can.updateMatrix(); return can.matrix.clone(); }) },
+        ...Object.fromEntries(detail.map((g, i) => [`detail ${g.k}${g.e ? ' (świeci)' : ''} #${i}`, { geo: g.g === 'capsule' ? capsule : g.g === 'cylX' ? cylX : g.g === 'cylV' ? cylV : g.g === 'cone' ? cone : g.g === 'ringH' ? ringH : g.g === 'sphere' ? sphere : unit, mats: g.m }])),
+      });
+    }
+    return { unit, liner, linerDoors, ring, ringThick, frames, cutFrames, cargoSurround, doorFrames, doorSills, stringers, beams, floor, struts, keel, bulk, bulkM, disc, fwdPlate, fireWall, centre, spars, bay, radar, radarMech, seatJ, seatY, heads, legs, bins, detail, winSurround, winReveal, winPane, winShade, winHandle, grilles, winSurroundGeo, winRevealGeo, winPaneGeo, winShadeGeo, winHandleGeo, grilleGeo, capsule, cylX, cylV, cone, ringH, sphere, ld3, cargoFloor, rollers, bulkBags, jack };
   }), []);
+  // kontenery: w zakładce ładowni wjeżdżają po kolei przez drzwi ładowni (prawa burta) i jadą po rolkach na miejsce
+  const cans = useRef<THREE.InstancedMesh>(null);
+  const canParts = useRef<(THREE.InstancedMesh | null)[]>([]);
+  const tmp = useMemo(() => new THREE.Object3D(), []);
+  const mm = useMemo(() => new THREE.Matrix4(), []);
+  useFrame(() => {
+    const m = cans.current;
+    if (!m) return;
+    const t = view === 'cargo' ? FUS_LIVE.cargoT : 1e9;
+    CARGO_SLOTS.forEach((sl, i) => {
+      const { p, yaw, vis } = canPose(sl, t);
+      tmp.position.set(p[0], p[1], p[2]);
+      tmp.rotation.set(0, yaw, 0);
+      // kontener pociągu, który jeszcze nie wjechał na płytę – schowany
+      tmp.scale.set(vis ? 1 : 0, vis ? 1 : 0, vis ? (sl.z < 0 ? -1 : 1) : 0);
+      tmp.updateMatrix();
+      m.setMatrixAt(i, tmp.matrix);
+      CAN_PARTS.forEach((pt, k) => {
+        const im = canParts.current[k];
+        if (!im) return;
+        pt.mats.forEach((L, j) => im.setMatrixAt(i * pt.mats.length + j, mm.multiplyMatrices(tmp.matrix, L)));
+      });
+    });
+    m.instanceMatrix.needsUpdate = true;
+    canParts.current.forEach((im) => im && (im.instanceMatrix.needsUpdate = true));
+  });
+  const S = view === 'struct';
   return (
     <group>
-      <mesh geometry={d.liner}>
-        <M k="liner" side={THREE.DoubleSide} />
+      {!S && (
+        <mesh geometry={doorHoles ? d.linerDoors : d.liner}>
+          {/* w zakładce o ciśnieniu wykładzina półprzezroczysta – widać piony nawiewu schowane w burtach */}
+          <M k="liner" side={THREE.DoubleSide} opacity={view === 'press' ? 0.28 : 1} />
+        </mesh>
+      )}
+      {/* konstrukcja – w zakładce o konstrukcji wyróżniona kolorami */}
+      <Inst geo={S ? d.ringThick : d.ring} mats={d.frames} k={S ? '#5eead4' : 'dark'} />
+      <mesh geometry={d.cutFrames}>
+        <M k={S ? '#5eead4' : 'dark'} side={THREE.DoubleSide} />
       </mesh>
-      <Inst geo={d.ring} mats={d.frames} k="dark" />
-      <Inst geo={d.unit} mats={d.floor} k="carpet" />
-      <Inst geo={d.unit} mats={d.cockpit} k="dark" />
-      <Inst geo={d.unit} mats={d.pilotSeats} k="#20242a" />
-      <Inst geo={d.unit} mats={d.seatJ} k="seatJ" />
-      <Inst geo={d.unit} mats={d.seatY} k="seatY" />
-      <Inst geo={d.unit} mats={d.heads} k="#e5e7eb" />
-      <Inst geo={d.unit} mats={d.bins} k="bin" />
-      <Inst geo={d.unit} mats={d.galleys} k="#d9d4c8" />
-      <Inst geo={d.unit} mats={d.cargoFloor} k="#6b7280" />
-      <Inst geo={d.unit} mats={d.cans} k="can" />
+      {/* rama otworów drzwi ładowni: wręgi krawędziowe i progi */}
+      <mesh geometry={d.cargoSurround}>
+        <M k={S ? '#fb923c' : '#7b8590'} side={THREE.DoubleSide} />
+      </mesh>
+      {S && <Inst geo={d.unit} mats={d.stringers} k="#fbbf24" />}
+      {S && <Inst geo={d.ringThick} mats={d.doorFrames} k="#fb923c" />}
+      {S && <Inst geo={d.unit} mats={d.doorSills} k="#fb923c" />}
+      <Inst geo={d.unit} mats={d.beams} k={S ? '#a78bfa' : '#59616b'} />
+      <Inst geo={d.unit} mats={d.struts} k={S ? '#a78bfa' : '#59616b'} />
+      <Inst geo={d.unit} mats={d.floor} k={S ? '#4b5563' : 'carpet'} />
+      <Inst geo={d.unit} mats={d.keel} k={S ? '#f472b6' : 'primer'} />
+      <Inst geo={d.bulk} mats={d.bulkM} k={S ? '#f472b6' : 'primer'} side={THREE.DoubleSide} />
+      <mesh geometry={d.fwdPlate}>
+        <M k={S ? '#f472b6' : 'primer'} side={THREE.DoubleSide} />
+      </mesh>
+      <Inst geo={d.disc} mats={d.fireWall} k="#b9bfc6" side={THREE.DoubleSide} />
       <Inst geo={d.unit} mats={d.centre} k="primer" />
+      <Inst geo={d.unit} mats={d.spars} k={S ? '#bef264' : '#7f9a63'} />
       <Inst geo={d.unit} mats={d.bay} k="#565d66" />
-      <Inst geo={d.bulk} mats={d.bulkM} k="primer" side={THREE.DoubleSide} />
-      <Lbl pos={[-30.4 - PF, 1.4, 1.4]}>kokpit</Lbl>
-      <Lbl pos={[-23.0, 1.0, 1.9]}>klasa biznes</Lbl>
-      <Lbl pos={[0.5, 0.6, 2.3]}>klasa ekonomiczna 3-3-3</Lbl>
-      <Lbl pos={[9.0, 1.75, 2.6]} sub>
-        schowki
-      </Lbl>
-      <Lbl pos={[-17.0, -2.2, 2.4]}>luk bagażowy (przedni)</Lbl>
-      <Lbl pos={[-4.6, -1.0, 2.0]} color="#bef264">
-        centropłat
-      </Lbl>
-      <Lbl pos={[1.8, -3.4, 2.4]}>wnęka podwozia</Lbl>
-      <Lbl pos={[11.0, -2.2, 2.4]}>luk bagażowy (tylny)</Lbl>
-      <Lbl pos={[20.8 + PA, 0.6, 1.6]} color="#bef264">
-        gródź ciśnieniowa
-      </Lbl>
-      <Lbl pos={[DOORS[1], FLOOR + 2.3, 3.2]} sub>
-        drzwi 2
-      </Lbl>
+      <Inst geo={d.unit} mats={d.cargoFloor} k="#6b7280" />
+      <Inst geo={d.unit} mats={d.rollers} k="#9ca3af" />
+      <Inst geo={d.unit} mats={d.jack} k="#8b939c" />
+      {/* okna (także w zakładce o konstrukcji – otwory w wykładzinie, wnęki i szyby) */}
+      {!S && <Inst geo={d.winSurroundGeo} mats={d.winSurround} k="#f1ede4" side={THREE.DoubleSide} />}
+      <Inst geo={d.winRevealGeo} mats={d.winReveal} k={S ? '#38bdf8' : '#dcd6ca'} side={THREE.DoubleSide} />
+      <Inst geo={d.winPaneGeo} mats={d.winPane} k="#cfe6fb" emit="#6aa2d8" side={THREE.DoubleSide} />
+      {furnished && <Inst geo={d.winShadeGeo} mats={d.winShade} k="#f4f1ea" side={THREE.DoubleSide} />}
+      {furnished && <Inst geo={d.winHandleGeo} mats={d.winHandle} k="#9ca3af" />}
+      {/* wyposażenie */}
+      {furnished && (
+        <>
+          <Inst geo={d.unit} mats={d.radar} k="#c9b98a" />
+          <Inst geo={d.unit} mats={d.radarMech} k="#3a3f45" />
+          <Inst geo={d.unit} mats={d.seatJ} k="seatJ" />
+          <Inst geo={d.unit} mats={d.seatY} k="seatY" />
+          <Inst geo={d.unit} mats={d.heads} k="#e5e7eb" />
+          <Inst geo={d.unit} mats={d.legs} k="#9ca3af" />
+          <Inst geo={d.unit} mats={d.bins} k="bin" />
+          <Inst geo={d.unit} mats={d.bulkBags} k="#3f4a5a" />
+          <Inst geo={d.grilleGeo} mats={d.grilles} k="#5b6470" />
+          {d.detail.map((gr, i) => (
+            <Inst key={i} geo={{ box: d.unit, capsule: d.capsule, cylX: d.cylX, cylV: d.cylV, cone: d.cone, ringH: d.ringH, sphere: d.sphere }[gr.g]} mats={gr.m} k={gr.k} emit={gr.e} />
+          ))}
+          <instancedMesh ref={cans} args={[d.ld3, undefined, CARGO_SLOTS.length]} frustumCulled={false}>
+            <M k="can" side={THREE.DoubleSide} />
+          </instancedMesh>
+          {CAN_PARTS.map((pt, k) => (
+            <instancedMesh key={k} ref={(el) => (canParts.current[k] = el)} args={[d.unit, undefined, CARGO_SLOTS.length * pt.mats.length]} frustumCulled={false}>
+              <M k={pt.k} />
+            </instancedMesh>
+          ))}
+        </>
+      )}
+      {labels && <FuselageLabels pick={pick} />}
     </group>
   );
 }
@@ -1668,7 +2782,7 @@ function wingCycle(m: Mover, t: number) {
 
 /** Ustawienie mechanizacji skrzydła: klapy (kąt w stopniach, wysunięcie 0…1) i sloty (0…1). */
 export type Mech = { flap: number; fowler: number; slat: number };
-function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, surfaces }: { open: boolean; animate: boolean; ctlAnim?: boolean; mech?: Mech; canoes?: boolean; side?: number; surfaces?: { aileron: number; spoiler?: number } }) {
+function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, surfaces, outside = false }: { open: boolean; animate: boolean; ctlAnim?: boolean; mech?: Mech; canoes?: boolean; side?: number; surfaces?: { aileron: number; spoiler?: number }; outside?: boolean }) {
   // mechanizacja dojeżdża płynnie do zadanego ustawienia (ok. 1,5 s – jak prawdziwe klapy, tylko szybciej)
   const mc = useRef<Mech>({ flap: 0, fowler: 0, slat: 0 });
   const mt = useRef(mech);
@@ -1715,10 +2829,18 @@ function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, s
       (r < LEG_NECK.z1 + 0.5 && inLegSlot(WING.st(r).x + s * WING.st(r).c, r));
     const upper = grid(ss, rs, (s, r) => sp(WING, r, s, 1), upSkip(false));
     const full = upper.getIndex()!.clone();
+    // przekrój kadłuba: poszycie skrzydła dopiero od burty – część wewnątrz kadłuba wystawałaby nad podłogę kabiny
+    const outG = grid(ss, rs, (s, r) => sp(WING, r, s, 1), (s, r) => r < W_SIDE - 0.05 || upSkip(false)(s, r));
+    const fullOut = outG.getIndex()!.clone();
+    outG.dispose();
     const cutG = grid(ss, rs, (s, r) => sp(WING, r, s, 1), upSkip(true));
     const cut = cutG.getIndex()!.clone();
     cutG.dispose();
     const lower = grid(ss, rs, (s, r) => sp(WING, r, s, -1), loSkip);
+    const lowFull = lower.getIndex()!.clone();
+    const lowG = grid(ss, rs, (s, r) => sp(WING, r, s, -1), (s, r) => r < W_SIDE - 0.05 || loSkip(s, r));
+    const lowOut = lowG.getIndex()!.clone();
+    lowG.dispose();
     // zaślepka końca wingletu
     const tip = loftSections([W_REND - 0.001, W_REND], (r) => [...Array.from({ length: 17 }, (_, i) => sp(WING, r, 1 - i / 16, 1)), ...Array.from({ length: 15 }, (_, i) => sp(WING, r, (i + 1) / 16, -1))]);
     // ciemne wnęki widoczne w szczelinach: za slotami (nosek) i przed klapami/lotkami
@@ -1838,12 +2960,14 @@ function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, s
           const piv = sp(WING, r, 0.22, -1, -0.5);
           const att = sp(WING, r, S_SLAT_L * 0.55, -1, 0.06);
           const pts = Array.from({ length: 14 }, (_, k) => {
-            const th = -(k / 13) * 0.34;
+            // ok. 0,18 rad (krócej ku końcówce, gdzie profil jest cieńszy): przy schowanym slocie cała szyna mieści się w nosku
+            const th = -(k / 13) * (r < 15 ? 0.18 : 0.18 - 0.0085 * (r - 15));
             const dx = att[0] - piv[0];
             const dy = att[1] - piv[1];
             return new THREE.Vector3(piv[0] + dx * Math.cos(th) - dy * Math.sin(th), piv[1] + dx * Math.sin(th) + dy * Math.cos(th), att[2]);
           });
-          return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, 0.045, 6, false);
+          // przy końcówce profil jest cienki – szyna też cieńsza
+          return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, r > 26 ? 0.025 : 0.045, 6, false);
         });
         full = merge([geo, ...tracks]);
       }
@@ -1907,7 +3031,7 @@ function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, s
     }
     for (const r of [r0 - 0.06, r1 + 0.06])
       for (let s = s0; s <= s1 + 1e-6; s += 0.22 / WING.st(r).c) rivets.push(onSkin(r, s, 1, [0.035, 0.006, 0.035], 0.004));
-    return { upper, full, cut, lower, tip, coves, fixedNose, movers, canoes, seamUp, seamLo, dis, panels, panelRims, vent, walk, holeEdge, rivets };
+    return { upper, full, fullOut, cut, lower, lowFull, lowOut, tip, coves, fixedNose, movers, canoes, seamUp, seamLo, dis, panels, panelRims, vent, walk, holeEdge, rivets };
   }), []);
   const rod = cached('rod', () => {
     const c = new THREE.CylinderGeometry(1, 0.6, 1, 6);
@@ -1917,7 +3041,9 @@ function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, s
   });
   // owalna płytka (walec o średnicy i wysokości 1) – włazy rewizyjne i wlot odpowietrzenia
   const disc = cached('disc', () => new THREE.CylinderGeometry(0.5, 0.5, 1, 28));
-  const upper = useShared(g.upper, open ? g.cut : g.full);
+  // outside – przekrój kadłuba: bez poszycia wewnątrz kadłuba
+  const upper = useShared(g.upper, open ? g.cut : outside ? g.fullOut : g.full);
+  const lower = useShared(g.lower, outside ? g.lowOut : g.lowFull);
   const groups = useMemo(
     () => ({
       flaps: g.movers.filter((m) => m.kind === 'flap' && !m.tag),
@@ -1958,7 +3084,7 @@ function Wing({ open, animate, ctlAnim = false, mech, canoes = true, side = 1, s
         <mesh geometry={upper}>
           <M k="wing" side={THREE.DoubleSide} />
         </mesh>
-        <mesh geometry={g.lower}>
+        <mesh geometry={lower}>
           <M k="wing" side={THREE.DoubleSide} />
         </mesh>
         <mesh geometry={g.coves}>
@@ -2433,19 +3559,19 @@ function Tail({ animate, surfaces, open = false, fin = 1 }: { animate: boolean; 
 
 /** Opisy elementów usterzenia, które można kliknąć w zakładce „Usterzenie w ruchu”. */
 export const TAIL_PART_INFO: Record<string, { name: string; desc: string }> = {
-  vtp: { name: 'statecznik pionowy', desc: 'Stała część usterzenia pionowego, ok. 10 m nad kadłubem. W środku ma keson z dźwigarami i żebrami z kompozytu węglowego. Działa jak lotka strzały: gdy samolot zacznie lecieć bokiem, napływ z boku obraca nos z powrotem w kierunku lotu (stateczność kierunkowa).' },
-  rudder: { name: 'ster kierunku', desc: 'Jednoczęściowa powierzchnia na tylnej krawędzi statecznika pionowego. Odchyla nos w lewo lub w prawo – koordynuje zakręty, pomaga przy lądowaniu z bocznym wiatrem i równoważy ciąg, gdy jeden silnik stanie. Komputery sterowania zmniejszają dopuszczalne wychylenie wraz z prędkością, żeby nie przeciążyć statecznika.' },
-  rudderAct: { name: 'siłowniki steru kierunku', desc: 'Trzy siłowniki wewnątrz statecznika, przy linii zawiasów (pokazane prześwietlone). Cylinder jest przymocowany do tylnego dźwigara statecznika, a tłoczysko do okucia na sterze. Każdy ma inne źródło zasilania, więc ster działa także po awarii jednego układu.' },
-  htp: { name: 'statecznik poziomy (przestawiany)', desc: 'Statecznik poziomy przestawiany w całości – w dokumentacji oznaczany skrótem THS. Obraca się powoli o kilka stopni wokół osi na tylnym dźwigarze – tak samolot jest wyważany przy zmianie prędkości, konfiguracji klap i położenia środka ciężkości. Dzięki temu stery wysokości mogą wrócić do położenia neutralnego. W animacji widać ten wolny ruch.' },
-  elevator: { name: 'ster wysokości', desc: 'Po jednym na każdej połówce statecznika poziomego. Służą do szybkich zmian pochylenia: wychylenie w górę dociska ogon i podnosi nos, w dół – odwrotnie. Długotrwałe wyważenie przejmuje przestawny statecznik.' },
-  elevAct: { name: 'siłowniki sterów wysokości', desc: 'Po dwa na każdy ster, wewnątrz statecznika poziomego (pokazane prześwietlone). Zasilane z różnych układów: gdy jeden zawiedzie, drugi przejmuje pracę, a pierwszy przechodzi w tryb tłumienia, żeby ster nie trzepotał.' },
-  thsPivot: { name: 'oś obrotu statecznika', desc: 'Okucia na tylnym dźwigarze statecznika poziomego, wewnątrz stożka ogonowego. Statecznik obraca się wokół nich jak na zawiasie, a przednią krawędzią porusza śruba trymera.' },
-  thsJack: { name: 'śruba trymera statecznika', desc: 'Śruba toczna z nakrętką zamocowaną na przednim dźwigarze statecznika. Napędzają ją silniki przez przekładnię u dołu: obrót śruby podnosi albo opuszcza krawędź natarcia statecznika. Śruba jest samohamowna – bez napędu statecznik zostaje tam, gdzie był.' },
-  dis: { name: 'wyładowniki statyczne', desc: 'Cienkie pręciki na krawędziach spływu sterów (i skrzydeł). W locie samolot elektryzuje się od tarcia powietrza, kropel i kryształków lodu – wyładowniki oddają ten ładunek do powietrza po trochu i z dala od anten, żeby wyładowania nie zakłócały łączności radiowej.' },
-  dorsal: { name: 'płetwa grzbietowa', desc: 'Opływowe przejście grzbietu kadłuba w krawędź natarcia statecznika pionowego. Poprawia opływ statecznika przy dużym ślizgu (np. po awarii silnika) i łagodnie wprowadza obciążenia z nasady statecznika w kadłub.' },
-  aileron: { name: 'lotki', desc: 'Dwie lotki na krawędzi spływu każdego skrzydła, przy końcówce. Działają przeciwsobnie: na jednym skrzydle wychylają się w dół (więcej siły nośnej), na drugim w górę (mniej) – samolot przechyla się wokół osi podłużnej. To trzecia oś sterowania obok steru kierunku i sterów wysokości. W A350 lotki wychylają się też lekko w dół razem z klapami, żeby zwiększyć siłę nośną przy starcie i lądowaniu.' },
-  spoiler: { name: 'spojlery (pomoc lotkom)', desc: 'Płyty na górnej powierzchni skrzydła przed klapami. Przy przechylaniu unoszą się tylko na skrzydle, które ma opaść (tam, gdzie lotka idzie w górę): psują tam siłę nośną i dokładają oporu, więc przechylanie jest szybsze, a odchylenie niekorzystne mniejsze. Po wylądowaniu wszystkie podnoszą się naraz jako hamulce aerodynamiczne.' },
-  tailLights: { name: 'światła logo', desc: 'Reflektory w górnej powierzchni stateczników poziomych, przy kadłubie. Oświetlają logo linii na stateczniku pionowym – w nocy na postoju oraz przy starcie i lądowaniu, żeby samolot był lepiej widoczny.' },
+  vtp: { name: 'statecznik pionowy', desc: 'Stała, pionowa część ogona – ma ok. 10 m wysokości ponad kadłubem. W środku ma szkielet z belek i żeber z kompozytu węglowego. Działa jak lotki na końcu strzały: gdy samolot zacznie lecieć trochę bokiem, napływające z boku powietrze samo obraca nos z powrotem w kierunku lotu.' },
+  rudder: { name: 'ster kierunku', desc: 'Ruchoma tylna część statecznika pionowego. Obraca nos samolotu w lewo albo w prawo. Pomaga w zakrętach, przy lądowaniu z bocznym wiatrem i wtedy, gdy jeden silnik przestanie pracować, a drugi „ciągnie” samolot w bok. Przy dużej prędkości komputery pozwalają wychylić go tylko trochę, żeby nie przeciążyć ogona.' },
+  rudderAct: { name: 'siłowniki steru kierunku', desc: 'Trzy siłowniki hydrauliczne w środku statecznika, przy zawiasach steru (pokazane jak na prześwietleniu). Jednym końcem są przymocowane do statecznika, drugim do steru. Każdy ma inne źródło zasilania, więc ster działa nawet po awarii jednej instalacji.' },
+  htp: { name: 'statecznik poziomy (przestawiany)', desc: 'Poziome „skrzydełka” na ogonie. Cały statecznik może się powoli obracać o kilka stopni – tak samolot jest wyważany, gdy zmienia się prędkość, położenie klap albo rozłożenie ładunku. Dzięki temu stery wysokości mogą wrócić do położenia środkowego. W animacji widać ten wolny ruch.' },
+  elevator: { name: 'ster wysokości', desc: 'Ruchome tylne części statecznika poziomego, po jednej z każdej strony. Służą do szybkich zmian pochylenia: wychylone w górę dociskają ogon w dół i podnoszą nos, wychylone w dół – odwrotnie. Do długotrwałego wyważenia służy przestawny statecznik.' },
+  elevAct: { name: 'siłowniki sterów wysokości', desc: 'Po dwa siłowniki na każdy ster, w środku statecznika poziomego (pokazane jak na prześwietleniu). Mają różne źródła zasilania: gdy jeden zawiedzie, drugi przejmuje pracę, a pierwszy tylko tłumi ruchy steru, żeby nie trzepotał.' },
+  thsPivot: { name: 'oś obrotu statecznika', desc: 'Okucia, na których obraca się statecznik poziomy – jak na zawiasie. Są w środku ogona, przy tylnej belce statecznika. Przednią krawędź statecznika podnosi i opuszcza śruba.' },
+  thsJack: { name: 'śruba trymera statecznika', desc: 'Długa śruba z nakrętką przymocowaną do przedniej belki statecznika. Kręcą nią silniki przez przekładnię na dole: obrót śruby podnosi albo opuszcza przednią krawędź statecznika. Śruba sama się nie obraca, więc gdy napęd stanie, statecznik zostaje tam, gdzie był.' },
+  dis: { name: 'wyładowniki statyczne', desc: 'Cienkie pręciki na tylnych krawędziach sterów (i skrzydeł). W locie samolot elektryzuje się od tarcia o powietrze, krople i kryształki lodu. Pręciki oddają ten ładunek do powietrza po trochu i z dala od anten, żeby iskrzenie nie zakłócało łączności radiowej.' },
+  dorsal: { name: 'płetwa grzbietowa', desc: 'Opływowe przejście grzbietu kadłuba w przednią krawędź statecznika pionowego. Poprawia opływ statecznika, gdy samolot leci mocno bokiem (np. po awarii silnika), i łagodnie przenosi obciążenia ze statecznika na kadłub.' },
+  aileron: { name: 'lotki', desc: 'Po dwie lotki na tylnej krawędzi każdego skrzydła, przy końcu. Wychylają się w przeciwne strony: na jednym skrzydle w dół (skrzydło unosi się mocniej), na drugim w górę (słabiej) – samolot się przechyla. Razem ze sterem kierunku i sterami wysokości pozwalają obracać samolot we wszystkich trzech kierunkach. W A350 lotki wychylają się też lekko w dół razem z klapami, żeby skrzydło lepiej niosło przy starcie i lądowaniu.' },
+  spoiler: { name: 'spojlery (pomoc lotkom)', desc: 'Płyty na górze skrzydła, przed klapami. Przy przechylaniu podnoszą się tylko na skrzydle, które ma opaść: odbierają mu część siły nośnej i hamują je, więc samolot przechyla się szybciej i równiej. Po wylądowaniu wszystkie podnoszą się naraz i hamują samolot.' },
+  tailLights: { name: 'światła logo', desc: 'Reflektory w górnej powierzchni poziomych stateczników, przy kadłubie. Oświetlają logo linii lotniczej na stateczniku pionowym – nocą na postoju oraz przy starcie i lądowaniu, żeby samolot był lepiej widoczny.' },
 };
 
 /**
@@ -2753,10 +3879,11 @@ const GearCtx = createContext<GearDrive | null>(null);
 /** Podwozie schowane (lot): goleń we wnęce, drzwi zamknięte, amortyzator wysunięty. */
 const GEAR_STOWED: GearDrive = { retract: 1, extend: 0.46, lift: 0, steer: 0, rear: 0, heat: 0, spin: 0 };
 /**
- * Kąt obrotu goleni głównej przy chowaniu (do środka kadłuba). Nieco mniej niż 90°: schowany wózek leży trochę niżej,
- * więc górny rząd kół zostaje pod podłogą kabiny.
+ * Kąt obrotu goleni głównej przy chowaniu (do środka kadłuba). Mniej niż 90°: schowany wózek leży niżej, pod płytą
+ * nad wnęką (zmierzone w przekroju kadłuba – przy 85° górny rząd kół wchodził ok. 10 cm nad podłogę kabiny, a przy
+ * 75° goleń przy nasadzie skrzydła wystawała z owiewki).
  */
-const MAIN_SWING = (85 * Math.PI) / 180;
+const MAIN_SWING = (80 * Math.PI) / 180;
 const smooth01 = (v: number) => {
   const t = Math.max(0, Math.min(1, v));
   return t * t * (3 - 2 * t);
@@ -2781,6 +3908,7 @@ export const MLG = { x: 1.3, z: 4.75, top: -1.62 };
  */
 function Gear() {
   const drive = useContext(GearCtx);
+  const ext = useContext(ExtLtCtx);
   const nx = NOSE_X;
   const { x: mx, z: mz, top } = MLG;
   const wy = GROUND + 0.7; // środek kół głównych (opona ok. 1,4 m)
@@ -2870,6 +3998,10 @@ function Gear() {
   const stayLo = useRef<(THREE.Group | null)[]>([]);
   const stayKnee = useRef<(THREE.Group | null)[]>([]);
   const stayLock = useRef<(THREE.Group | null)[]>([]);
+  // siłownik chowania: cylinder zawieszony w skrzydle (A), tłoczysko na goleni (B) – wysuwa się, gdy goleń się chowa
+  const retBody = useRef<(THREE.Group | null)[]>([]);
+  const retRod = useRef<(THREE.Group | null)[]>([]);
+  const RET = useMemo(() => ({ A: new THREE.Vector3(mx - 0.3, top + 0.3, mz + 0.9), B0: new THREE.Vector3(mx - 0.3, top - 1.0, mz), body: 1.1 }), [mx, mz, top]);
   // zastrzał: punkt zawieszenia w konstrukcji (stały), kolano i punkt na goleni (w położeniu wypuszczonym)
   const stay = useMemo(() => {
     // górny koniec zastrzału w konstrukcji skrzydła, w szczelinie goleni – przy wypuszczonym podwoziu zastrzał nie
@@ -2933,6 +4065,13 @@ function Gear() {
       stayLo.current.forEach((g) => place(g, K, B));
       stayKnee.current.forEach((g) => g && g.position.copy(K));
       stayLock.current.forEach((g) => g && (g.visible = sw < 0.03));
+      // siłownik chowania: punkt na goleni obraca się z nią, cylinder i tłoczysko leżą na prostej A–B
+      const rdy = RET.B0.y - top;
+      const RB = new THREE.Vector3(RET.B0.x, top + rdy * Math.cos(ang), mz + rdy * Math.sin(ang));
+      const dir = RB.clone().sub(RET.A).normalize();
+      const bodyEnd = RET.A.clone().addScaledVector(dir, RET.body);
+      retBody.current.forEach((g) => place(g, RET.A, bodyEnd));
+      retRod.current.forEach((g) => place(g, bodyEnd.clone().addScaledVector(dir, -0.15), RB));
     }
     piston.current.forEach((g) => g && (g.position.y = -stroke));
     // wózek: w powietrzu pochylony (przednia oś niżej); przed obrotem goleni siłownik ustawia go prostopadle do niej,
@@ -3009,16 +4148,46 @@ function Gear() {
           ))}
           <Hose pts={[[nx + 0.32, -3.0, 0.16], [nx + 0.4, -3.6, 0.22], [nx + 0.33, -4.0, 0.22]]} />
           <Pipe pts={[[nx + 0.16, -2.9, 0.1], [nx + 0.16, -4.0, 0.1], [nx + 0.2, -4.1, 0.05]]} />
-          {/* reflektory kołowania i startu na goleni */}
+          {/* reflektory na goleni: kołowania (szeroka wiązka, z = +0,12) i startu (wąska, daleka, z = −0,12) */}
           {[0.12, -0.12].map((z) => (
             <group key={z}>
               <mesh position={[nx - 0.17, -3.85, z]}>
                 <boxGeometry args={[0.12, 0.16, 0.16]} />
                 <M k="dark" />
               </mesh>
-              <Lamp p={[nx - 0.235, -3.85, z]} n={[-1, -0.08, 0]} color="#fff6dc" r={0.055} halo={1.6} isOn={() => Boolean(drive?.lights)} sector={SECTOR.taxi} bezel={false} beam={{ len: 30, half: 0.16, dir: [-1, -0.11, 0] }} />
+              <Lamp
+                p={[nx - 0.235, -3.85, z]}
+                n={[-1, -0.08, 0]}
+                color="#fff6dc"
+                r={0.055}
+                halo={1.6}
+                isOn={() => Boolean(drive?.lights)}
+                lt={z > 0 ? 'taxi' : 'to'}
+                sector={SECTOR.taxi}
+                bezel={false}
+                beam={z > 0 ? { len: 16, half: 0.3, dir: [-1, -0.16, 0] } : { len: 28, half: 0.1, dir: [-1, -0.07, 0] }}
+              />
             </group>
           ))}
+          {/* reflektory zjazdu z pasa (RWY TURN OFF): wyżej na goleni, skierowane ukośnie w lewo i w prawo */}
+          {[1, -1].map((sg) => (
+              <group key={`to${sg}`}>
+                <mesh position={[nx - 0.12, -3.62, 0.17 * sg]}>
+                  <boxGeometry args={[0.12, 0.13, 0.13]} />
+                  <M k="dark" />
+                </mesh>
+                <Lamp p={[nx - 0.17, -3.62, 0.215 * sg]} n={[-0.7, -0.08, 0.7 * sg]} color="#fff6dc" r={0.048} halo={1.4} lt="turnoff" sector={{ c: 45 * sg, h: 30, v: -5, vh: 15 }} bezel={false} beam={{ len: 22, half: 0.32, dir: [-0.7, -0.14, 0.7 * sg] }} />
+              </group>
+            ))}
+          {ext?.night && (
+            <>
+              <SpotLamp p={[nx - 0.3, -3.85, 0.12]} dir={[-1, -0.16, 0]} lt="taxi" angle={0.42} dist={70} power={900} />
+              <SpotLamp p={[nx - 0.3, -3.85, -0.12]} dir={[-1, -0.07, 0]} lt="to" angle={0.17} dist={160} power={2600} />
+              {[1, -1].map((sg) => (
+                <SpotLamp key={sg} p={[nx - 0.2, -3.62, 0.25 * sg]} dir={[-0.7, -0.15, 0.7 * sg]} lt="turnoff" angle={0.5} dist={60} power={700} />
+              ))}
+            </>
+          )}
           {/* tłoczysko z kołami: wysuwa się w powietrzu, a koła skręcają razem z dolną częścią goleni */}
           <group ref={nosePiston}>
             <group ref={noseSteer} position={[nx + 0.06, 0, 0]}>
@@ -3071,7 +4240,7 @@ function Gear() {
           {/* drzwi wnęki w owiewce: wygięte jak spód owiewki i równe z poszyciem, zawias wzdłuż krawędzi przy osi kadłuba;
               otwierają się w dół tylko w czasie chowania i wypuszczania podwozia */}
           <group ref={(g) => (bayDoor.current[si] = g)} position={[0, doors.mainHingeY, BAY_MAIN.z0]}>
-            <mesh geometry={doors.main} position={[0, -doors.mainHingeY, -BAY_MAIN.z0]}>
+            <mesh geometry={doors.main} position={[0, -doors.mainHingeY, -BAY_MAIN.z0]} userData={{ noCull: true }}>
               <M k="belly" side={THREE.DoubleSide} />
             </mesh>
           </group>
@@ -3094,6 +4263,19 @@ function Gear() {
               <M k="steel" />
             </mesh>
           </group>
+          {/* siłownik chowania goleni: cylinder w skrzydle, chromowane tłoczysko zaczepione u góry goleni */}
+          <group ref={(g) => (retBody.current[si] = g)}>
+            <mesh>
+              <cylinderGeometry args={[0.1, 0.1, 1, 16]} />
+              <M k={GEAR_GREY} />
+            </mesh>
+          </group>
+          <group ref={(g) => (retRod.current[si] = g)}>
+            <mesh>
+              <cylinderGeometry args={[0.055, 0.055, 1, 14]} />
+              <M k="chrome" />
+            </mesh>
+          </group>
           {/* goleń obraca się do środka kadłuba wokół osi przegubu (wzdłuż kadłuba) */}
           <group ref={(g) => (swing.current[si] = g)} position={[mx, top, mz]}>
             <group position={[-mx, -top, -mz]}>
@@ -3103,6 +4285,16 @@ function Gear() {
                 <M k={GEAR_GREY} />
               </mesh>
               <Strut a={[mx, top, mz]} b={[mx, MAIN_CYL_END, mz]} r={0.22} k={GEAR_GREY} />
+              {/* ucho siłownika chowania na goleni */}
+              <mesh position={[mx - 0.3, top - 1.0, mz + 0.12]}>
+                <boxGeometry args={[0.16, 0.22, 0.3]} />
+                <M k={GEAR_GREY} />
+              </mesh>
+              {/* czujnik zbliżeniowy „koła na ziemi” (WOW) przy nożycach – mówi komputerom, że samolot stoi na ziemi */}
+              <mesh position={[mx - 0.3, MAIN_CYL_END + 0.05, mz + 0.2]}>
+                <boxGeometry args={[0.08, 0.12, 0.08]} />
+                <M k="dark" />
+              </mesh>
               <mesh position={[mx, MAIN_CYL_END - 0.03, mz]}>
                 <cylinderGeometry args={[0.25, 0.25, 0.14, 28]} />
                 <M k="dark" />
@@ -3151,18 +4343,82 @@ function Gear() {
                 <Strut a={[mx, MAIN_CYL_END + 0.75, mz]} b={[mx, wy + 0.18, mz]} r={0.155} k="chrome" />
                 <Strut a={[mx + 0.22, -4.05, mz]} b={[mx + 1.9, wy + 0.12, mz]} r={0.055} k="dark" />
                 <Pin p={[mx, wy + 0.12, mz]} r={0.15} len={0.56} k={GEAR_GREY} />
+                {/* widełki na końcu tłoczyska: obejmują środek belki wózka, przez nie przechodzi sworzeń przegubu */}
+                <mesh position={[mx, wy + 0.32, mz]}>
+                  <boxGeometry args={[0.42, 0.14, 0.52]} />
+                  <M k={GEAR_GREY} />
+                </mesh>
+                {[1, -1].map((sg) => (
+                  <mesh key={`fork${sg}`} position={[mx, wy + 0.16, mz + 0.235 * sg]}>
+                    <boxGeometry args={[0.4, 0.42, 0.05]} />
+                    <M k={GEAR_GREY} />
+                  </mesh>
+                ))}
+                {[1, -1].map((sg) => (
+                  <mesh key={`nut${sg}`} position={[mx, wy + 0.12, mz + 0.3 * sg]} rotation={[Math.PI / 2, 0, 0]}>
+                    <cylinderGeometry args={[0.1, 0.1, 0.05, 6]} />
+                    <M k="steel" />
+                  </mesh>
+                ))}
                 <group ref={(g) => (bogie.current[si] = g)} position={[mx, wy + 0.12, mz]}>
                   <group position={[-mx, -(wy + 0.12), -mz]}>
-                    <mesh position={[mx, wy + 0.06, mz]}>
-                      <boxGeometry args={[4.3, 0.26, 0.28]} />
+                    {/* belka wózka: kuta rura, gruba w środku (przegub) i zwężająca się ku końcom */}
+                    <mesh position={[mx, wy + 0.06, mz]} rotation={[0, 0, Math.PI / 2]}>
+                      <cylinderGeometry args={[0.15, 0.15, 3.0, 24]} />
                       <M k={GEAR_GREY} />
                     </mesh>
+                    {[1, -1].map((e) => (
+                      <mesh key={e} position={[mx + e * 1.85, wy + 0.06, mz]} rotation={[0, 0, (-e * Math.PI) / 2]}>
+                        <cylinderGeometry args={[0.1, 0.15, 0.7, 24]} />
+                        <M k={GEAR_GREY} />
+                      </mesh>
+                    ))}
+                    {/* środek belki z gniazdem przegubu */}
+                    <mesh position={[mx, wy + 0.1, mz]}>
+                      <boxGeometry args={[0.62, 0.36, 0.36]} />
+                      <M k={GEAR_GREY} />
+                    </mesh>
+                    {/* piasty osi w belce i podkładki pod podnośnik (do zmiany koła podnosi się wózek pod osią) */}
+                    {[-1.5, 0, 1.5].map((dx) => (
+                      <group key={`hub${dx}`}>
+                        <mesh position={[mx + dx, wy, mz]} rotation={[Math.PI / 2, 0, 0]}>
+                          <cylinderGeometry args={[0.17, 0.17, 0.4, 24]} />
+                          <M k={GEAR_GREY} />
+                        </mesh>
+                        <mesh position={[mx + dx, wy - 0.19, mz]}>
+                          <sphereGeometry args={[0.07, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]} />
+                          <M k="steel" />
+                        </mesh>
+                        {/* rozdzielacz hamulcowy na belce: z niego wychodzą węże do obu hamulców osi */}
+                        <mesh position={[mx + dx + 0.24, wy + 0.2, mz]}>
+                          <boxGeometry args={[0.16, 0.08, 0.2]} />
+                          <M k="#8b939c" />
+                        </mesh>
+                      </group>
+                    ))}
                     {[-1.5, 0].map((dx) => (
                       <Pin key={dx} p={[mx + dx, wy, mz]} r={0.095} len={1.5} />
                     ))}
-                    {/* przewody hamulców wzdłuż belki wózka */}
-                    <Pipe pts={[[mx + 0.3, wy + 0.2, mz + 0.16], [mx + 1.5, wy + 0.16, mz + 0.2], [mx + 1.5, wy + 0.05, mz + 0.45]]} />
-                    <Pipe pts={[[mx - 0.3, wy + 0.2, mz + 0.16], [mx - 1.5, wy + 0.16, mz + 0.2], [mx - 1.5, wy + 0.05, mz + 0.45]]} />
+                    {/* ucho holownicze z przodu belki i ucho siłownika ustawiającego wózek z tyłu */}
+                    <mesh position={[mx - 2.24, wy + 0.06, mz]} rotation={[Math.PI / 2, 0, 0]}>
+                      <torusGeometry args={[0.07, 0.025, 8, 20]} />
+                      <M k="steel" />
+                    </mesh>
+                    {[1, -1].map((sg) => (
+                      <mesh key={`lug${sg}`} position={[mx + 1.92, wy + 0.17, mz + 0.07 * sg]}>
+                        <boxGeometry args={[0.18, 0.16, 0.035]} />
+                        <M k={GEAR_GREY} />
+                      </mesh>
+                    ))}
+                    <Pin p={[mx + 1.92, wy + 0.2, mz]} r={0.03} len={0.2} />
+                    {/* przewody hamulców wzdłuż belki wózka (po obu stronach – dwa niezależne układy hydrauliczne) */}
+                    {[1, -1].map((sg) => (
+                      <Pipe key={`bl${sg}`} pts={[[mx - 1.3, wy + 0.24, mz + 0.1 * sg], [mx - 0.32, wy + 0.24, mz + 0.1 * sg], [mx - 0.32, wy + 0.3, mz + 0.19 * sg], [mx + 0.32, wy + 0.3, mz + 0.19 * sg], [mx + 0.32, wy + 0.24, mz + 0.1 * sg], [mx + 1.72, wy + 0.24, mz + 0.1 * sg]]} />
+                    ))}
+                    {/* węże do hamulców przedniej i środkowej osi (tylna oś ma swoje, skręcają się razem z nią) */}
+                    {[-1.5, 0].flatMap((dx) =>
+                      [1, -1].map((sg) => <Hose key={`bh${dx}${sg}`} pts={[[mx + dx + 0.3, wy + 0.22, mz + 0.06 * sg], [mx + dx + 0.42, wy + 0.34, mz + 0.24 * sg], [mx + dx + 0.3, wy + 0.3, mz + 0.38 * sg]]} r={0.014} />),
+                    )}
                     {/* drążki reakcyjne hamulców: przenoszą moment hamowania z obudowy hamulca na belkę wózka */}
                     {[-1.5, 0].flatMap((dx) =>
                       [1, -1].map((sg) => <Strut key={`tr${dx}${sg}`} a={[mx + dx, wy - 0.3, mz + 0.34 * sg]} b={[mx + dx + 0.62, wy - 0.06, mz + 0.14 * sg]} r={0.028} k="#7c848e" />),
@@ -3176,6 +4432,9 @@ function Gear() {
                     <group ref={(g) => (rearAx.current[si] = g)} position={[mx + 1.5, wy, mz]}>
                       <group position={[-(mx + 1.5), -wy, -mz]}>
                         <Pin p={[mx + 1.5, wy, mz]} r={0.095} len={1.5} />
+                        {[1, -1].map((sg) => (
+                          <Hose key={`rh${sg}`} pts={[[mx + 1.8, wy + 0.22, mz + 0.06 * sg], [mx + 1.92, wy + 0.34, mz + 0.24 * sg], [mx + 1.8, wy + 0.3, mz + 0.38 * sg]]} r={0.014} />
+                        ))}
                         {[1, -1].map((sg) => (
                           <Strut key={sg} a={[mx + 1.5, wy - 0.3, mz + 0.34 * sg]} b={[mx + 0.9, wy - 0.06, mz + 0.14 * sg]} r={0.028} k="#7c848e" />
                         ))}
@@ -3197,19 +4456,20 @@ function Gear() {
 
 /** Opisy części podwozia, które można kliknąć na stronie głównej modułu. */
 export const GEAR_PART_INFO: Record<string, { name: string; group: 'główne' | 'przednie' | 'koła i hamulce'; desc: string }> = {
-  leg: { name: 'goleń z amortyzatorem', group: 'główne', desc: 'Główna kolumna podwozia przymocowana przegubem do konstrukcji skrzydła i kadłuba. W środku jest amortyzator olejowo-gazowy: cylinder z azotem i olejem. Przenosi cały ciężar samolotu na postoju i siłę uderzenia przy przyziemieniu.' },
-  piston: { name: 'tłoczysko', group: 'główne', desc: 'Chromowana, wypolerowana rura wsuwająca się w cylinder amortyzatora. Gładka powierzchnia pozwala uszczelkom szczelnie trzymać gaz i olej. W powietrzu tłoczysko jest wysunięte, na postoju schowane w dużej części – po tym, ile go widać, mechanik ocenia napełnienie amortyzatora.' },
+  leg: { name: 'goleń z amortyzatorem', group: 'główne', desc: 'Główna kolumna podwozia, przymocowana przegubem do konstrukcji skrzydła i kadłuba. W środku jest amortyzator: cylinder z olejem i sprężonym azotem. Goleń dźwiga cały ciężar samolotu na postoju i przyjmuje uderzenie przy lądowaniu.' },
+  piston: { name: 'tłoczysko', group: 'główne', desc: 'Błyszcząca, gładka rura, która wsuwa się w cylinder amortyzatora. Gładka powierzchnia pozwala uszczelkom szczelnie trzymać gaz i olej. W powietrzu tłoczysko jest wysunięte, a na postoju w dużej części schowane – po tym, ile go widać, mechanik ocenia, czy amortyzator jest dobrze napełniony.' },
   torque: { name: 'nożyce', group: 'główne', desc: 'Dwa ramiona połączone przegubem z przodu goleni. Łączą cylinder z tłoczyskiem tak, żeby tłoczysko mogło się wsuwać i wysuwać, ale nie obracać – inaczej koła mogłyby się skręcić względem goleni.' },
-  stay: { name: 'zastrzał boczny z zamkiem', group: 'główne', desc: 'Składane ramię podpierające goleń z boku. Po wypuszczeniu podwozia prostuje się i blokuje zamkiem (dwa krótkie ogniwa ze sprężynami), więc goleń nie może się złożyć pod obciążeniem. Przy chowaniu siłownik odblokowuje zamek, a zastrzał składa się w kolanie.' },
-  bogie: { name: 'wózek', group: 'główne', desc: 'Belka z trzema osiami i sześcioma kołami – cecha wersji -1000, cięższej od -900 (ta ma cztery koła na wózku). Więcej kół rozkłada ciężar na większą powierzchnię, więc samolot nie niszczy nawierzchni pasów i dróg kołowania. Wózek jest zawieszony przegubowo na końcu tłoczyska, żeby wszystkie koła stały na nierównej nawierzchni.' },
-  pitch: { name: 'siłownik ustawiający wózek', group: 'główne', desc: 'Hydrauliczny siłownik między goleń a wózkiem. W powietrzu trzyma wózek pochylony (przednia oś niżej), żeby przy przyziemieniu koła dotykały pasa po kolei, a przed schowaniem ustawia go tak, by sześć kół zmieściło się we wnęce.' },
-  rear: { name: 'tylna oś skrętna', group: 'główne', desc: 'Tylna oś każdego wózka może się lekko skręcać – w przeciwną stronę niż koło przednie. Przy ciasnych zakrętach opony mniej się ścierają, a wózek nie szoruje bokiem po płycie. Steruje nią automatycznie ten sam układ, co kołem przednim.' },
+  stay: { name: 'zastrzał boczny z zamkiem', group: 'główne', desc: 'Składane ramię, które podpiera goleń z boku. Po wypuszczeniu podwozia prostuje się i blokuje zamkiem, więc goleń nie może się złożyć pod ciężarem samolotu. Przy chowaniu siłownik odblokowuje zamek, a ramię składa się „w kolanie”.' },
+  bogie: { name: 'wózek', group: 'główne', desc: 'Belka z trzema osiami i sześcioma kołami – w A350-1000, cięższym od A350-900, który ma po cztery koła na goleni. Więcej kół rozkłada ciężar na większą powierzchnię, więc samolot nie niszczy nawierzchni. Wózek może się kołysać na końcu tłoczyska, żeby wszystkie koła stały na nierównym podłożu.' },
+  retract: { name: 'siłownik chowania', group: 'główne', desc: 'Duży siłownik hydrauliczny między konstrukcją skrzydła a górą goleni. Przy chowaniu wysuwa tłoczysko i obraca goleń do środka kadłuba, przy wypuszczaniu ją hamuje – goleń opada głównie pod własnym ciężarem. Na postoju i w locie nie przenosi obciążeń: trzymają je zamki.' },
+  pitch: { name: 'siłownik ustawiający wózek', group: 'główne', desc: 'Siłownik hydrauliczny między goleń a wózkiem. W powietrzu trzyma wózek pochylony, żeby przy lądowaniu koła dotykały pasa po kolei, a przed schowaniem ustawia go tak, by sześć kół zmieściło się we wnęce.' },
+  rear: { name: 'tylna oś skrętna', group: 'główne', desc: 'Tylna oś każdego wózka może się lekko skręcać – w przeciwną stronę niż koło przednie, podobnie jak w niektórych autobusach przegubowych. W ciasnych zakrętach opony mniej się ścierają, a koła nie szorują bokiem po płycie. Steruje nią automatycznie ten sam układ, co kołem przednim.' },
   hyd: { name: 'przewody hydrauliczne', group: 'główne', desc: 'Sztywne rurki i elastyczne węże biegnące wzdłuż goleni i belki wózka. Doprowadzają płyn pod ciśnieniem do hamulców każdego koła i do siłowników. Na złączach ruchomych są węże, które wyginają się przy pracy amortyzatora i przy chowaniu.' },
   doors: { name: 'drzwi wnęk podwozia', group: 'główne', desc: 'Wnęki podwozia głównego są w owiewce centropłata pod kadłubem. Duże drzwi otwierają się tylko na czas chowania i wypuszczania, a potem zamykają – wnęka zostaje zakryta i nie zwiększa oporu. Mniejsza osłona przymocowana do goleni zamyka resztę otworu.' },
   brakes: { name: 'hamulce węglowe', group: 'koła i hamulce', desc: 'W każdym z dwunastu kół głównych jest pakiet tarcz z kompozytu węglowego: na przemian tarcze obracające się z kołem i nieruchome. Hydrauliczne tłoczki ściskają je przy hamowaniu. Węgiel jest lekki i znosi bardzo wysoką temperaturę – po hamowaniu tarcze nagrzewają się do kilkuset stopni.' },
-  tyres: { name: 'opony', group: 'koła i hamulce', desc: 'Opony radialne pompowane azotem (nie powietrzem – azot nie podtrzymuje ognia i nie zawiera wilgoci) do ciśnienia ok. 14–15 barów, kilka razy więcej niż w samochodzie. Bieżnik ma tylko rowki wzdłuż obwodu, które odprowadzają wodę spod opony. W feldze są bezpieczniki termiczne: gdy hamulce za mocno ją nagrzeją, wypuszczają gaz, zanim opona mogłaby pęknąć.' },
-  nose: { name: 'podwozie przednie', group: 'przednie', desc: 'Goleń z dwoma kołami pod kokpitem. Ma własny amortyzator i nożyce, a zastrzał przed nią blokuje ją po wypuszczeniu. Chowa się do przodu – gdyby zawiodła hydraulika, pęd powietrza pomaga ją wypuścić. Koła przednie nie mają hamulców.' },
-  steer: { name: 'sterowanie kołem przednim', group: 'przednie', desc: 'Kołnierz na goleni z siłownikami hydraulicznymi obraca dolną część goleni z kołami. Pilot steruje kołem sterowym (tillerem) do ok. 70°, a pedałami steru kierunku – o kilka stopni przy większej prędkości na pasie. Przy holowaniu sterowanie się odłącza, żeby ciągnik mógł swobodnie skręcać kołem.' },
+  tyres: { name: 'opony', group: 'koła i hamulce', desc: 'Opony pompowane azotem, a nie powietrzem – azot nie podtrzymuje ognia i nie zawiera wilgoci. Ciśnienie to ok. 14–15 barów, kilka razy więcej niż w samochodzie. Bieżnik ma tylko rowki wzdłuż obwodu, które odprowadzają wodę spod opony. W feldze są bezpieczniki: gdy hamulce za mocno ją nagrzeją, wypuszczają gaz, zanim opona mogłaby pęknąć.' },
+  nose: { name: 'podwozie przednie', group: 'przednie', desc: 'Przednia goleń z dwoma kołami, pod kokpitem. Ma własny amortyzator, a składane ramię przed nią blokuje ją po wypuszczeniu. Chowa się do przodu – gdyby zawiodła hydraulika, pęd powietrza pomaga ją wypuścić. Koła przednie nie mają hamulców.' },
+  steer: { name: 'sterowanie kołem przednim', group: 'przednie', desc: 'Siłowniki hydrauliczne obracają dolną część przedniej goleni razem z kołami. Na ziemi pilot skręca małą kierownicą przy bocznym oknie – nawet o ok. 70° – a pedałami w czasie rozbiegu po pasie, o kilka stopni. Gdy samolot jest holowany, sterowanie się odłącza, żeby ciągnik mógł swobodnie obracać kołem.' },
   lights: { name: 'reflektory kołowania i startu', group: 'przednie', desc: 'Na goleni przedniej są reflektory, które świecą do przodu podczas kołowania i startu, oraz reflektory oświetlające zjazd z drogi startowej na boki. Są przymocowane do goleni, więc chowają się razem z nią.' },
 };
 const GEAR_GROUP_COLOR: Record<string, string> = { główne: '#fbbf24', przednie: '#7dd3fc', 'koła i hamulce': '#fca5a5' };
@@ -3240,6 +4500,7 @@ function GearLabels({ pick }: { pick?: WingPick }) {
       {L('bogie', [mx + 2.4, -5.0, mz + 0.9], 'wózek sześciokołowy')}
       {L('rear', [mx + 2.3, -5.75, mz - 1.0], 'tylna oś skrętna')}
       {L('pitch', [mx + 1.9, -4.3, mz + 0.3], 'siłownik ustawiający wózek')}
+      {L('retract', [mx - 0.3, -2.45, mz + 0.75], 'siłownik chowania')}
       {L('hyd', [mx + 0.55, -3.7, mz + 0.35], 'przewody hydrauliczne')}
       {L('doors', [mx, -4.6, 1.7], 'drzwi wnęki')}
       {L('brakes', [mx - 1.5, -5.9, mz + 1.1], 'hamulce węglowe')}
@@ -3354,7 +4615,7 @@ export function useCameraLod(ref: React.RefObject<THREE.Object3D>, near: number,
 /** Stan silników zmieniany co klatkę przez scenę: N1 (%) i wysunięcie odwracacza ciągu 0…1. */
 export type EnginePower = { n1: number; rev: number };
 
-function Engine({ active, throttle, flow, running = false, power }: { active: boolean; throttle: number; flow: boolean; running?: boolean; power?: EnginePower }) {
+function Engine({ active, cutaway = false, feed = false, throttle, flow, running = false, power }: { active: boolean; cutaway?: boolean; feed?: boolean; throttle: number; flow: boolean; running?: boolean; power?: EnginePower }) {
   // stan ze sceny odczytywany co klatkę – silnik przerysowuje się tylko przy wyraźnej zmianie obrotów lub odwracacza
   const [pw, setPw] = useState<EnginePower | null>(power ? { ...power } : null);
   useFrame(() => {
@@ -3383,14 +4644,17 @@ function Engine({ active, throttle, flow, running = false, power }: { active: bo
         clickable={[]}
         n1={n1}
         n2={n2}
-        cut={active}
+        cut={active || cutaway}
         fanScale={ENG_FS}
         fanBlades={22}
-        flow={active && flow ? 'plain' : false}
-        flowSpeed={0.25 + throttle * 1.1}
+        // przekrój w module kadłuba: przepływ z temperaturą – widać, skąd bierze się gorące powietrze upustu
+        flow={cutaway ? 'temp' : active && flow ? 'plain' : false}
+        flowSpeed={cutaway ? 0.9 : 0.25 + throttle * 1.1}
         labels={active}
-        accessories={active}
-        detail={active || near}
+        accessories={active || cutaway}
+        // zasilanie paliwem ze zbiornika w skrzydle – ten sam układ co w module silnika
+        feed={feed}
+        detail={active || cutaway || near}
         reverser={power && pw && pw.rev > 0.01 ? { type: 'kaskadowy', deploy: pw.rev } : undefined}
       />
     </group>
@@ -3454,6 +4718,115 @@ const LAMP = (() => {
   const scanP = fusPt(xs, fusTheta(xs, W_Y0 + 1.0));
   return { navN, aftN, strobeF: along(le, 0.22), strobeA: along(te, 0.2), land, scan: { p: scanP, n: [0.45, 0.12, 1] as V3 } };
 })();
+
+/** Położenia świateł zewnętrznych (lewa strona; prawa – z = −z) – do podpisów i numerów w module świateł. */
+export const EXT_LIGHT_POS = (() => {
+  const logo = sp(HTP, 1.9, 0.32, 1);
+  const nx = NOSE_X;
+  return {
+    navL: mid(WING, LAMP_R, 0.004),
+    navTail: mid(WING, LAMP_R, 0.996),
+    strobe: LAMP.strobeF,
+    tailStrobe: [33.1 + PA, 1.62, 0] as V3,
+    beaconTop: fusPt(-1.5, 0),
+    beaconBottom: [-3.0, -4.4, 0] as V3,
+    land: LAMP.land[0].p,
+    scan: LAMP.scan.p,
+    logo,
+    taxi: [nx - 0.24, -3.85, 0] as V3,
+    turnoff: [nx - 0.17, -3.62, 0.22] as V3,
+    fin: [VTP.st(6).x + VTP.st(6).c * 0.45, 6, 0] as V3,
+  };
+})();
+
+/** Logo linii na obu stronach statecznika pionowego (moduł świateł) – oświetlane przez światła logo. */
+let logoTex: THREE.CanvasTexture | null = null;
+function getLogoTex() {
+  if (logoTex) return logoTex;
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 512;
+  const x = c.getContext('2d')!;
+  x.clearRect(0, 0, 512, 512);
+  // znak: koło z łukiem jak tor lotu i skrzydłem
+  const g = x.createLinearGradient(0, 80, 0, 440);
+  g.addColorStop(0, '#1d6fd6');
+  g.addColorStop(1, '#0b3a82');
+  x.fillStyle = g;
+  x.beginPath();
+  x.arc(256, 250, 170, 0, Math.PI * 2);
+  x.fill();
+  x.strokeStyle = '#f5f7fa';
+  x.lineWidth = 26;
+  x.lineCap = 'round';
+  x.beginPath();
+  x.arc(256, 420, 230, Math.PI * 1.22, Math.PI * 1.78);
+  x.stroke();
+  x.fillStyle = '#f5f7fa';
+  x.beginPath();
+  x.moveTo(150, 300);
+  x.lineTo(380, 175);
+  x.lineTo(330, 235);
+  x.lineTo(360, 330);
+  x.lineTo(310, 270);
+  x.closePath();
+  x.fill();
+  x.fillStyle = '#ffb020';
+  x.beginPath();
+  x.arc(372, 160, 22, 0, Math.PI * 2);
+  x.fill();
+  logoTex = new THREE.CanvasTexture(c);
+  logoTex.colorSpace = THREE.SRGBColorSpace;
+  logoTex.anisotropy = 4;
+  return logoTex;
+}
+function FinLogo() {
+  const geos = useMemo(
+    () =>
+      cached('fin-logo', () =>
+        ([1, -1] as const).map((side) => {
+          const ys = refine([3.2, 8.6], 0.2);
+          const ss = refine([0.18, 0.78], 0.03);
+          const pos: number[] = [];
+          const uv: number[] = [];
+          const idx: number[] = [];
+          ys.forEach((y, j) =>
+            ss.forEach((s0, i) => {
+              const p = sp(VTP, y, s0, side, -0.012);
+              pos.push(...p);
+              // wzór czytelny z obu stron: od nosa do ogona po lewej burcie, odwrotnie po prawej
+              const u = (p[0] - (VTP.st(5.9).x + 0.5 * VTP.st(5.9).c)) / 5.4 + 0.5;
+              uv.push(side > 0 ? u : 1 - u, (y - 3.2) / 5.4);
+              if (i > 0 && j > 0) {
+                const a = (j - 1) * ss.length + i - 1;
+                const b = a + 1;
+                const c2 = a + ss.length;
+                const d = c2 + 1;
+                if (side > 0) idx.push(a, b, d, a, d, c2);
+                else idx.push(a, d, b, a, c2, d);
+              }
+            }),
+          );
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+          g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+          g.setIndex(idx);
+          g.computeVertexNormals();
+          return g;
+        }),
+      ),
+    [],
+  );
+  return (
+    <>
+      {geos.map((g, i) => (
+        <mesh key={i} geometry={g} renderOrder={1} raycast={() => null}>
+          <meshStandardMaterial map={getLogoTex()} transparent alphaTest={0.05} roughness={0.45} metalness={0.05} polygonOffset polygonOffsetFactor={-2} />
+        </mesh>
+      ))}
+    </>
+  );
+}
 
 export const WING_PIECE = { z0: W_ENG - 6.7, z1: W_ENG + 6.7, amp: 0.9 };
 /** Przesunięcie przekroju na stacji z względem przekroju na stacji r: środek cięciwy (skos), wznios i skala cięciwy. */
@@ -3587,6 +4960,16 @@ export interface AirlinerProps {
   surfaces?: { aileron: number; elevator: number; rudder: number; spoiler?: number };
   /** Przycięcie do fragmentu rozpiętości z0…z1 (poszarpana granica o amplitudzie amp). */
   clip?: { z0: number; z1: number; amp?: number } | null;
+  /** Moduł kadłuba: która zakładka (przekrój z wyposażeniem, konstrukcja, ciśnienie, ładownie). */
+  fusView?: FusView;
+  /** Strona główna modułu kadłuba: zaznaczona część (klikane podpisy). */
+  fusPick?: WingPick;
+  /** Lewy silnik w przekroju z przepływem (jak w module silnika) – np. upust powietrza w zakładce o klimatyzacji. */
+  engineCut?: boolean;
+  /** W przekroju lewego silnika także zasilanie paliwem ze zbiornika (pompy, zawór LP, przewód w pylonie). */
+  engineFeed?: boolean;
+  /** Moduł drzwi: otwory drzwi pasażerskich w poszyciu, kabina widoczna przez nie (drzwi rysuje scena). */
+  doorsOpen?: boolean;
   /** Lewe skrzydło jako przekrój (zdjęte poszycie, keson) i jego podpisy. */
   wingOpen?: boolean;
   wingLabels?: boolean;
@@ -3606,11 +4989,16 @@ export interface AirlinerProps {
   hilite?: Record<string, string> | null;
   /** Zmieniony układ (zakładka o wzniosie): kąt wzniosu skrzydeł (°), przesunięcie skrzydeł w pionie, wielkość statecznika pionowego. */
   morph?: { dihedral: number; wingY: number; fin: number } | null;
+  /** Pełne, klikalne podpisy części modułu (skrzydło, usterzenie, podwozie) – tylko na stronie głównej modułu. */
+  moduleLabels?: boolean;
+  /** Moduł świateł: stan przełączników (każda lampa osobno, prawdziwe źródła światła, logo na stateczniku). */
+  extLights?: ExtLights | null;
 }
 
+const sideV = new THREE.Vector3();
 const ANCHOR: Record<PlanePart, V3> = {
   fuselage: [-12, 3.8, 0],
-  wing: [12, 1.3, 18],
+  wing: [4.2, 0.6, 18], // na górze skrzydła, w połowie cięciwy
   engine: [-10.2, -2.2, W_ENG],
   // środek ogona: między sterem kierunku a sterami wysokości (podświetla się całe usterzenie z oboma sterami)
   tail: [28.6 + PA, 3.6, 0],
@@ -3620,8 +5008,6 @@ const ANCHOR: Record<PlanePart, V3> = {
   // zalążki modułów – podpisy przy miejscu, którego dotyczą
   cockpit: [-34.5, 1.9, 1.3], // szyby kokpitu
   radar: [-37.5, -1.0, 0.5], // owiewka radaru w nosie
-  packs: [-5, -4.9, 0], // pakiety klimatyzacji w owiewce przed skrzydłem (pod środkiem brzucha)
-  fuel: [-1.2, 0.4, 9], // zbiorniki w skrzydle
   lights: [8.6, 2.2, 29.8], // światła na końcówce skrzydła
   doors: [-26.9 - PF, 0.6, 3.1], // drzwi 1L
 };
@@ -3655,7 +5041,13 @@ export function Airliner(props: AirlinerProps) {
   return <AirlinerBody {...props} />;
 }
 
-function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = true, animate = true, layers = {}, clip = null, wingOpen, wingLabels, interactive = true, partLabels = true, wingPick, mech, linksFrom = null, links = true, inFlight = false, landingLights = false, surfaces, gear, gearPick, enginePower, hilite = null, morph = null }: AirlinerProps) {
+function AirlinerBody(props: AirlinerProps) {
+  // złota zasada: klikanie, odnośniki i podpisy części tylko na stronie głównej modułu (zakładka „0”) i w widoku całości
+  const home = useModuleHome();
+  return <AirlinerBodyInner {...props} {...(home ? {} : { interactive: false, links: false, partLabels: false, moduleLabels: false, wingLabels: false, wingPick: undefined, gearPick: undefined, fusPick: undefined })} />;
+}
+
+function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flow = true, animate = true, layers = {}, clip = null, wingOpen, wingLabels, interactive = true, partLabels = true, wingPick, mech, linksFrom = null, links = true, inFlight = false, landingLights = false, surfaces, gear, gearPick, enginePower, hilite = null, morph = null, extLights = null, moduleLabels = true, fusView = 'home', fusPick, engineCut = false, engineFeed = false, doorsOpen = false }: AirlinerProps) {
   // dodatkowy wznios względem modelu: połówka skrzydła (z silnikiem) obraca się wokół osi kadłuba
   const wingTilt = morph ? morph.dihedral * (Math.PI / 180) - W_DIH : 0;
   const wingLift = morph ? morph.wingY : 0;
@@ -3682,6 +5074,18 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
     u.z += ((c.amp ?? 0.8) - u.z) * k;
   });
   const [hover, setHover] = useState<PlanePart | null>(null);
+  // podpisy części parzystych (skrzydło, silnik, podwozie, drzwi, światła) – po stronie samolotu zwróconej do kamery
+  const sideRef = useRef<THREE.Group>(null);
+  const [side, setSide] = useState(1);
+  useFrame(({ camera }) => {
+    if (!sideRef.current) return;
+    sideV.copy(camera.position);
+    sideRef.current.worldToLocal(sideV);
+    // mała strefa nieczułości, żeby podpisy nie skakały przy widoku dokładnie z przodu albo z tyłu
+    if (side > 0 && sideV.z < -1.5) setSide(-1);
+    else if (side < 0 && sideV.z > 1.5) setSide(1);
+  });
+  const anchorAt = (p: PlanePart): V3 => [ANCHOR[p][0], ANCHOR[p][1], ANCHOR[p][2] * side];
   const [tip, setTip] = useState<PlanePart | null>(null);
   const [pickHover, setPickHover] = useState<string | null>(null);
   // kliknięcia tylko w widocznej (nieprzyciętej) części skrzydła – niewidoczne fragmenty nie łapią myszy
@@ -3734,7 +5138,35 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
       <group {...ev(p)}>{children}</group>
     </GlowCtx.Provider>
   );
+  /*
+   * Te same lampy i ten sam stan świateł w każdym module. Gdy scena nie podaje przełączników (moduł świateł), samolot
+   * ustawia je jak załoga w danej fazie: pozycyjne zawsze; beacon, gdy silniki pracują; strobo w powietrzu i na pasie
+   * przy lądowaniu; reflektory lądowania przy podejściu i dobiegu; na goleni przedniej – przy kołowaniu i lądowaniu;
+   * logo na ziemi i przy lądowaniu.
+   */
+  const auto = useMemo(() => newExtLights(false), []);
+  const autoIn = useRef({ inFlight, landingLights, gear, enginePower });
+  autoIn.current = { inFlight, landingLights, gear, enginePower };
+  useFrame(() => {
+    if (extLights) return;
+    const a = autoIn.current;
+    const nose = Boolean(a.gear?.lights) && (a.gear?.retract ?? 0) < 0.5;
+    const engines = a.inFlight || (a.enginePower ? a.enginePower.n1 > 12 : false) || nose;
+    Object.assign(auto, {
+      nav: true,
+      logo: !a.inFlight || a.landingLights,
+      beacon: engines,
+      strobe: a.inFlight || a.landingLights,
+      land: a.landingLights,
+      taxi: nose,
+      to: nose && a.landingLights,
+      turnoff: nose && !a.landingLights,
+      wing: false,
+    });
+  });
+  const ext = extLights ?? auto;
   return (
+    <ExtLtCtx.Provider value={ext}>
     <GearCtx.Provider value={gear ?? null}>
     <ClipCtx.Provider value={clipU}>
     <PickCtx.Provider value={pickState}>
@@ -3747,25 +5179,32 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
         <Lightformer intensity={0.45} position={[0, -30, 0]} rotation-x={Math.PI / 2} scale={[120, 120, 1]} color="#64748b" />
       </Environment>}
       {show('ground') && <Ground />}
-      {show('fuselage') && part('fuselage', <Fuselage open={focus === 'fuselage'} apu={focus === 'apu'} />)}
+      {show('fuselage') && part('fuselage', <Fuselage open={focus === 'fuselage'} apu={focus === 'apu'} radar={focus === 'radar'} view={fusView} labels={moduleLabels} pick={fusPick} doorsOpen={doorsOpen} />)}
       {show('tail') && part('tail', <Tail animate={focus === 'tail' && animate} surfaces={surfaces} open={focus === 'tail'} fin={morph ? morph.fin : 1} />)}
       {/* światła logo: w górnej powierzchni statecznika poziomego przy kadłubie, świecą na statecznik pionowy */}
       {show('tail') &&
         [1, -1].map((sg) => {
           const p = sp(HTP, 1.9, 0.32, 1);
-          return <Lamp key={sg} p={[p[0], p[1], p[2] * sg]} n={[0.15, 1, -0.75 * sg]} color="#fff6dc" r={0.07} halo={1.4} on={inFlight} />;
+          return <Lamp key={sg} p={[p[0], p[1], p[2] * sg]} n={[0.15, 1, -0.75 * sg]} color="#fff6dc" r={0.07} halo={1.4} on={inFlight} lt="logo" />;
+        })}
+      {show('tail') && <FinLogo />}
+      {show('tail') &&
+        ext.night &&
+        [1, -1].map((sg) => {
+          const p = sp(HTP, 1.9, 0.32, 1);
+          return <SpotLamp key={sg} p={[p[0], p[1] + 0.15, p[2] * sg]} dir={[0.12, 1, -0.5 * sg]} lt="logo" angle={0.42} dist={16} power={260} />;
         })}
       {/* podwozie zawsze: w locie (bez sterowania ze sceny) schowane we wnękach, z zamkniętymi drzwiami */}
       {/* na wycinkach skrzydła (plaster profilu, kawałek wokół silnika) podwozie nic nie wnosi – a tarcze hamulców mają
           własny materiał, który nie podlega przycinaniu, więc schowane koła prześwitywałyby przez plaster. Szeroki
-          „wycinek” całego samolotu (z = ±60 m) obejmuje podwozie, więc wtedy jest rysowane */}
-      {show('gear') && !(clip && (clip.z0 > -6 || clip.z1 < 6)) && part('gear', <GearCtx.Provider value={gear ?? (inFlight ? GEAR_STOWED : null)}><Gear /></GearCtx.Provider>)}
+          „wycinek” całego samolotu (z = ±60 m) obejmuje podwozie, więc wtedy jest rysowane – tak samo przekrój kadłuba */}
+      {show('gear') && !(clip && (clip.z0 > -6 || clip.z1 < 6) && focus !== 'fuselage') && part('gear', <GearCtx.Provider value={gear ?? (inFlight ? GEAR_STOWED : null)}>{focus === 'fuselage' ? <ClipCull><Gear /></ClipCull> : <Gear />}</GearCtx.Provider>)}
       {[1, -1].filter((sz) => sz > 0 || show('rightSide')).map((sz) => (
         <group key={sz} scale={[1, 1, sz]}>
           <group position={[0, W_Y0 + wingLift, 0]} rotation={[-wingTilt, 0, 0]}>
           <group position={[0, -W_Y0, 0]}>
-          {part('wing', <Wing open={(focus === 'wing' || Boolean(wingOpen)) && sz > 0} animate={focus === 'wing' && animate} ctlAnim={focus === 'tail' && animate} mech={mech} canoes={show('canoes')} side={sz} surfaces={surfaces} />)}
-          {(sz < 0 || show('leftEngine')) && part('engine', <Engine active={focus === 'engine' && sz > 0} throttle={throttle} flow={flow} running={inFlight} power={enginePower} />)}
+          {part('wing', <Wing open={(focus === 'wing' || Boolean(wingOpen)) && sz > 0} animate={focus === 'wing' && animate} ctlAnim={focus === 'tail' && animate} mech={mech} canoes={show('canoes')} side={sz} surfaces={surfaces} outside={focus === 'fuselage'} />)}
+          {(sz < 0 || show('leftEngine')) && part('engine', <Engine active={focus === 'engine' && sz > 0} cutaway={engineCut && sz > 0} feed={engineFeed && sz > 0} throttle={throttle} flow={flow} running={inFlight} power={enginePower} />)}
           {/*
             Światła jak w A350, wbudowane w poszycie pod przezroczystymi osłonami:
             – w krawędzi natarcia końcówki, tuż przed wingletem: pozycyjne (czerwone po lewej, zielone po prawej) i strobo,
@@ -3773,32 +5212,47 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
             – w krawędzi natarcia przy nasadzie skrzydła: dwa reflektory lądowania (świecą w locie),
             – na burcie przed skrzydłem: reflektor oświetlający krawędź natarcia i gondolę (kontrola oblodzenia).
           */}
-          <Lamp p={mid(WING, LAMP_R, 0.004)} n={LAMP.navN} color={sz > 0 ? '#ff3b2f' : '#22e06b'} r={0.075} rx={1.9} halo={1.9} sector={SECTOR.nav} />
-          <Lamp p={LAMP.strobeF} n={LAMP.navN} color="#ffffff" r={0.05} halo={4.2} blink="strobe" sector={SECTOR.strobeF} />
-          <Lamp p={mid(WING, LAMP_R, 0.996)} n={LAMP.aftN} color="#ffffff" r={0.06} rx={1.5} halo={1.7} sector={SECTOR.tailNav} />
-          <Lamp p={LAMP.strobeA} n={LAMP.aftN} color="#ffffff" r={0.045} halo={4} blink="strobe" sector={SECTOR.strobeA} />
+          <Lamp p={mid(WING, LAMP_R, 0.004)} n={LAMP.navN} color={sz > 0 ? '#ff3b2f' : '#22e06b'} r={0.075} rx={1.9} halo={1.9} sector={SECTOR.nav} lt="nav" />
+          <Lamp p={LAMP.strobeF} n={LAMP.navN} color="#ffffff" r={0.05} halo={4.2} blink="strobe" sector={SECTOR.strobeF} lt="strobe" />
+          <Lamp p={mid(WING, LAMP_R, 0.996)} n={LAMP.aftN} color="#ffffff" r={0.06} rx={1.5} halo={1.7} sector={SECTOR.tailNav} lt="nav" />
+          <Lamp p={LAMP.strobeA} n={LAMP.aftN} color="#ffffff" r={0.045} halo={4} blink="strobe" sector={SECTOR.strobeA} lt="strobe" />
+          {ext.night && (
+            <>
+              {/* światło pozycyjne lekko barwi końcówkę skrzydła, a błysk strobo oświetla całą końcówkę i winglet */}
+              <SpotLamp p={mid(WING, LAMP_R, 0.004)} dir={[-0.6, 0, 0.8]} lt="nav" angle={1.2} dist={7} power={6} color={sz > 0 ? '#ff3b2f' : '#22e06b'} penumbra={1} />
+              <FlashLight p={[LAMP.strobeF[0] - 0.6, LAMP.strobeF[1] + 0.4, LAMP.strobeF[2] + 0.3]} lt="strobe" blink="strobe" color="#eef4ff" power={160} dist={26} />
+            </>
+          )}
           {/* reflektory lądowania: dwa reflektory w krawędzi natarcia przy kadłubie, pod przezroczystą osłoną w kształcie krawędzi */}
           <mesh geometry={landingCover()} renderOrder={2}>
             <M k="glass" side={THREE.DoubleSide} opacity={0.55} />
           </mesh>
           {LAMP.land.map((l, i) => (
-            <Lamp key={i} p={l.p} n={l.n} color="#fff6dc" r={0.07} halo={3.2} on={landingLights} sector={SECTOR.landing} bezel={false} beam={landingLights ? { len: 45, half: 0.06, dir: [-1, -0.05, 0.07] } : undefined} />
+            <Lamp key={i} p={l.p} n={l.n} color="#fff6dc" r={0.07} halo={3.2} on={landingLights} lt="land" sector={SECTOR.landing} bezel={false} beam={{ len: 45, half: 0.06, dir: [-1, -0.05, 0.07] }} />
           ))}
-          <Lamp p={LAMP.scan.p} n={LAMP.scan.n} color="#fff6dc" r={0.07} halo={1.6} on={inFlight} sector={SECTOR.scan} />
+          <Lamp p={LAMP.scan.p} n={LAMP.scan.n} color="#fff6dc" r={0.07} halo={1.6} on={inFlight} lt="wing" sector={SECTOR.scan} beam={{ len: 16, half: 0.22, dir: [0.64, -0.09, 0.76] }} />
+          {ext.night && (
+            <>
+              <SpotLamp p={LAMP.land[0].p} dir={[-1, -0.07, 0.07]} lt="land" angle={0.15} dist={600} power={9000} />
+              {/* reflektor skrzydła celuje w krawędź natarcia i wlot silnika (w modelu: między nimi) */}
+              <SpotLamp p={[LAMP.scan.p[0], LAMP.scan.p[1], LAMP.scan.p[2] + 0.3]} dir={[0.64, -0.09, 0.76]} lt="wing" angle={0.42} dist={50} power={150} />
+            </>
+          )}
           </group>
           </group>
         </group>
       ))}
-      {(focus === 'wing' || wingLabels) && <WingLabels range={clip} />}
-      {focus === 'tail' && <TailLabels />}
-      {focus === 'gear' && show('gear') && !inFlight && !gear && <GearLabels pick={gearPick} />}
+      {((focus === 'wing' && moduleLabels) || wingLabels) && <WingLabels range={clip} />}
+      {focus === 'tail' && moduleLabels && <TailLabels />}
+      {focus === 'gear' && moduleLabels && show('gear') && !inFlight && !gear && <GearLabels pick={gearPick} />}
       {/* widok ogólny: tylko nazwy podzespołów (klikalne); szczegółowe podpisy dopiero w module podzespołu */}
+      <group ref={sideRef}>
       {interactive && partLabels && !focus &&
         (Object.keys(ANCHOR) as PlanePart[]).map((p) => (
           <Lbl
             key={p}
             occlude
-            pos={ANCHOR[p]}
+            pos={anchorAt(p)}
             color={p === tip ? '#fbbf24' : '#e2e8f0'}
             active={hover === p || highlight === p}
             onHover={(on) => setHover(on ? p : (h) => (h === p ? null : h))}
@@ -3819,7 +5273,7 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
             <Lbl
               key={`link-${p}`}
               occlude
-              pos={ANCHOR[p]}
+              pos={anchorAt(p)}
               link
               color={p === tip ? '#fbbf24' : '#e2e8f0'}
               active={hover === p}
@@ -3833,11 +5287,13 @@ function AirlinerBody({ focus = null, highlight = null, throttle = 0.6, flow = t
               {p === tip ? `${PART_NAME[p]} – moduł w przygotowaniu` : PART_NAME[p]}
             </Lbl>
           ))}
+      </group>
     </group>
     </HiliteCtx.Provider>
     </PickCtx.Provider>
     </ClipCtx.Provider>
     </GearCtx.Provider>
+    </ExtLtCtx.Provider>
   );
 }
 
@@ -3872,4 +5328,1652 @@ export function EngineOnPlane({ wingOpen, wingLabels, wingPick, phase, whole, ..
   const plain = Boolean(props.afterburner) || props.spools === 'jet1' || (props.fanScale ?? 1) <= 0.05 || props.wing === false;
   if (plain) return <EngineModel {...props} />;
   return <EngineModel {...props} mount={(fs) => <PlaneMount fs={fs} wingOpen={wingOpen} wingLabels={wingLabels} wingPick={wingPick} phase={phase} whole={whole} />} />;
+}
+
+/* ---------- klimatyzacja i ciśnienie w kabinie: układ (tory powietrza, położenie urządzeń) ---------- */
+
+/** Strefy kabiny z własnym pionem nawiewu i zaworem powietrza dogrzewającego (trim air): x pionu. */
+export const AIR_ZONES = [
+  { id: 'fwd', name: 'przód (biznes)', x: -22.0 },
+  { id: 'mid', name: 'środek', x: -3.0 },
+  { id: 'aft', name: 'tył', x: 12.0 },
+];
+/**
+ * Układ wody, ścieków i gaszenia ładowni (zakładki „Woda i toalety” oraz „Pożar w ładowni”) – w tych samych miejscach
+ * co zbiorniki, rury, toalety i kuchnie modelu kabiny. Toalety i umywalki – lewa burta (widać je w przekroju).
+ */
+export function cabinSystemsLayout() {
+  const bottom = (x: number, z = 0): V3 => [x, fusBottom(x, z, 0.02), z];
+  const half = (y: number, x: number) => fusPt(x, fusTheta(x, y), 0)[2] - 0.2;
+  const hw = (y: number, x: number) => Math.max(0, half(y, x) + 0.2);
+  const WX = -25.3;
+  const SX = 15.5;
+  const WEND = 19.5;
+  const yMain = FLOOR - 0.5;
+  // toalety (lewa burta) przed drzwiami 2, 3 i 4: muszla i umywalka
+  const lavs = DOORS.slice(1).map((dx) => {
+    const lx = dx - 1.25;
+    const zc = Math.min(1.7, Math.min(hw(FLOOR + 0.02, lx + 0.5), hw(FLOOR + 2.1, lx + 0.5)) - 0.65);
+    return { dx, lx, zc, bowl: [lx + 0.22, FLOOR + 0.45, zc] as V3, sink: [lx - 0.33, FLOOR + 0.86, zc] as V3 };
+  });
+  const galleys = DOORS.filter((dx) => dx + 1.2 < WEND).map((dx) => [dx + 1.2, FLOOR + 0.95, 0.95] as V3);
+  // --- woda pitna ---
+  const fillPanel = bottom(WX + 1.3, -0.35);
+  const fill: V3[] = [fillPanel, [WX + 1.3, -2.55, -0.35], [WX + 0.6, -2.4, -0.55], [WX + 0.2, -2.25, -0.55]];
+  const compressor: V3 = [WX + 1.4, -1.85, -0.75];
+  const air: V3[] = [compressor, [WX + 0.8, -1.72, -0.75], [WX, -1.72, -0.55], [WX, -1.82, -0.55]];
+  const air2: V3[] = [[WX, -1.72, -0.55], [WX, -1.72, 0.55], [WX, -1.82, 0.55]];
+  const trunk: V3[] = [[WX, -1.82, 0.55], [WX, yMain, 0.55], [WX, yMain, 0.95], [DOORS[0] + 0.6, yMain, 0.95], [WEND, yMain, 0.95]];
+  const branches: V3[][] = [
+    ...galleys.map((g) => [[g[0], yMain, 0.95], [g[0], FLOOR - 0.05, 0.95], g] as V3[]),
+    ...lavs.map((l) => [[l.dx - 1.0, yMain, 0.95], [l.dx - 1.0, FLOOR - 0.05, 0.95], [l.sink[0] + 0.05, FLOOR + 0.3, l.zc - 0.2], l.sink] as V3[]),
+  ];
+  const heaters = lavs.map((l) => [l.sink[0], FLOOR + 0.45, l.zc] as V3);
+  // --- szara woda: z umywalek i zlewów kuchni do podgrzewanych masztów odpływowych (przedni i tylny) ---
+  const mastF = bottom(-19.5 - PF, 0);
+  const mastA = bottom(12.6 + PA, 0);
+  const grey: V3[][] = lavs.map((l) => {
+    const m = l.dx < 0 ? mastF : mastA;
+    return [l.sink, [l.sink[0] + 0.05, FLOOR + 0.2, l.zc - 0.1], [l.sink[0], FLOOR - 0.75, 0.25], [m[0], FLOOR - 0.75, 0.25], [m[0], m[1] + 0.25, 0.05], m];
+  });
+  const greyOut: V3[][] = [mastF, mastA].map((m) => [m, [m[0] + 0.4, m[1] - 0.25, 0], [m[0] + 1.6, m[1] - 0.9, 0]]);
+  // --- ścieki: przewód podciśnieniowy od muszli do zbiorników ---
+  const yVac = FLOOR - 0.6;
+  const vacuum: V3[][] = lavs.map((l) => [l.bowl, [l.lx + 0.22, FLOOR - 0.05, l.zc], [l.dx - 1.03, FLOOR - 0.3, 1.3], [l.dx - 1.03, yVac, 1.3], [SX, yVac, 1.3], [SX, -1.4, 0.9], [SX, -1.45, 0.45]]);
+  const vacGen: V3 = [SX + 1.0, -1.55, 0.95];
+  // powietrze odessane ze zbiorników przez generator podciśnienia – wylot w spodzie kadłuba
+  const vent: V3[] = [[SX + 0.3, -1.4, 0.45], [SX + 0.8, -1.42, 0.85], vacGen, [SX + 1.3, -1.9, 0.6], bottom(SX + 1.5, 0.35), [SX + 2.0, bottom(SX + 1.5)[1] - 0.6, 0.35]];
+  const wastePanel = bottom(SX + 0.9, -0.35);
+  const drain: V3[] = [[SX, -2.15, -0.45], [SX + 0.5, -2.35, -0.4], wastePanel, [wastePanel[0], wastePanel[1] - 0.8, -0.35]];
+  // --- gaszenie ładowni: butle za przednią ładownią, rury pod sufitem ładowni, dysze ---
+  const ceil = FLOOR - 0.47;
+  const bottles: V3[] = [
+    [-9.6, -2.15, 1.25],
+    [-9.6, -2.15, 0.8],
+  ];
+  const nozzlesF = [-23.5, -20.5, -17.5, -14.5, -11.5].map((x) => [x, ceil - 0.05, 0.35] as V3);
+  const nozzlesA = [5.5, 8, 10.5].map((x) => [x, ceil - 0.05, 0.35] as V3);
+  const agentF: V3[] = [[bottles[0][0], -1.9, 1.05], [-9.8, ceil, 1.05], [-10.2, ceil, 0.35], [-24, ceil, 0.35]];
+  const agentA: V3[] = [[-9.8, ceil, 1.05], [-1, ceil, 1.05], [4.6, ceil, 0.35], [11.5, ceil, 0.35]];
+  const detectorsF = [-22, -17, -12.5].map((x) => [x, ceil + 0.02, -0.4] as V3);
+  // wentylacja ładowni: wlot (z kabiny przez zawór odcinający) i wyciąg (wentylator, zawór odcinający)
+  const ventIn: V3[] = [[-22.8, FLOOR - 0.15, 1.2], [-22.8, ceil, 1.2], [-22.8, ceil - 0.35, 1.0]];
+  const ventOut: V3[] = [[-11.2, ceil - 0.35, 1.0], [-11.2, ceil, 1.2], [-11.2, FLOOR - 0.15, 1.2], [-9.9, FLOOR - 0.15, 1.2]];
+  const isoValves: V3[] = [
+    [-22.8, ceil + 0.2, 1.2],
+    [-11.2, ceil + 0.2, 1.2],
+  ];
+  const hold = { x0: HOLDS[0][0], x1: HOLDS[0][1], y0: CARGO_Y, y1: ceil, z: 1.55 };
+  return { WX, SX, lavs, galleys, fill, fillPanel, compressor, air: [air, air2], trunk, branches, heaters, grey, greyOut, mastF, mastA, vacuum, vacGen, vent, drain, wastePanel, bottles, agentF, agentA, nozzlesF, nozzlesA, detectorsF, ventIn, ventOut, isoValves, hold };
+}
+
+/**
+ * Układ klimatyzacji w lewej połowie samolotu (przekrój kadłuba): tory strug powietrza (od silnika do zaworu
+ * wylotowego) i położenie urządzeń. Tory to łamane w układzie samolotu; rury rysuje się po nich jako rurki.
+ */
+export function cabinAirLayout() {
+  const E = engineAt();
+  const mid = (r: number, s: number): V3 => {
+    const a = sp(WING, r, s, 1);
+    const b = sp(WING, r, s, -1);
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  };
+  const hw = (y: number, x: number) => fusPt(x, fusTheta(x, y))[2];
+  // urządzenia
+  const pylonTop: V3 = [E[0] + 2.0, sp(WING, W_ENG, 0.3, -1)[1] - 0.12, W_ENG];
+  const PACK: V3 = [-5.0, -3.62, 1.2];
+  const MIXER: V3 = [-8.75, -2.0, 0];
+  const FILTERS: V3[] = [[-9.85, -2.0, 0.95], [-9.85, -2.0, -0.95]];
+  const FANS: V3[] = [[-9.35, -2.0, 0.95], [-9.35, -2.0, -0.95]];
+  const OUTFLOW: V3 = [18.3, fusBottom(18.3, 0) + 0.2, -0.15];
+  // upust z silnika: sprężarka WP → chłodnica w pylonie → krawędź natarcia skrzydła → owiewka → pakiet
+  const bleed: V3[] = [
+    [E[0] + 2.3, E[1] + 0.35, E[2]],
+    [E[0] + 2.2, E[1] + 1.0, E[2]],
+    pylonTop,
+    ...[W_ENG - 0.4, 8.5, 6.5, 4.6, 3.3].map((r) => mid(r, 0.09)),
+    [-5.9, -2.55, 2.55],
+    [-6.3, -3.25, 1.6],
+    [-6.35, -3.45, 1.25],
+  ];
+  // powietrze dogrzewające (trim air): gorące, z rury upustowej przed pakietem, osobno do każdej strefy
+  const trimMain: V3[] = [[-5.9, -2.55, 2.55], [-7.2, -2.0, 2.2], [-8.6, -1.5, 2.0]];
+  const trim: V3[][] = AIR_ZONES.map((zn) => [...trimMain, [zn.x, -1.5, 2.05], [zn.x, -1.45, hw(-1.45, zn.x) - 0.32]]);
+  // powietrze z zewnątrz przez wlot NACA w owiewce: chłodzi wymienniki pakietu i wylatuje za skrzydłem
+  const ram: V3[] = [[-6.8, -4.3, 1.2], [-6.0, -3.98, 1.2], [-4.0, -3.98, 1.2], [-2.6, -4.28, 1.35], [-1.4, -4.7, 1.45]];
+  // zimne powietrze z pakietu → mieszalnik (pod kesonem centropłata, do przodu)
+  const packOut: V3[] = [[-6.3, -3.5, 1.0], [-7.4, -3.1, 0.7], [-8.3, -2.75, 0.4], [-8.6, -2.3, 0.15], MIXER];
+  // recyrkulacja: powietrze spod podłogi przez filtry HEPA i wentylatory do mieszalnika (z obu stron)
+  const recirc: V3[][] = [1, -1].map((sg) => [
+    [-14.0, -1.75, 1.7 * sg],
+    [-11.2, -1.85, 1.25 * sg],
+    [FILTERS[0][0], -2.0, 0.95 * sg],
+    [FANS[0][0], -2.0, 0.95 * sg],
+    [-9.0, -2.0, 0.4 * sg],
+    MIXER,
+  ]);
+  // nawiew: z mieszalnika pod podłogą do pionu w burcie każdej strefy, w górę do głównego kanału nad sufitem
+  const supply: V3[][] = AIR_ZONES.map((zn) => {
+    const x = zn.x;
+    return [
+      [MIXER[0], -1.68, 0.2],
+      [MIXER[0] + Math.sign(x - MIXER[0]) * 0.8, -1.5, 0.8],
+      [x, -1.5, 1.3],
+      [x, -1.5, hw(-1.5, x) - 0.35],
+      [x, -0.8, hw(-0.8, x) - 0.1],
+      [x, 0.5, hw(0.5, x) - 0.1],
+      [x, 1.6, hw(1.6, x) - 0.15],
+      [x, 2.25, 1.0],
+      [x, 2.42, 0.3],
+    ];
+  });
+  // główny kanał nad sufitem: od pionów w obie strony
+  const DX0 = -26.5;
+  const DX1 = 21.0;
+  const duct: V3[][] = [];
+  AIR_ZONES.forEach((zn, i) => {
+    const prev = i === 0 ? DX0 : (AIR_ZONES[i - 1].x + zn.x) / 2;
+    const next = i === AIR_ZONES.length - 1 ? DX1 : (AIR_ZONES[i + 1].x + zn.x) / 2;
+    duct.push([[zn.x, 2.42, 0.3], [prev, 2.42, 0.3]], [[zn.x, 2.42, 0.3], [next, 2.42, 0.3]]);
+  });
+  // w kabinie: z nawiewów nad schowkami w dół, wzdłuż burty do kratek przy podłodze i pod podłogę
+  const cabin: V3[][] = [];
+  for (let x = -26; x <= 19.5; x += 1.6) {
+    if (DOORS.some((dd) => Math.abs(dd - x) < 0.8)) continue;
+    cabin.push([
+      [x, 2.3, 0.6],
+      [x, 1.9, 0.98],
+      [x, 1.2, 1.5],
+      [x, 0.3, Math.min(2.05, hw(0.3, x) - 0.6)],
+      [x, -0.7, hw(-0.7, x) - 0.35],
+      [x, FLOOR + 0.18, hw(FLOOR + 0.18, x) - 0.2],
+      [x, -1.45, hw(-1.45, x) - 0.15],
+      [x + 0.3, -1.75, hw(-1.75, x) - 0.3],
+    ]);
+  }
+  // wylot: dolna część kadłuba do zaworu wylotowego za skrzydłem i na zewnątrz
+  const exhaust: V3[][] = [0.8, 1.6].map((dz) => [
+    [-1.0, -1.85, dz],
+    [6.0, -1.85, dz],
+    [12.0, -1.8, Math.min(dz, hw(-1.8, 12) - 0.3)],
+    [16.5, -1.85, 0.5],
+    [OUTFLOW[0], OUTFLOW[1] + 0.15, 0.1],
+    [OUTFLOW[0] + 0.25, OUTFLOW[1] - 0.3, -0.45],
+    [OUTFLOW[0] + 0.9, OUTFLOW[1] - 0.9, -1.0],
+  ]);
+  return { bleed, trim, ram, packOut, recirc, supply, duct, cabin, exhaust, PACK, MIXER, FILTERS, FANS, OUTFLOW, pylonTop, engine: E };
+}
+
+/* ---------- załadunek ładowni: drzwi, podnośniki, wózki bagażowe (zakładka „Ładownie i załadunek”) ---------- */
+
+/*
+ * Przebieg jak na płycie: pod każde drzwi podjeżdża podnośnik (most na wysokości progu i tylna platforma na nożycach).
+ * Kontenery przywożą pociągi po TRAIN_N wózków. Pociąg dojeżdża z boku (z dala od silnika), skręca i staje wzdłuż
+ * kadłuba tuż za tylną platformą; kontener zsuwa się z wózka na platformę, a ciągnik podciąga pociąg o jeden wózek.
+ * Pusty pociąg odjeżdża (przedni ku nosowi, tylny ku ogonowi), a na jego miejsce podjeżdża następny.
+ */
+
+/** Czas scenariusza załadunku (s): otwarcie drzwi, potem kontenery co CARGO_CT w obu ładowniach naraz. */
+export const CARGO_T0 = 3.2;
+export const CARGO_CT = 2.8;
+/** Wózków w pociągu i dodatkowy czas na zmianę pociągu. */
+const TRAIN_N = 4;
+const TRAIN_GAP = 4.5;
+/** Liczba kontenerów w ładowni (do czasu zamknięcia drzwi). */
+const holdCount = (h: number) => CARGO_SLOTS.filter((s) => s.hold === h).length;
+/** Chwila, w której kontener j (kolejność załadunku w ładowni) zaczyna zjeżdżać z wózka. */
+const canStart = (j: number) => CARGO_T0 + j * CARGO_CT + Math.floor(j / TRAIN_N) * TRAIN_GAP;
+export const CARGO_TEND = Math.max(canStart(holdCount(0) - 1), canStart(holdCount(1) - 1)) + CARGO_CT + 0.6;
+const sm01 = (v: number) => {
+  const u = Math.max(0, Math.min(1, v));
+  return u * u * (3 - 2 * u);
+};
+/** Otwarcie drzwi ładowni 0…1 w chwili t scenariusza (−1 – przed „Rozpocznij”): otwarcie, załadunek, zamknięcie. */
+export function cargoDoorOpen(t: number) {
+  if (t < 0) return 0;
+  return sm01(t / 2.6) * (1 - sm01((t - CARGO_TEND) / 2.6));
+}
+/** Wysokość podłogi ładowni (próg drzwi) i pokładu wózka (spód kontenera). */
+const SILL_Y = CARGO_Y + 0.03;
+const DOLLY_Y = GROUND + 0.62;
+/** Podnośnik (z): most do progu i tylna platforma; rząd wózków za platformą. */
+const BRIDGE_Z: [number, number] = [-3.25, -5.75];
+const LZ = -6.9;
+const ZD = -9.5;
+/** Rozstaw wózków w pociągu i odległość ciągnika od pierwszego wózka. */
+const DOLLY_P = 2.5;
+const TUG_D = 2.85;
+/** Wysokość ramy podwozia podnośnika (nożyce zaczynają się tuż nad nią). */
+const LOADER_YC = GROUND + 0.42;
+
+type TrainPath = { pts: [number, number][]; len: number[]; total: number; sx: number; yaw0: number };
+/** Trasa pociągu ładowni: dojazd z boku wzdłuż +z, łuk i prosta wzdłuż kadłuba (przednia – ku nosowi, tylna – ku ogonowi). */
+function makeTrainPath(hold: number): TrainPath {
+  const xd = CARGO_DOORS[hold];
+  const dir = hold === 0 ? -1 : 1;
+  const R = hold === 0 ? 4 : 3;
+  // kolumna dojazdu: przednia przed silnikiem, tylna za dyszą silnika
+  const xc = xd - dir * (R + (hold === 0 ? 1.5 : 0.3));
+  const pts: [number, number][] = [];
+  for (let z = -78; z < ZD - R; z += 0.5) pts.push([xc, z]);
+  const c: [number, number] = [xc + dir * R, ZD - R];
+  for (let i = 0; i <= 24; i++) {
+    const f = (i / 24) * (Math.PI / 2);
+    pts.push([c[0] - dir * R * Math.cos(f), c[1] + R * Math.sin(f)]);
+  }
+  pts[pts.length - 1] = [c[0], ZD];
+  const iArc = pts.length - 1;
+  for (let x = c[0] + dir * 0.5; Math.abs(x) < 130; x += dir * 0.5) pts.push([x, ZD]);
+  const len = [0];
+  for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  const sx = len[iArc] + Math.abs(xd - pts[iArc][0]);
+  return { pts, len, total: len[len.length - 1], sx, yaw0: dir < 0 ? Math.PI : 0 };
+}
+const TRAIN_PATHS = [0, 1].map(makeTrainPath);
+/** Punkt trasy w odległości s: położenie (x, z) i obrót wokół pionu (oś x pojazdu w kierunku jazdy); null – poza trasą. */
+function pathAt(P: TrainPath, s: number): { x: number; z: number; yaw: number } | null {
+  if (s < 0 || s > P.total) return null;
+  let lo = 0;
+  let hi = P.len.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (P.len[mid] <= s) lo = mid;
+    else hi = mid;
+  }
+  const a = P.pts[lo];
+  const b = P.pts[hi];
+  const k = (s - P.len[lo]) / Math.max(1e-6, P.len[hi] - P.len[lo]);
+  return { x: a[0] + (b[0] - a[0]) * k, z: a[1] + (b[1] - a[1]) * k, yaw: Math.atan2(-(b[1] - a[1]), b[0] - a[0]) };
+}
+/** Położenie (s na trasie) pierwszego wózka pociągu m ładowni h w chwili t; null – pociągu nie ma jeszcze na płycie. */
+function trainLead(h: number, m: number, t: number): number | null {
+  const P = TRAIN_PATHS[h];
+  const n = Math.min(TRAIN_N, holdCount(h) - m * TRAIN_N);
+  if (n <= 0) return null;
+  const j0 = m * TRAIN_N;
+  const t0 = canStart(j0);
+  if (t < 0) return m === 0 ? P.sx : null;
+  if (m > 0 && t < t0) {
+    const ARR = 5.5;
+    if (t < t0 - ARR) return null;
+    return P.sx - 48 * (1 - sm01((t - (t0 - ARR)) / ARR));
+  }
+  let s = P.sx;
+  // po zdjęciu kontenera ciągnik podciąga pociąg o jeden wózek
+  for (let k = 1; k < n; k++) s += DOLLY_P * sm01((t - (canStart(j0 + k - 1) + 0.25 * CARGO_CT)) / (0.55 * CARGO_CT));
+  // pusty pociąg odjeżdża, coraz szybciej
+  const e = Math.max(0, Math.min(1, (t - (canStart(j0 + n - 1) + 0.25 * CARGO_CT)) / 8));
+  return s + 110 * e * e;
+}
+/** Tor kontenera: z wózka na tylną platformę podnośnika, w górę do progu, przez drzwi do ładowni, po rolkach na miejsce. */
+export function canPose(sl: (typeof CARGO_SLOTS)[number], t: number): { p: V3; u: number; yaw: number; vis: boolean } {
+  const door = CARGO_DOORS[sl.hold];
+  const u = t < 0 ? -1 : (t - canStart(sl.j)) / CARGO_CT;
+  const lerp = (a: number, b: number, k: number) => a + (b - a) * Math.max(0, Math.min(1, k));
+  if (u < 0) {
+    // na swoim wózku w pociągu
+    const P = TRAIN_PATHS[sl.hold];
+    const s = trainLead(sl.hold, Math.floor(sl.j / TRAIN_N), t);
+    const q = s === null ? null : pathAt(P, s - (sl.j % TRAIN_N) * DOLLY_P);
+    if (!q) return { p: [0, -50, 0], u, yaw: 0, vis: false };
+    return { p: [q.x, DOLLY_Y, q.z], u, yaw: q.yaw - P.yaw0, vis: true };
+  }
+  const at = (p: V3) => ({ p, u, yaw: 0, vis: true });
+  if (u >= 1) return at([sl.x, SILL_Y, sl.z]);
+  if (u < 0.2) return at([door, DOLLY_Y, lerp(ZD, LZ, u / 0.2)]);
+  if (u < 0.45) return at([door, lerp(DOLLY_Y, SILL_Y, sm01((u - 0.2) / 0.25)), LZ]);
+  if (u < 0.62) return at([door, SILL_Y, lerp(LZ, -1.2, (u - 0.45) / 0.17)]);
+  const k = (u - 0.62) / 0.38;
+  return at([lerp(door, sl.x, k), SILL_Y, lerp(-1.2, sl.z, Math.min(1, k * 2.5))]);
+}
+/** Wysokość mostu podnośnika: na dole (pod progiem) przy zamkniętych drzwiach, do progu po ich otwarciu. */
+function bridgeY(t: number) {
+  // nisko: barierki (1 m nad pokładem) muszą być pod łukiem, który zatacza dolna krawędź otwieranych drzwi
+  const lo = SILL_Y - 1.5;
+  if (t < 0) return lo;
+  const k = sm01((t - 2.7) / 1.4) * (1 - sm01((t - (CARGO_TEND - 1.5)) / 1.4));
+  return lo + (SILL_Y - lo) * k;
+}
+/** Wysokość pokładu tylnej platformy podnośnika ładowni h w chwili t (podnosi kontener i wraca na dół po następny). */
+function liftY(h: number, t: number) {
+  const lo = DOLLY_Y;
+  const hi = SILL_Y;
+  for (let j = 0; j < holdCount(h); j++) {
+    const u = (t - canStart(j)) / CARGO_CT;
+    if (u < 0 || u >= 1) continue;
+    const k = u < 0.2 ? 0 : u < 0.45 ? sm01((u - 0.2) / 0.25) : u < 0.62 ? 1 : u < 0.88 ? 1 - sm01((u - 0.62) / 0.26) : 0;
+    return lo + (hi - lo) * k;
+  }
+  return lo;
+}
+/**
+ * Drzwi ładowni: gruba skorupa wycięta z walca kadłuba – poszycie, krawędzie na całą głębokość, wewnętrzne wręgi
+ * z pasami i belki poprzeczne, okucia zawiasów u góry i zaczepy zamków na dolnej krawędzi. Zawias u góry: drzwi
+ * otwierają się do góry i na zewnątrz (prawa burta).
+ */
+const DOOR_D = 0.15;
+function CargoDoor({ xd }: { xd: number }) {
+  const g = useMemo(() => {
+    const x0 = xd - CARGO_DOOR.hw + 0.015;
+    const x1 = xd + CARGO_DOOR.hw - 0.015;
+    // kąty krawędzi otworu (θ < 0 – prawa burta), z małym luzem
+    const thT = (x: number) => -fusTheta(x, CARGO_DOOR.yt) - 0.012;
+    const thB = (x: number) => -fusTheta(x, CARGO_DOOR.yb) + 0.012;
+    const H = fusPt(xd, -fusTheta(xd, CARGO_DOOR.yt), -0.02);
+    const xs = refine([x0, x1], 0.12);
+    const ths = (x: number) => refine([thB(x), thT(x)], 0.03);
+    const tn = 24;
+    const lerpTh = (x: number, k: number) => thB(x) + (thT(x) - thB(x)) * k;
+    const ks = Array.from({ length: tn + 1 }, (_, i) => i / tn);
+    const skin = grid(xs, ks, (x, k) => fusPt(x, lerpTh(x, k), -0.012));
+    // krawędzie skorupy: góra, dół i boki – od poszycia do wewnętrznej strony
+    const edges = [
+      grid(xs, [-0.012, DOOR_D], (x, o) => fusPt(x, thT(x), o)),
+      grid(xs, [-0.012, DOOR_D], (x, o) => fusPt(x, thB(x), o)),
+      grid(ks, [-0.012, DOOR_D], (k, o) => fusPt(x0, lerpTh(x0, k), o)),
+      grid(ks, [-0.012, DOOR_D], (k, o) => fusPt(x1, lerpTh(x1, k), o)),
+      // pas obwodowy od środka (rama drzwi)
+      grid(xs, [0, 0.08], (x, k) => fusPt(x, lerpTh(x, 1 - k * 0.5), DOOR_D)),
+      grid(xs, [0, 0.08], (x, k) => fusPt(x, lerpTh(x, k * 0.5), DOOR_D)),
+    ];
+    // wewnętrzne wręgi drzwi (środnik + pas) i belki poprzeczne
+    const ribs: THREE.BufferGeometry[] = [];
+    const nR = 4;
+    for (let i = 1; i <= nR; i++) {
+      const x = x0 + ((x1 - x0) * i) / (nR + 1);
+      ribs.push(grid(ks, [0, DOOR_D], (k, o) => fusPt(x, lerpTh(x, k), o)));
+      ribs.push(grid(ks, [x - 0.035, x + 0.035], (k, xx) => fusPt(xx, lerpTh(xx, k), DOOR_D)));
+    }
+    for (const k of [0.33, 0.66]) {
+      ribs.push(grid(xs, [0, DOOR_D * 0.8], (x, o) => fusPt(x, lerpTh(x, k), o)));
+      ribs.push(grid(xs, [-0.012, 0.012], (x, dk) => fusPt(x, lerpTh(x, k + dk), DOOR_D * 0.8)));
+    }
+    const shell = mergeGeo([skin, ...edges]);
+    const frame = mergeGeo(ribs);
+    shell.translate(-H[0], -H[1], -H[2]);
+    frame.translate(-H[0], -H[1], -H[2]);
+    // okucia zawiasów (u góry) i zaczepy zamków (dolna krawędź) – położenia względem osi zawiasu
+    const fit = (x: number, th: number, o: number): V3 => {
+      const q = fusPt(x, th, o);
+      return [q[0] - H[0], q[1] - H[1], q[2] - H[2]];
+    };
+    const hinges = [0.15, 0.38, 0.62, 0.85].map((f) => fit(x0 + (x1 - x0) * f, thT(xd) - 0.01, 0.07));
+    const latches = [0.12, 0.37, 0.63, 0.88].map((f) => fit(x0 + (x1 - x0) * f, thB(xd) + 0.015, DOOR_D + 0.03));
+    return { shell, frame, H, hinges, latches };
+  }, [xd]);
+  useEffect(
+    () => () => {
+      g.shell.dispose();
+      g.frame.dispose();
+    },
+    [g],
+  );
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    // ok. 150°: drzwi podnoszą się wysoko nad otwór, blisko poszycia – cały płat nad zawiasem, ponad barierkami mostu
+    if (ref.current) ref.current.rotation.x = 2.6 * cargoDoorOpen(FUS_LIVE.cargoT);
+  });
+  return (
+    <group position={g.H}>
+      <group ref={ref}>
+        <mesh geometry={g.shell}>
+          <M k="paint" side={THREE.DoubleSide} />
+        </mesh>
+        <mesh geometry={g.frame}>
+          <M k="#9aa3ad" side={THREE.DoubleSide} />
+        </mesh>
+        {g.hinges.map((p, i) => (
+          <mesh key={`h${i}`} position={p}>
+            <boxGeometry args={[0.1, 0.12, 0.14]} />
+            <M k="#5b636c" />
+          </mesh>
+        ))}
+        {g.latches.map((p, i) => (
+          <mesh key={`l${i}`} position={p}>
+            <boxGeometry args={[0.08, 0.1, 0.08]} />
+            <M k="#3f464e" />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+/** Ustawia ramiona nożyc (stopnie jeden nad drugim, w każdym po dwa skrzyżowane z każdej strony) między y0 a y1 wokół zc,
+ * a także rurowe poprzeczki łączące lewą i prawą stronę: na końcach ramion (przeguby) i w środku każdego stopnia (oś). */
+/** Ustawia walec (oś y geometrii o wysokości 1) między punktami a i b. */
+const _ya = new THREE.Vector3(0, 1, 0);
+const _va = new THREE.Vector3();
+const _vb = new THREE.Vector3();
+export function placeBetween(m: THREE.Object3D, a: V3, b: V3) {
+  _va.set(...a);
+  _vb.set(...b).sub(_va);
+  const len = _vb.length();
+  m.position.set(a[0] + _vb.x / 2, a[1] + _vb.y / 2, a[2] + _vb.z / 2);
+  m.quaternion.setFromUnitVectors(_ya, _vb.normalize());
+  m.scale.set(1, Math.max(0.01, len), 1);
+}
+function setScissor(bars: (THREE.Mesh | null)[], y0: number, y1: number, zc: number, L: number, stages: number, tubes?: (THREE.Mesh | null)[], rams?: (THREE.Mesh | null)[]) {
+  const h = Math.max(0.04, y1 - y0) / stages;
+  const a = Math.acos(Math.min(0.999, h / L));
+  const sp = L * Math.sin(a);
+  bars.forEach((m, i) => {
+    if (!m) return;
+    const st = Math.floor(i / 4);
+    const j = i % 4;
+    m.position.set(j < 2 ? -0.95 : 0.95, y0 + (st + 0.5) * h, zc);
+    m.rotation.set((j % 2 ? 1 : -1) * a, 0, 0);
+  });
+  tubes?.forEach((m, i) => {
+    if (!m) return;
+    // najpierw przeguby na obu końcach każdego poziomu, potem osie środkowe stopni
+    if (i < 2 * (stages + 1)) {
+      const l = Math.floor(i / 2);
+      m.position.set(0, y0 + l * h, zc + (i % 2 ? 1 : -1) * (sp / 2));
+    } else m.position.set(0, y0 + (i - 2 * (stages + 1) + 0.5) * h, zc);
+  });
+  // siłowniki podnoszenia (po jednym z każdej strony): od przegubu przy ramie do osi pierwszego stopnia
+  if (rams) {
+    for (const [k, sx] of [[0, -0.6], [1, 0.6]] as const) {
+      const A: V3 = [sx, y0 + 0.06, zc + sp / 2 - 0.05];
+      const B: V3 = [sx, y0 + h * 1.0, zc - sp * 0.05];
+      const M2: V3 = [(A[0] + B[0]) / 2, A[1] + (B[1] - A[1]) * 0.55, A[2] + (B[2] - A[2]) * 0.55];
+      const body = rams[2 * k];
+      const rod = rams[2 * k + 1];
+      if (body) placeBetween(body, A, M2);
+      if (rod) placeBetween(rod, M2, B);
+    }
+  }
+}
+function Scissor({ bars, tubes, rams, L, stages, k = '#2b3440' }: { bars: React.MutableRefObject<(THREE.Mesh | null)[]>; tubes: React.MutableRefObject<(THREE.Mesh | null)[]>; rams: React.MutableRefObject<(THREE.Mesh | null)[]>; L: number; stages: number; k?: string }) {
+  return (
+    <>
+      {[0, 1, 2, 3].map((i) => (
+        <mesh key={`r${i}`} ref={(el) => (rams.current[i] = el)}>
+          <cylinderGeometry args={i % 2 ? [0.035, 0.035, 1, 12] : [0.07, 0.07, 1, 14]} />
+          <M k={i % 2 ? 'steel' : '#e8b10e'} />
+        </mesh>
+      ))}
+      {Array.from({ length: 4 * stages }, (_, i) => (
+        <mesh key={i} ref={(el) => (bars.current[i] = el)}>
+          <boxGeometry args={[0.09, L, 0.16]} />
+          <M k={k} />
+        </mesh>
+      ))}
+      {Array.from({ length: 3 * stages + 2 }, (_, i) => (
+        <mesh key={`t${i}`} ref={(el) => (tubes.current[i] = el)} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.045, 0.045, 2.02, 12]} />
+          <M k="#4b5563" />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+/** Tekstura pasów ostrzegawczych (skośne pasy żółte i czarne) – wspólna dla sprzętu na płycie. */
+let hazardTex: THREE.CanvasTexture | null = null;
+function getHazardTex() {
+  if (hazardTex) return hazardTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#f2c214';
+  x.fillRect(0, 0, 64, 64);
+  x.fillStyle = '#15171a';
+  for (let i = -64; i < 128; i += 32) {
+    x.beginPath();
+    x.moveTo(i, 0);
+    x.lineTo(i + 16, 0);
+    x.lineTo(i + 16 + 64, 64);
+    x.lineTo(i + 64, 64);
+    x.closePath();
+    x.fill();
+  }
+  hazardTex = new THREE.CanvasTexture(c);
+  hazardTex.wrapS = hazardTex.wrapT = THREE.RepeatWrapping;
+  hazardTex.colorSpace = THREE.SRGBColorSpace;
+  return hazardTex;
+}
+/** Płyta z pasami ostrzegawczymi (rozmiar s, powtórzenia wzoru rep wzdłuż). */
+export function HazardPlate({ p, s, rot = [0, 0, 0], rep = 3 }: { p: V3; s: [number, number, number]; rot?: V3; rep?: number }) {
+  const tex = useMemo(() => {
+    const t = getHazardTex().clone();
+    t.repeat.set(rep, 1);
+    t.needsUpdate = true;
+    return t;
+  }, [rep]);
+  useEffect(() => () => tex.dispose(), [tex]);
+  return (
+    <mesh position={p} rotation={rot}>
+      <boxGeometry args={s} />
+      <meshStandardMaterial map={tex} roughness={0.6} />
+    </mesh>
+  );
+}
+
+/** Pokład z rolkami (oś rolek w x – kontener jedzie w z): rama z ceowników, dwa pasy rolek, w środku kule, prowadnice. */
+function RollerDeck({ z0, z1, w = 2.4, rails = true }: { z0: number; z1: number; w?: number; rails?: boolean }) {
+  const L = Math.abs(z1 - z0);
+  const zc = (z0 + z1) / 2;
+  const zMin = Math.min(z0, z1);
+  const n = Math.max(2, Math.floor(L / 0.2));
+  const nb = Math.max(2, Math.floor(L / 0.3));
+  return (
+    <>
+      {/* płyta spodnia, belki boczne i czołowe ramy */}
+      <mesh position={[0, -0.12, zc]}>
+        <boxGeometry args={[w - 0.1, 0.05, L - 0.04]} />
+        <M k="#3a424c" />
+      </mesh>
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * (w / 2 - 0.06), -0.06, zc]}>
+          <boxGeometry args={[0.12, 0.17, L]} />
+          <M k="#2b3138" />
+        </mesh>
+      ))}
+      {[zMin + 0.04, zMin + L - 0.04].map((z) => (
+        <mesh key={z} position={[0, -0.07, z]}>
+          <boxGeometry args={[w, 0.14, 0.08]} />
+          <M k="#2b3138" />
+        </mesh>
+      ))}
+      {/* rolki w dwóch pasach i kule w środku (na nich kontener można obrócić) */}
+      {Array.from({ length: n }, (_, i) => {
+        const z = zMin + (i + 0.5) * (L / n);
+        return [-1, 1].map((sg) => (
+          <mesh key={`${i}${sg}`} position={[sg * (w / 4 + 0.05), -0.02, z]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.032, 0.032, w / 2 - 0.35, 10]} />
+            <M k="#d5dae0" />
+          </mesh>
+        ));
+      })}
+      {Array.from({ length: nb }, (_, i) => (
+        <mesh key={`b${i}`} position={[0, -0.02, zMin + (i + 0.5) * (L / nb)]}>
+          <sphereGeometry args={[0.035, 10, 8]} />
+          <M k="steel" />
+        </mesh>
+      ))}
+      {/* prowadnice boczne z pasami ostrzegawczymi – kontener nie zjedzie z platformy */}
+      {rails && [-1, 1].map((s) => <HazardPlate key={s} p={[s * (w / 2 - 0.03), 0.1, zc]} s={[0.04, 0.2, L - 0.12]} rep={Math.max(2, Math.round(L * 2))} />)}
+    </>
+  );
+}
+
+/** Koło pojazdu obsługi naziemnej: opona z wyraźnym barkiem, jasna felga, piasta. Oś w x. */
+export function GseWheel({ p, r = 0.3, w = 0.24 }: { p: V3; r?: number; w?: number }) {
+  return (
+    <group position={p}>
+      <mesh rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[r, r, w, 28]} />
+        <M k="#16181b" />
+      </mesh>
+      {[-1, 1].map((s) => (
+        <group key={s} position={[(s * w) / 2 + s * 0.004, 0, 0]}>
+          <mesh rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[r * 0.6, r * 0.6, 0.01, 20]} />
+            <M k="#c9ced4" />
+          </mesh>
+          <mesh rotation={[0, 0, Math.PI / 2]} position={[s * 0.012, 0, 0]}>
+            <cylinderGeometry args={[r * 0.2, r * 0.22, 0.03, 12]} />
+            <M k="#6b7280" />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * Podnośnik kontenerów do ładowni dolnej (typu „TLD”): niska rama na czterech kołach z błotnikami, z przodu i z tyłu
+ * pasy ostrzegawcze, gumowe odbojniki i podpory hydrauliczne; z boku kabina operatora (okna z trzech stron, fotel,
+ * kierownica, pulpit, lusterko, reflektory, lampa ostrzegawcza na maszcie), za nią obudowa silnika i pompy
+ * hydraulicznej z kratką. Przedni most na nożycach na wysokości progu (zderzaki przy poszyciu, płyta najazdowa,
+ * prowadnice wejściowe, barierki z poprzeczką) i tylna platforma na nożycach, która zjeżdża do wysokości wózka po
+ * każdy kontener.
+ */
+function CargoLoader({ xd, hold }: { xd: number; hold: number }) {
+  const G = GROUND;
+  const rear = useRef<THREE.Group>(null);
+  const rearBars = useRef<(THREE.Mesh | null)[]>([]);
+  const frontBars = useRef<(THREE.Mesh | null)[]>([]);
+  const rearTubes = useRef<(THREE.Mesh | null)[]>([]);
+  const frontTubes = useRef<(THREE.Mesh | null)[]>([]);
+  const rearRams = useRef<(THREE.Mesh | null)[]>([]);
+  const frontRams = useRef<(THREE.Mesh | null)[]>([]);
+  const beacon = useRef<THREE.MeshStandardMaterial>(null);
+  const bridge = useRef<THREE.Group>(null);
+  // przód mostu dosunięty do burty: z poszycia na wysokości progu (kadłub w dole się zwęża), z luzem na zderzak
+  const zS = fusPt(xd, -fusTheta(xd, SILL_Y), 0)[2];
+  const zF = zS - 0.1;
+  const bz = (zF + BRIDGE_Z[1]) / 2;
+  const lip = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => {
+    const t = FUS_LIVE.cargoT;
+    const y = liftY(hold, t);
+    if (rear.current) rear.current.position.y = y;
+    setScissor(rearBars.current, LOADER_YC, y - 0.16, LZ, 1.9, 2, rearTubes.current, rearRams.current);
+    // most podnosi się do progu dopiero, gdy drzwi są otwarte, i opuszcza się przed ich zamknięciem
+    const yb = bridgeY(t);
+    if (bridge.current) bridge.current.position.y = yb;
+    // płyta najazdowa: opuszcza się na próg, gdy most dojdzie do jego wysokości (wcześniej uniesiona pionowo)
+    if (lip.current) lip.current.rotation.x = -(Math.PI / 2) * (1 - sm01((yb - (SILL_Y - 0.08)) / 0.08));
+    setScissor(frontBars.current, LOADER_YC, yb - 0.16, bz, 2.0, 2, frontTubes.current, frontRams.current);
+    // lampa błyska, gdy podnośnik pracuje (drzwi otwarte)
+    if (beacon.current) beacon.current.emissiveIntensity = cargoDoorOpen(t) > 0.05 ? (Math.sin(clock.elapsedTime * 9) > 0 ? 2.2 : 0.15) : 0.1;
+  });
+  const z0 = -3.1;
+  const z1 = -8.0;
+  const zc = (z0 + z1) / 2;
+  const yel = '#e8b10e';
+  return (
+    <group position={[xd, 0, 0]}>
+      {/* rama: dwie podłużnice i blacha pokładu */}
+      {[-1, 1].map((s) => (
+        <mesh key={s} position={[s * 1.1, G + 0.36, zc]}>
+          <boxGeometry args={[0.2, 0.24, z0 - z1]} />
+          <M k={yel} />
+        </mesh>
+      ))}
+      <mesh position={[0, G + 0.29, zc]}>
+        <boxGeometry args={[2.0, 0.1, z0 - z1 - 0.1]} />
+        <M k="#2d333b" />
+      </mesh>
+      {/* odblaski boczne: pomarańczowe wzdłuż ramy, czerwone z tyłu */}
+      {[-1, 1].flatMap((s) => [-4.6, -5.6, -6.5].map((z) => (
+        <mesh key={`o${s}${z}`} position={[s * 1.205, G + 0.36, z]}>
+          <boxGeometry args={[0.01, 0.06, 0.12]} />
+          <meshStandardMaterial color="#ff8a00" emissive="#ff8a00" emissiveIntensity={0.5} />
+        </mesh>
+      )))}
+      {[-0.9, 0.9].map((x) => (
+        <mesh key={`t${x}`} position={[x, G + 0.4, z1 - 0.07]}>
+          <boxGeometry args={[0.2, 0.08, 0.01]} />
+          <meshStandardMaterial color="#d61f1f" emissive="#d61f1f" emissiveIntensity={0.6} />
+        </mesh>
+      ))}
+      {/* czoła ramy z pasami ostrzegawczymi i gumowe odbojniki na narożnikach */}
+      {[z0 + 0.03, z1 - 0.03].map((z) => (
+        <group key={z}>
+          <HazardPlate p={[0, G + 0.36, z]} s={[2.44, 0.24, 0.06]} rep={6} />
+          {[-1, 1].map((s) => (
+            <mesh key={s} position={[s * 1.1, G + 0.36, z + (z > zc ? 0.07 : -0.07)]}>
+              <boxGeometry args={[0.24, 0.2, 0.08]} />
+              <M k="#111317" />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {/* koła z błotnikami */}
+      {[-1.24, 1.24].flatMap((x) => [-3.75, -7.35].map((z) => (
+        <group key={`${x}${z}`}>
+          <GseWheel p={[x, G + 0.3, z]} />
+          <mesh position={[x, G + 0.64, z]}>
+            <boxGeometry args={[0.3, 0.04, 0.78]} />
+            <M k="#1f2329" />
+          </mesh>
+        </group>
+      )))}
+      {/* podpory hydrauliczne: cylinder, tłoczysko i stopa opuszczona na płytę */}
+      {/* na końcach ramy (z dala od kół): wysięgnik przykręcony do podłużnicy, cylinder, tłoczysko i stopa */}
+      {[-1, 1].flatMap((sx) => [z0 + 0.12, z1 - 0.1].map((z) => (
+        <group key={`s${sx}${z}`} position={[sx * 1.32, G, z]}>
+          <mesh position={[-sx * 0.12, 0.5, 0]}>
+            <boxGeometry args={[0.36, 0.14, 0.18]} />
+            <M k="#2b3138" />
+          </mesh>
+          {[-1, 1].map((k) => (
+            <mesh key={k} position={[-sx * 0.25, 0.5, k * 0.095]}>
+              <cylinderGeometry args={[0.02, 0.02, 0.02, 8]} />
+              <M k="steel" />
+            </mesh>
+          ))}
+          <mesh position={[0, 0.4, 0]}>
+            <cylinderGeometry args={[0.065, 0.065, 0.28, 12]} />
+            <M k={yel} />
+          </mesh>
+          <mesh position={[0, 0.18, 0]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.3, 10]} />
+            <M k="steel" />
+          </mesh>
+          <mesh position={[0, 0.025, 0]}>
+            <cylinderGeometry args={[0.12, 0.14, 0.05, 16]} />
+            <M k="#2b3138" />
+          </mesh>
+        </group>
+      )))}
+      {/* obudowa silnika i pompy hydraulicznej (z boku, pod tylną platformą) z kratką i rurą wydechową */}
+      <group position={[1.66, G, -6.9]}>
+        <mesh position={[0, 0.6, 0]}>
+          <boxGeometry args={[0.6, 0.7, 1.9]} />
+          <M k={yel} />
+        </mesh>
+        {/* zaokrąglona pokrywa */}
+        <mesh position={[0, 0.98, 0]}>
+          <boxGeometry args={[0.5, 0.06, 1.84]} />
+          <M k={yel} />
+        </mesh>
+        <mesh position={[0, 1.03, 0]}>
+          <boxGeometry args={[0.36, 0.04, 1.76]} />
+          <M k={yel} />
+        </mesh>
+        {/* żaluzje wlotu powietrza (poziome), panel serwisowy z zamkami, pas ostrzegawczy u dołu */}
+        {Array.from({ length: 6 }, (_, i) => (
+          <mesh key={i} position={[0.305, 0.48 + i * 0.07, -0.45]} rotation={[0.5, 0, 0]}>
+            <boxGeometry args={[0.012, 0.035, 0.7]} />
+            <M k="#1f2329" />
+          </mesh>
+        ))}
+        <mesh position={[0.303, 0.68, 0.45]}>
+          <boxGeometry args={[0.006, 0.46, 0.75]} />
+          <M k="#cf9c0c" />
+        </mesh>
+        {[0.25, 0.65].map((dz) => (
+          <mesh key={dz} position={[0.31, 0.68, dz]}>
+            <boxGeometry args={[0.02, 0.05, 0.05]} />
+            <M k="#1f2329" />
+          </mesh>
+        ))}
+        <HazardPlate p={[0.305, 0.31, 0]} s={[0.01, 0.12, 1.9]} rep={8} />
+        {/* rura wydechowa z daszkiem */}
+        <mesh position={[0.12, 1.2, 0.65]}>
+          <cylinderGeometry args={[0.035, 0.035, 0.4, 10]} />
+          <M k="#2b3138" />
+        </mesh>
+        <mesh position={[0.12, 1.41, 0.69]} rotation={[0.6, 0, 0]}>
+          <cylinderGeometry args={[0.045, 0.045, 0.02, 10]} />
+          <M k="#2b3138" />
+        </mesh>
+      </group>
+      {/* kabina operatora z boku, pod mostem */}
+      {/* podest kabiny przykręcony do podłużnicy ramy */}
+      <mesh position={[1.42, G + 0.5, -4.3]}>
+        <boxGeometry args={[0.5, 0.2, 1.4]} />
+        <M k="#2b3138" />
+      </mesh>
+      <group position={[1.76, G + 0.25, -4.3]}>
+        <mesh position={[0, 0.66, 0]}>
+          <boxGeometry args={[0.92, 0.72, 1.6]} />
+          <M k={yel} />
+        </mesh>
+        <mesh position={[0, 0.36, 0]}>
+          <boxGeometry args={[0.94, 0.12, 1.62]} />
+          <M k="#1f2329" />
+        </mesh>
+        {/* drzwi (zewnętrzny bok): obrys, klamka, stopień i uchwyt przy wejściu */}
+        {[
+          [0.6, 0.02, 0.02, 0.462, 0.66, 0.38],
+          [0.6, 0.02, 0.02, 0.462, 0.66, -0.38],
+          [0.02, 0.02, 0.78, 0.462, 0.96, 0],
+        ].map(([sy, sx, sz, x, y, z], i) => (
+          <mesh key={`d${i}`} position={[x, y, z]}>
+            <boxGeometry args={[sx, sy, sz]} />
+            <M k="#a87c08" />
+          </mesh>
+        ))}
+        <mesh position={[0.48, 0.8, 0.28]}>
+          <boxGeometry args={[0.03, 0.03, 0.12]} />
+          <M k="#1f2329" />
+        </mesh>
+        {/* stopień wejściowy pod drzwiami: kratownica (rama i poprzeczki z prześwitami) zawieszona na dwóch bocznych
+            płaskownikach przykręconych do spodu kabiny; ok. 0,3 m nad płytą, podłoga kabiny ok. 0,55 m */}
+        {[-0.26, 0.26].map((dz) => (
+          <mesh key={dz} position={[0.43, 0.18, dz]}>
+            <boxGeometry args={[0.05, 0.3, 0.02]} />
+            <M k="#2b3138" />
+          </mesh>
+        ))}
+        {[-0.26, 0.26].map((dz) => (
+          <mesh key={`r${dz}`} position={[0.53, 0.05, dz]}>
+            <boxGeometry args={[0.24, 0.04, 0.025]} />
+            <M k="#2b3138" />
+          </mesh>
+        ))}
+        {[0.42, 0.64].map((x) => (
+          <mesh key={`f${x}`} position={[x, 0.05, 0]}>
+            <boxGeometry args={[0.025, 0.04, 0.54]} />
+            <M k={x > 0.5 ? '#e8b10e' : '#2b3138'} />
+          </mesh>
+        ))}
+        {Array.from({ length: 5 }, (_, i) => (
+          <mesh key={`g${i}`} position={[0.53, 0.055, -0.2 + i * 0.1]}>
+            <boxGeometry args={[0.2, 0.03, 0.015]} />
+            <M k="#5b636c" />
+          </mesh>
+        ))}
+        {[-0.26, 0.26].map((dz) => (
+          <mesh key={`b${dz}`} position={[0.43, 0.31, dz]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 0.04, 8]} />
+            <M k="steel" />
+          </mesh>
+        ))}
+        <mesh position={[0.5, 1.25, 0.6]}>
+          <cylinderGeometry args={[0.018, 0.018, 0.6, 8]} />
+          <M k="#d1d5db" />
+        </mesh>
+        {/* światła pozycyjne na narożnikach */}
+        {[-0.81, 0.81].map((dz) => (
+          <mesh key={`p${dz}`} position={[0.4, 0.94, dz]}>
+            <boxGeometry args={[0.1, 0.05, 0.02]} />
+            <meshStandardMaterial color={dz < 0 ? '#ffb347' : '#d61f1f'} emissive={dz < 0 ? '#ffb347' : '#d61f1f'} emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+        {/* słupki */}
+        {[-0.44, 0.44].flatMap((dx) => [-0.78, 0.78].map((dz) => (
+          <mesh key={`${dx}${dz}`} position={[dx, 1.36, dz]}>
+            <boxGeometry args={[0.06, 0.7, 0.06]} />
+            <M k={yel} />
+          </mesh>
+        )))}
+        {/* okna: przód (w stronę samolotu), tył i bok zewnętrzny */}
+        {[-0.78, 0.78].map((dz) => (
+          <mesh key={dz} position={[0, 1.36, dz]}>
+            <boxGeometry args={[0.84, 0.64, 0.02]} />
+            <M k="glass" opacity={0.42} />
+          </mesh>
+        ))}
+        <mesh position={[0.44, 1.36, 0]}>
+          <boxGeometry args={[0.02, 0.64, 1.52]} />
+          <M k="glass" opacity={0.42} />
+        </mesh>
+        {/* dach z daszkiem i lampa ostrzegawcza na maszcie */}
+        <mesh position={[0, 1.73, 0]}>
+          <boxGeometry args={[1.02, 0.05, 1.78]} />
+          <M k={yel} />
+        </mesh>
+        <mesh position={[0, 1.77, 0]}>
+          <boxGeometry args={[0.9, 0.05, 1.64]} />
+          <M k={yel} />
+        </mesh>
+        {/* uszczelki szyb (ciemne ramki) */}
+        {[-0.77, 0.77].map((dz) => (
+          <mesh key={`u${dz}`} position={[0, 1.36, dz]}>
+            <boxGeometry args={[0.86, 0.66, 0.01]} />
+            <meshStandardMaterial color="#111317" wireframe />
+          </mesh>
+        ))}
+        <mesh position={[0.25, 1.86, -0.6]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.18, 8]} />
+          <M k="#2b3138" />
+        </mesh>
+        <mesh position={[0.25, 2.0, -0.6]}>
+          <cylinderGeometry args={[0.07, 0.08, 0.13, 14]} />
+          <meshStandardMaterial ref={beacon} color="#f97316" emissive="#f97316" emissiveIntensity={0.1} />
+        </mesh>
+        {/* wnętrze: fotel, pulpit i kierownica */}
+        <mesh position={[-0.05, 1.12, 0.25]}>
+          <boxGeometry args={[0.44, 0.1, 0.44]} />
+          <M k="#1f2329" />
+        </mesh>
+        <mesh position={[-0.05, 1.4, 0.47]}>
+          <boxGeometry args={[0.44, 0.5, 0.08]} />
+          <M k="#1f2329" />
+        </mesh>
+        <mesh position={[0, 1.15, -0.5]} rotation={[0.5, 0, 0]}>
+          <boxGeometry args={[0.7, 0.08, 0.3]} />
+          <M k="#2b3138" />
+        </mesh>
+        <mesh position={[0, 1.33, -0.35]} rotation={[1.1, 0, 0]}>
+          <torusGeometry args={[0.15, 0.018, 6, 20]} />
+          <M k="#111317" />
+        </mesh>
+        {/* reflektory i lusterko */}
+        {[-0.3, 0.3].map((dx) => (
+          <mesh key={dx} position={[dx, 0.82, -0.81]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.06, 0.06, 0.03, 14]} />
+            <meshStandardMaterial color="#fffbe8" emissive="#fff4c2" emissiveIntensity={0.6} />
+          </mesh>
+        ))}
+        <mesh position={[0.56, 1.5, -0.74]}>
+          <boxGeometry args={[0.03, 0.18, 0.12]} />
+          <M k="#111317" />
+        </mesh>
+      </group>
+      {/* przedni most na wysokości progu: rolki, prowadnice, gumowy zderzak przy poszyciu */}
+      <Scissor bars={frontBars} tubes={frontTubes} rams={frontRams} L={2.0} stages={2} />
+      <group ref={bridge} position={[0, bridgeY(-1), 0]}>
+        <RollerDeck z0={zF} z1={BRIDGE_Z[1]} />
+        {/* gumowe zderzaki na przodzie mostu – opierają się o poszycie pod progiem */}
+        {[-0.85, 0.85].map((x) => (
+          <mesh key={x} position={[x, -0.2, zF + 0.04]}>
+            <boxGeometry args={[0.35, 0.22, 0.12]} />
+            <M k="#111317" />
+          </mesh>
+        ))}
+        {/* płyta najazdowa na zawiasie: leży na progu drzwi, kontener przejeżdża po niej do ładowni */}
+        <group ref={lip} position={[0, -0.01, zF]}>
+          <mesh position={[0, 0, 0.2]}>
+            <boxGeometry args={[1.9, 0.03, 0.4]} />
+            <M k="#9ca3af" />
+          </mesh>
+        </group>
+        {/* prowadnice wejściowe (rozchylone) – ustawiają kontener na środku otworu drzwi */}
+        {[-1, 1].map((sg) => (
+          <mesh key={sg} position={[sg * 1.0, 0.12, zF - 0.35]} rotation={[0, sg * 0.35, 0]}>
+            <boxGeometry args={[0.05, 0.22, 0.6]} />
+            <M k="#f59e0b" />
+          </mesh>
+        ))}
+        {/* pulpit sterowania na moście: słupek, skrzynka z przyciskami i dźwignią (operator steruje z mostu) */}
+        <group position={[1.0, 0, BRIDGE_Z[1] + 0.35]}>
+          <mesh position={[0, 0.45, 0]}>
+            <boxGeometry args={[0.08, 0.9, 0.08]} />
+            <M k="#2b3138" />
+          </mesh>
+          <mesh position={[0, 0.98, 0]} rotation={[-0.4, 0, 0]}>
+            <boxGeometry args={[0.32, 0.12, 0.26]} />
+            <M k="#e8b10e" />
+          </mesh>
+          <mesh position={[0, 1.06, -0.03]} rotation={[-0.4, 0, 0]}>
+            <boxGeometry args={[0.26, 0.01, 0.18]} />
+            <M k="#1f2329" />
+          </mesh>
+          {[-0.08, 0, 0.08].map((dx, i) => (
+            <mesh key={dx} position={[dx, 1.075, 0.02]}>
+              <cylinderGeometry args={[0.018, 0.018, 0.02, 10]} />
+              <meshStandardMaterial color={['#22c55e', '#ef4444', '#facc15'][i]} emissive={['#22c55e', '#ef4444', '#facc15'][i]} emissiveIntensity={0.5} />
+            </mesh>
+          ))}
+          <mesh position={[0, 1.12, -0.07]}>
+            <cylinderGeometry args={[0.012, 0.012, 0.12, 8]} />
+            <M k="#111317" />
+          </mesh>
+          <mesh position={[0, 1.19, -0.07]}>
+            <sphereGeometry args={[0.025, 10, 8]} />
+            <M k="#111317" />
+          </mesh>
+        </group>
+        {/* barierki z boku mostu (dla obsługi) */}
+        {[-1.25, 1.25].map((x) => (
+          <group key={x}>
+            {[zF - 0.7, BRIDGE_Z[1] + 0.2].map((z) => (
+              <mesh key={z} position={[x, 0.5, z]}>
+                <boxGeometry args={[0.04, 1.0, 0.04]} />
+                <M k="#f59e0b" />
+              </mesh>
+            ))}
+            {[1.0, 0.55].map((yy) => (
+              <mesh key={yy} position={[x, yy, (zF - 0.7 + BRIDGE_Z[1] + 0.2) / 2]}>
+                <boxGeometry args={[0.045, 0.045, Math.abs(BRIDGE_Z[1] - zF) - 0.9]} />
+                <M k="#f59e0b" />
+              </mesh>
+            ))}
+          </group>
+        ))}
+      </group>
+      {/* tylna platforma na nożycach – jeździ w górę i w dół z kontenerem */}
+      <Scissor bars={rearBars} tubes={rearTubes} rams={rearRams} L={1.9} stages={2} />
+      <group ref={rear} position={[0, DOLLY_Y, 0]}>
+        <RollerDeck z0={LZ + 1.05} z1={LZ - 1.05} />
+        {/* niskie ograniczniki na tylnej krawędzi platformy */}
+        {[-0.75, 0.75].map((x) => (
+          <mesh key={x} position={[x, 0.07, LZ - 1.02]}>
+            <boxGeometry args={[0.3, 0.12, 0.05]} />
+            <M k="#111317" />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+/** Pręt (walec) między dwoma stałymi punktami – do dyszli, zastrzałów i poręczy. */
+export function StaticBar({ a, b, r, k }: { a: V3; b: V3; r: number; k: string }) {
+  const ref = useRef<THREE.Mesh>(null);
+  useEffect(() => {
+    if (ref.current) placeBetween(ref.current, a, b);
+  }, [a, b]);
+  return (
+    <mesh ref={ref}>
+      <cylinderGeometry args={[r, r, 1, 10]} />
+      <M k={k} />
+    </mesh>
+  );
+}
+
+/**
+ * Wózek pod kontener (przód w +x, ku ciągnikowi): rama z podłużnic i poprzeczek, pokład z rolkami (kontener zsuwa się
+ * w bok, w z) i kulami, narożne słupki i ograniczniki z przodu i z tyłu w pasy ostrzegawcze, skrętna oś przednia
+ * z trójkątnym dyszlem zakończonym uchem, hak z tyłu do następnego wózka, koła z felgami.
+ */
+function DollyModel() {
+  const G = GROUND;
+  const y = DOLLY_Y;
+  const tip: V3 = [DOLLY_P - 1.0, G + 0.36, 0];
+  return (
+    <group>
+      {/* rama */}
+      {[-0.75, 0.75].map((z) => (
+        <mesh key={z} position={[0, y - 0.19, z]}>
+          <boxGeometry args={[1.9, 0.12, 0.1]} />
+          <M k="#3b4552" />
+        </mesh>
+      ))}
+      {[-0.85, 0, 0.85].map((x) => (
+        <mesh key={x} position={[x, y - 0.19, 0]}>
+          <boxGeometry args={[0.1, 0.1, 1.5]} />
+          <M k="#3b4552" />
+        </mesh>
+      ))}
+      {/* pokład */}
+      <mesh position={[0, y - 0.1, 0]}>
+        <boxGeometry args={[1.94, 0.06, 1.94]} />
+        <M k="#56616e" />
+      </mesh>
+      {Array.from({ length: 7 }, (_, i) =>
+        [-1, 1].map((sg) => (
+          <mesh key={`${i}${sg}`} position={[-0.81 + i * 0.27, y - 0.035, sg * 0.45]} rotation={[0, 0, Math.PI / 2]}>
+            <cylinderGeometry args={[0.03, 0.03, 0.12, 8]} />
+            <M k="#d5dae0" />
+          </mesh>
+        )),
+      )}
+      {Array.from({ length: 7 }, (_, i) => (
+        <mesh key={`r${i}`} position={[-0.81 + i * 0.27, y - 0.035, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.028, 0.028, 1.6, 8]} />
+          <M k="#c4cad1" />
+        </mesh>
+      ))}
+      {/* ograniczniki z przodu i z tyłu (w kierunku jazdy) i narożne słupki */}
+      {[-0.95, 0.95].map((x) => (
+        <HazardPlate key={x} p={[x, y + 0.07, 0]} s={[0.05, 0.2, 1.7]} rep={5} />
+      ))}
+      {[-0.95, 0.95].flatMap((x) => [-0.92, 0.92].map((z) => (
+        <mesh key={`p${x}${z}`} position={[x, y + 0.12, z]}>
+          <boxGeometry args={[0.08, 0.34, 0.08]} />
+          <M k="#2b3138" />
+        </mesh>
+      )))}
+      {/* oś przednia (skrętna, na obrotnicy) i tylna; koła z felgami */}
+      <mesh position={[0.62, G + 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.035, 0.035, 1.3, 8]} />
+        <M k="#2b3138" />
+      </mesh>
+      <mesh position={[-0.62, G + 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.035, 0.035, 1.3, 8]} />
+        <M k="#2b3138" />
+      </mesh>
+      <mesh position={[0.62, y - 0.3, 0]}>
+        <cylinderGeometry args={[0.22, 0.22, 0.06, 18]} />
+        <M k="#2b3138" />
+      </mesh>
+      {[-0.62, 0.62].flatMap((dx) => [-0.66, 0.66].map((dz) => (
+        <group key={`${dx}${dz}`} position={[dx, G + 0.2, dz]} rotation={[0, Math.PI / 2, 0]}>
+          <GseWheel p={[0, 0, 0]} r={0.2} w={0.13} />
+        </group>
+      )))}
+      {/* dyszel: trójkąt od osi przedniej do ucha */}
+      <StaticBar a={[0.62, G + 0.22, 0.42]} b={tip} r={0.03} k="#e8b10e" />
+      <StaticBar a={[0.62, G + 0.22, -0.42]} b={tip} r={0.03} k="#e8b10e" />
+      <mesh position={tip} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.06, 0.018, 6, 14]} />
+        <M k="#2b3138" />
+      </mesh>
+      {/* hak z tyłu */}
+      <mesh position={[-1.0, G + 0.36, 0]}>
+        <boxGeometry args={[0.14, 0.08, 0.14]} />
+        <M k="#2b3138" />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * Ciągnik bagażowy (przód w +x): niska rama, maska silnika z osłoną chłodnicy i reflektorami, błotniki nad kołami,
+ * otwarte stanowisko kierowcy z fotelem i kierownicą, dach na czterech słupkach z lampą ostrzegawczą, przeciwwaga
+ * z tyłu z hakiem i światłami, zderzak z przodu.
+ */
+function TugModel() {
+  const G = GROUND;
+  const white = '#e9ecef';
+  const blue = '#1f5fd1';
+  return (
+    <group>
+      {/* rama i dolna część nadwozia */}
+      <mesh position={[0, G + 0.42, 0]}>
+        <boxGeometry args={[2.7, 0.26, 1.3]} />
+        <M k="#2b3138" />
+      </mesh>
+      {/* maska silnika (przód) */}
+      <mesh position={[0.82, G + 0.78, 0]}>
+        <boxGeometry args={[1.0, 0.5, 1.2]} />
+        <M k={white} />
+      </mesh>
+      <mesh position={[0.74, G + 1.06, 0]}>
+        <boxGeometry args={[0.8, 0.06, 1.12]} />
+        <M k={white} />
+      </mesh>
+      {/* skośny przód maski */}
+      <mesh position={[1.2, G + 0.98, 0]} rotation={[0, 0, -0.75]}>
+        <boxGeometry args={[0.24, 0.05, 1.18]} />
+        <M k={white} />
+      </mesh>
+      {/* kratki wentylacyjne na bokach maski */}
+      {[-0.605, 0.605].flatMap((z) => Array.from({ length: 4 }, (_, i) => (
+        <mesh key={`v${z}${i}`} position={[0.62 + i * 0.12, G + 0.82, z]}>
+          <boxGeometry args={[0.06, 0.22, 0.01]} />
+          <M k="#2b3138" />
+        </mesh>
+      )))}
+      {/* deska rozdzielcza z zegarami za maską */}
+      <mesh position={[0.3, G + 1.0, 0]} rotation={[0, 0, 0.5]}>
+        <boxGeometry args={[0.08, 0.3, 1.1]} />
+        <M k="#1f2329" />
+      </mesh>
+      {[0.05, 0.3].map((z) => (
+        <mesh key={`g${z}`} position={[0.27, G + 1.02, z]} rotation={[0, 0, Math.PI / 2 + 0.5]}>
+          <cylinderGeometry args={[0.05, 0.05, 0.01, 16]} />
+          <meshStandardMaterial color="#e5e7eb" emissive="#9fd3ff" emissiveIntensity={0.25} />
+        </mesh>
+      ))}
+      {/* lusterka na przednich słupkach */}
+      {[-0.68, 0.68].map((z) => (
+        <group key={`m${z}`}>
+          <StaticBar a={[0.3, G + 1.55, z * 0.9]} b={[0.32, G + 1.6, z * 1.12]} r={0.012} k="#2b3138" />
+          <mesh position={[0.32, G + 1.6, z * 1.16]}>
+            <boxGeometry args={[0.03, 0.16, 0.1]} />
+            <M k="#111317" />
+          </mesh>
+        </group>
+      ))}
+      {/* uchwyt przy wejściu i stopień */}
+      <StaticBar a={[0.27, G + 0.8, 0.62]} b={[0.27, G + 1.6, 0.62]} r={0.016} k="#d1d5db" />
+      <mesh position={[-0.2, G + 0.33, 0.68]}>
+        <boxGeometry args={[0.45, 0.03, 0.16]} />
+        <M k="#4b535c" />
+      </mesh>
+      <mesh position={[0.82, G + 0.6, 0]}>
+        <boxGeometry args={[1.02, 0.08, 1.22]} />
+        <M k={blue} />
+      </mesh>
+      {/* osłona chłodnicy i reflektory */}
+      {Array.from({ length: 5 }, (_, i) => (
+        <mesh key={i} position={[1.325, G + 0.72 + i * 0.05, 0]}>
+          <boxGeometry args={[0.01, 0.025, 0.6]} />
+          <M k="#1f2329" />
+        </mesh>
+      ))}
+      {[-0.45, 0.45].map((z) => (
+        <mesh key={z} position={[1.325, G + 0.88, z]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.07, 0.07, 0.03, 16]} />
+          <meshStandardMaterial color="#fffbe8" emissive="#fff4c2" emissiveIntensity={0.7} />
+        </mesh>
+      ))}
+      {[-0.45, 0.45].map((z) => (
+        <mesh key={`r${z}`} position={[1.322, G + 0.88, z]} rotation={[0, Math.PI / 2, 0]}>
+          <torusGeometry args={[0.08, 0.014, 6, 18]} />
+          <M k="#2b3138" />
+        </mesh>
+      ))}
+      <mesh position={[1.38, G + 0.42, 0]}>
+        <boxGeometry args={[0.1, 0.16, 1.36]} />
+        <M k="#111317" />
+      </mesh>
+      {/* stanowisko kierowcy: podłoga, fotel z oparciem, kolumna kierownicy, kierownica */}
+      <mesh position={[-0.2, G + 0.58, 0]}>
+        <boxGeometry args={[0.9, 0.06, 1.2]} />
+        <M k="#3a424c" />
+      </mesh>
+      {/* fotel kierowcy: podstawa na słupku z amortyzatorem, zaokrąglone siedzisko z boczkami, oparcie, zagłówek */}
+      <group position={[-0.45, G, 0.2]}>
+        <mesh position={[0, 0.66, 0]}>
+          <boxGeometry args={[0.34, 0.06, 0.34]} />
+          <M k="#2b3138" />
+        </mesh>
+        <mesh position={[0, 0.73, 0]}>
+          <cylinderGeometry args={[0.06, 0.07, 0.1, 14]} />
+          <M k="#3a424c" />
+        </mesh>
+        <RoundedBox args={[0.44, 0.1, 0.46]} radius={0.04} smoothness={3} position={[0.02, 0.83, 0]}>
+          <M k="#23272d" />
+        </RoundedBox>
+        {[-1, 1].map((sg) => (
+          <RoundedBox key={sg} args={[0.38, 0.06, 0.06]} radius={0.025} smoothness={2} position={[0.02, 0.89, sg * 0.21]}>
+            <M k="#1a1d21" />
+          </RoundedBox>
+        ))}
+        <RoundedBox args={[0.1, 0.5, 0.44]} radius={0.04} smoothness={3} position={[-0.2, 1.1, 0]} rotation={[0, 0, -0.12]}>
+          <M k="#23272d" />
+        </RoundedBox>
+        {[-1, 1].map((sg) => (
+          <RoundedBox key={`o${sg}`} args={[0.08, 0.42, 0.06]} radius={0.025} smoothness={2} position={[-0.17, 1.08, sg * 0.21]} rotation={[0, 0, -0.12]}>
+            <M k="#1a1d21" />
+          </RoundedBox>
+        ))}
+        {/* zagłówek na dwóch prętach wsuniętych w oparcie */}
+        {[-0.07, 0.07].map((dz) => (
+          <mesh key={`h${dz}`} position={[-0.235, 1.38, dz]} rotation={[0, 0, -0.12]}>
+            <cylinderGeometry args={[0.009, 0.009, 0.14, 8]} />
+            <M k="steel" />
+          </mesh>
+        ))}
+        <RoundedBox args={[0.09, 0.15, 0.26]} radius={0.035} smoothness={3} position={[-0.245, 1.47, 0]} rotation={[0, 0, -0.12]}>
+          <M k="#23272d" />
+        </RoundedBox>
+        {/* przeszycia siedziska */}
+        {[-0.1, 0.1].map((dz) => (
+          <mesh key={`s${dz}`} position={[0.02, 0.882, dz]}>
+            <boxGeometry args={[0.36, 0.004, 0.006]} />
+            <M k="#3a3f46" />
+          </mesh>
+        ))}
+      </group>
+      {/* kolumna kierownicy z osłoną i kierownica: obręcz zwrócona do kierowcy, trzy ramiona, piasta i gałka */}
+      <StaticBar a={[0.3, G + 0.6, 0.2]} b={[0.1, G + 1.1, 0.2]} r={0.022} k="#2b3138" />
+      <StaticBar a={[0.26, G + 0.7, 0.2]} b={[0.16, G + 0.95, 0.2]} r={0.05} k="#1f2329" />
+      <group position={[0.09, G + 1.13, 0.2]} rotation={[0, 0, -1.19]}>
+        <group rotation={[0, -Math.PI / 2, 0]}>
+          <mesh>
+            <torusGeometry args={[0.18, 0.022, 10, 32]} />
+            <M k="#111317" />
+          </mesh>
+          {[Math.PI / 2, (7 * Math.PI) / 6, (11 * Math.PI) / 6].map((ang) => (
+            <mesh key={ang} position={[Math.cos(ang) * 0.09, Math.sin(ang) * 0.09, 0]} rotation={[0, 0, ang]}>
+              <boxGeometry args={[0.17, 0.03, 0.015]} />
+              <M k="#2b3138" />
+            </mesh>
+          ))}
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.045, 0.05, 0.05, 16]} />
+            <M k="#1f2329" />
+          </mesh>
+          <mesh position={[0.18, 0, 0.04]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 0.07, 10]} />
+            <M k="#111317" />
+          </mesh>
+        </group>
+      </group>
+      {/* słupki, dach i lampa ostrzegawcza */}
+      {[-0.95, 0.3].flatMap((x) => [-0.6, 0.6].map((z) => (
+        <mesh key={`${x}${z}`} position={[x, G + 1.42, z]}>
+          <boxGeometry args={[0.05, 1.3, 0.05]} />
+          <M k="#2b3138" />
+        </mesh>
+      )))}
+      <mesh position={[-0.32, G + 2.09, 0]}>
+        <boxGeometry args={[1.5, 0.05, 1.42]} />
+        <M k={blue} />
+      </mesh>
+      <mesh position={[-0.32, G + 2.12, 0]}>
+        <boxGeometry args={[1.36, 0.03, 1.28]} />
+        <M k={white} />
+      </mesh>
+      <mesh position={[-0.6, G + 2.21, 0]}>
+        <cylinderGeometry args={[0.06, 0.07, 0.13, 12]} />
+        <meshStandardMaterial color="#f97316" emissive="#f97316" emissiveIntensity={1.2} />
+      </mesh>
+      {/* przeciwwaga z tyłu, światła i hak */}
+      <mesh position={[-1.08, G + 0.75, 0]}>
+        <boxGeometry args={[0.5, 0.45, 1.24]} />
+        <M k={white} />
+      </mesh>
+      <mesh position={[-1.08, G + 0.6, 0]}>
+        <boxGeometry args={[0.52, 0.08, 1.26]} />
+        <M k={blue} />
+      </mesh>
+      {[-0.5, 0.5].map((z) => (
+        <mesh key={`l${z}`} position={[-1.335, G + 0.85, z]}>
+          <boxGeometry args={[0.01, 0.08, 0.14]} />
+          <meshStandardMaterial color="#d61f1f" emissive="#d61f1f" emissiveIntensity={0.7} />
+        </mesh>
+      ))}
+      <HazardPlate p={[-1.34, G + 0.42, 0]} s={[0.02, 0.18, 1.3]} rep={4} />
+      <mesh position={[-1.42, G + 0.36, 0]}>
+        <boxGeometry args={[0.16, 0.08, 0.16]} />
+        <M k="#2b3138" />
+      </mesh>
+      {/* błotniki i koła */}
+      {[-0.85, 0.85].flatMap((dx) => [-0.66, 0.66].map((dz) => (
+        <group key={`${dx}${dz}`}>
+          <group position={[dx, G + 0.32, dz]} rotation={[0, Math.PI / 2, 0]}>
+            <GseWheel p={[0, 0, 0]} r={0.32} w={0.22} />
+          </group>
+          {/* błotnik: łuk nad kołem (półwalec) z gumowym fartuchem */}
+          <mesh position={[dx, G + 0.32, dz]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.41, 0.41, 0.3, 20, 1, true, Math.PI / 2, Math.PI]} />
+            <M k="#1f2329" side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      )))}
+    </group>
+  );
+}
+
+/** Pociągi wózków jednej ładowni (każdy: ciągnik i do TRAIN_N wózków) jadące po swojej trasie. */
+function DollyTrains({ hold }: { hold: number }) {
+  const P = TRAIN_PATHS[hold];
+  const nTrains = Math.ceil(holdCount(hold) / TRAIN_N);
+  const trains = Array.from({ length: nTrains }, (_, m) => Math.min(TRAIN_N, holdCount(hold) - m * TRAIN_N));
+  const refs = useRef<(THREE.Group | null)[][]>(trains.map(() => []));
+  useFrame(() => {
+    const t = FUS_LIVE.cargoT;
+    trains.forEach((n, m) => {
+      const s = trainLead(hold, m, t);
+      for (let k = -1; k < n; k++) {
+        const g = refs.current[m][k + 1];
+        if (!g) continue;
+        const q = s === null ? null : pathAt(P, k < 0 ? s + TUG_D : s - k * DOLLY_P);
+        g.visible = Boolean(q);
+        if (q) {
+          g.position.set(q.x, 0, q.z);
+          g.rotation.y = q.yaw;
+        }
+      }
+    });
+  });
+  return (
+    <group>
+      {trains.map((n, m) =>
+        Array.from({ length: n + 1 }, (_, i) => (
+          <group key={`${m}-${i}`} ref={(el) => (refs.current[m][i] = el)} visible={false}>
+            {i === 0 ? <TugModel /> : <DollyModel />}
+          </group>
+        )),
+      )}
+    </group>
+  );
+}
+
+/** Odległość środka klina od środka wózka: oś skrajna (dx) + miejsce, gdzie opona r jest 0,2 m nad płytą, + 3 cm (czubek skosu). */
+const chockSpan = (dx: number, r: number) => dx + Math.sqrt(r * r - (r - 0.2) * (r - 0.2)) + 0.03;
+/** Para klinów pod kołem (przed i za oponą, w odległości span od osi): skośny profil oparty o oponę, czarny pas
+ * odblaskowy, uchwyt i linka łącząca oba kliny z boku. */
+export function ChockPair({ x, z, span, len }: { x: number; z: number; span: number; len: number }) {
+  const G = GROUND;
+  const geo = useMemo(() => {
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.16, 0);
+    sh.lineTo(0.17, 0);
+    sh.lineTo(0.03, 0.2);
+    sh.lineTo(-0.16, 0.2);
+    sh.closePath();
+    const g = new THREE.ExtrudeGeometry(sh, { depth: len, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 2 });
+    g.translate(0, 0, -len / 2);
+    return g;
+  }, [len]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <group position={[x, G + 0.012, z]}>
+      {[-1, 1].map((sg) => (
+        // skos zwrócony ku oponie (klin przed kołem – skos w +x, za kołem – w −x)
+        <group key={sg} position={[sg * span, 0, 0]} scale={[-sg, 1, 1]}>
+          <mesh geometry={geo} raycast={() => null}>
+            <meshStandardMaterial color="#f5c518" roughness={0.65} />
+          </mesh>
+          <mesh position={[-0.065, 0.214, 0]} raycast={() => null}>
+            <boxGeometry args={[0.2, 0.012, len * 0.35]} />
+            <meshStandardMaterial color="#111317" roughness={0.6} />
+          </mesh>
+          <mesh position={[-0.07, 0.24, 0]} rotation={[0, Math.PI / 2, 0]} raycast={() => null}>
+            <torusGeometry args={[0.07, 0.012, 6, 16, Math.PI]} />
+            <meshStandardMaterial color="#1f2937" roughness={0.5} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Pachołek ostrzegawczy: pomarańczowy stożek z zaokrąglonym czubkiem, dwa pasy odblaskowe, gumowa kwadratowa podstawa. */
+export function SafetyCone({ x, z }: { x: number; z: number }) {
+  const orange = '#f26a1b';
+  return (
+    <group position={[x, GROUND, z]}>
+      <mesh position={[0, 0.025, 0]} raycast={() => null}>
+        <boxGeometry args={[0.42, 0.05, 0.42]} />
+        <meshStandardMaterial color="#1b1d21" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0.06, 0]} raycast={() => null}>
+        <cylinderGeometry args={[0.17, 0.19, 0.03, 20]} />
+        <meshStandardMaterial color="#1b1d21" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 0.405, 0]} raycast={() => null}>
+        <cylinderGeometry args={[0.035, 0.165, 0.67, 24]} />
+        <meshStandardMaterial color={orange} roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 0.745, 0]} raycast={() => null}>
+        <sphereGeometry args={[0.036, 12, 8]} />
+        <meshStandardMaterial color={orange} roughness={0.55} />
+      </mesh>
+      {/* pasy odblaskowe (lekko świecą, jak folia w świetle) */}
+      {[
+        [0.5, 0.075, 0.098],
+        [0.33, 0.11, 0.124],
+      ].map(([y, r0, r1]) => (
+        <mesh key={y} position={[0, y, 0]} raycast={() => null}>
+          <cylinderGeometry args={[r0 + 0.004, r1 + 0.004, 0.08, 24]} />
+          <meshStandardMaterial color="#eef2f6" roughness={0.3} metalness={0.2} emissive="#ffffff" emissiveIntensity={0.15} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * Stanowisko postojowe: lotnisko z pasem, drogą kołowania i terminalem (runway.tsx) ustawione tak, że stanowisko jest
+ * pod samolotem, a na płycie wokół samolotu – czerwona linia ograniczenia sprzętu, pola postoju sprzętu, kliny pod
+ * kołami i pachołki przy silniku i końcówce skrzydła.
+ */
+export function CargoStand() {
+  const G = GROUND;
+  const line = (x0: number, x1: number, z0: number, z1: number, c: string, key: string) => (
+    <mesh key={key} position={[(x0 + x1) / 2, G + 0.004, (z0 + z1) / 2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+      <planeGeometry args={[Math.max(0.15, Math.abs(x1 - x0)), Math.max(0.15, Math.abs(z1 - z0))]} />
+      <meshStandardMaterial color={c} roughness={0.75} emissive={c} emissiveIntensity={0.18} />
+    </mesh>
+  );
+  const ERA = { x0: -40, x1: 40, z: 35 };
+  const eng = engineOrigin();
+  const red = '#d23b2f';
+  const white = '#dfe3e8';
+  // pola postoju sprzętu (białe obrysy) za czerwoną linią, z prawej strony
+  const boxes: [number, number][] = [
+    [-26, -12],
+    [-8, 6],
+    [10, 24],
+  ];
+  const cones: [number, number][] = [
+    [eng[0] - 3.2, -eng[2]],
+    [eng[0] + 8, -eng[2] - 2.2],
+    [8, -33],
+    [36.5, -4],
+    [NOSE_X - 8.5, -2],
+  ];
+  return (
+    <group>
+      <group position={[STAND.u, G - 0.028, -STAND.v]}>
+        <AirportModel />
+      </group>
+      {/* czerwona linia ograniczenia sprzętu wokół samolotu */}
+      {line(ERA.x0, ERA.x1, -ERA.z, -ERA.z, red, 'e1')}
+      {line(ERA.x0, ERA.x1, ERA.z, ERA.z, red, 'e2')}
+      {line(ERA.x0, ERA.x0, -ERA.z, ERA.z, red, 'e3')}
+      {line(ERA.x1, ERA.x1, -ERA.z, ERA.z, red, 'e4')}
+      {/* białe pola postoju sprzętu za linią */}
+      {boxes.flatMap(([a, b], i) => [
+        line(a, b, -ERA.z - 1.5, -ERA.z - 1.5, white, `b${i}a`),
+        line(a, b, -ERA.z - 9, -ERA.z - 9, white, `b${i}b`),
+        line(a, a, -ERA.z - 9, -ERA.z - 1.5, white, `b${i}c`),
+        line(b, b, -ERA.z - 9, -ERA.z - 1.5, white, `b${i}d`),
+      ])}
+      {/* kliny pod kołami: przednie podwozie i prawy wózek główny (lewa połowa samolotu jest zdjęta); para przed i za kołem */}
+      {/* skos klina dotyka bieżnika ok. 0,2 m nad płytą: przed pierwszą i za ostatnią osią wózka (osie co 1,5 m, opony r = 0,7 m) */}
+      <ChockPair x={NOSE_X + 0.08} z={0} span={chockSpan(0, 0.53)} len={0.9} />
+      {[-0.63, 0.63].map((dz) => (
+        <ChockPair key={dz} x={MLG.x} z={-MLG.z + dz} span={chockSpan(1.5, 0.7)} len={0.44} />
+      ))}
+      {/* pachołki: przed silnikiem, za nim, przy końcówce skrzydła, przy ogonie i przed nosem */}
+      {cones.map(([x, z], i) => (
+        <SafetyCone key={i} x={x} z={z} />
+      ))}
+    </group>
+  );
+}
+
+/* ---------- dekompresja: maski tlenowe i mgła w kabinie (zakładka „Dekompresja”) ---------- */
+
+/** Fotele klasy ekonomicznej (jak w kabinie): rząd x i położenie z każdego fotela. */
+function economySeats() {
+  const half = (y: number, x: number) => fusPt(x, fusTheta(x, y), 0)[2] - 0.2;
+  const zs = [-2.42, -1.95, -1.48, -0.47, 0, 0.47, 1.48, 1.95, 2.42];
+  const out: { x: number; z: number; centre: boolean }[] = [];
+  for (let x = -14.2; x <= 16.5 + PA; x += 0.81) {
+    if (DOORS.some((dd) => x > dd - 1.95 && x < dd + 1.85)) continue;
+    const k = Math.min(1, half(FLOOR + 0.6, x) / 2.75);
+    for (const dz of zs) out.push({ x, z: dz * k, centre: Math.abs(dz) < 1 });
+  }
+  return out;
+}
+
+/** Miękka, okrągła plamka do mgły (biała, z przezroczystym brzegiem). */
+let fogTex: THREE.CanvasTexture | null = null;
+function getFogTex() {
+  if (fogTex) return fogTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d')!;
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  fogTex = new THREE.CanvasTexture(c);
+  return fogTex;
+}
+
+/**
+ * Skutki dekompresji w kabinie: z paneli nad fotelami (PSU) otwierają się klapki i wypadają maski tlenowe – po
+ * jednej na fotel, na przewodzie, z woreczkiem; spadają, odbijają się i kołyszą. Przy gwałtownym spadku ciśnienia
+ * powietrze rozpręża się i ochładza poniżej punktu rosy – w kabinie na kilka sekund pojawia się mgła.
+ * Stan (postęp wypadania masek, ich „wiek”, gęstość mgły) ustawia zakładka w FUS_LIVE.
+ */
+function DecompFx() {
+  const seats = useMemo(economySeats, []);
+  const n = seats.length;
+  const tubes = useRef<THREE.InstancedMesh>(null);
+  const cups = useRef<THREE.InstancedMesh>(null);
+  const bags = useRef<THREE.InstancedMesh>(null);
+  const flaps = useRef<THREE.InstancedMesh>(null);
+  const fog = useRef<THREE.Points>(null);
+  const fogMat = useRef<THREE.PointsMaterial>(null);
+  const o = useMemo(() => new THREE.Object3D(), []);
+  // punkt zawieszenia maski: panel nad rzędem z boku albo spód środkowego schowka; maska kończy się przed twarzą
+  const tops = useMemo(() => seats.map((s) => new THREE.Vector3(s.x - 0.12, s.centre ? 1.5 : 0.93, s.z)), [seats]);
+  const lens = useMemo(() => tops.map((p) => p.y - 0.08), [tops]);
+  const fogGeo = useMemo(() => {
+    const pts: number[] = [];
+    let k = 7;
+    const r = () => {
+      k = (k * 16807) % 2147483647;
+      return (k - 1) / 2147483646;
+    };
+    for (let i = 0; i < 1400; i++) {
+      const x = -15 + r() * 33;
+      const y = FLOOR + 0.1 + r() * 2.6;
+      const w = Math.max(0.3, fusPt(x, fusTheta(x, Math.min(1.2, y)), 0)[2] - 0.35);
+      pts.push(x, y, (r() * 2 - 1) * w);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, []);
+  useEffect(() => () => fogGeo.dispose(), [fogGeo]);
+  useFrame(({ clock }) => {
+    const d = FUS_LIVE.masks;
+    const age = FUS_LIVE.maskAge;
+    const t = clock.elapsedTime;
+    // spadek z odbiciem: przewód rozwija się, przeskakuje trochę za długość i wraca
+    const drop = d <= 0 ? 0 : d < 1 ? 1 - Math.pow(1 - d, 3) : 1 + 0.08 * Math.sin(age * 7) * Math.exp(-age * 2.2);
+    const swingAmp = 0.22 * Math.exp(-Math.max(0, age) * 0.35) + 0.03;
+    const tm = tubes.current;
+    const cm = cups.current;
+    const bm = bags.current;
+    const fm = flaps.current;
+    for (let i = 0; i < n; i++) {
+      const T = tops[i];
+      const L = Math.max(0.001, lens[i] * drop);
+      const a = d > 0 ? swingAmp * Math.sin(t * 2.1 + i * 1.7) : 0;
+      const b = d > 0 ? 0.6 * swingAmp * Math.sin(t * 1.6 + i * 2.3) : 0;
+      const dir = new THREE.Vector3(Math.sin(a), -Math.cos(a) * Math.cos(b), Math.sin(b)).normalize();
+      const end = T.clone().addScaledVector(dir, L);
+      const vis = d > 0 ? 1 : 0;
+      if (tm) {
+        o.position.copy(T).addScaledVector(dir, L / 2);
+        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        o.scale.set(vis, L, vis);
+        o.updateMatrix();
+        tm.setMatrixAt(i, o.matrix);
+      }
+      if (cm) {
+        o.position.copy(end);
+        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
+        o.scale.set(vis, vis, vis);
+        o.updateMatrix();
+        cm.setMatrixAt(i, o.matrix);
+      }
+      if (bm) {
+        o.position.copy(T).addScaledVector(dir, L * 0.72);
+        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        o.scale.set(vis, vis, vis);
+        o.updateMatrix();
+        bm.setMatrixAt(i, o.matrix);
+      }
+      if (fm && i % 3 === 1) {
+        // klapka panelu: jedna na grupę trzech foteli, otwiera się w dół na zawiasie
+        const j = (i - 1) / 3;
+        const open = Math.min(1, d * 3);
+        o.position.set(T.x + 0.12 - 0.15 * open, T.y + 0.01 - 0.15 * Math.sin(open * 1.4), T.z);
+        o.quaternion.setFromEuler(new THREE.Euler(0, 0, -open * 1.4));
+        o.scale.set(0.3, 0.012, 1.0);
+        o.updateMatrix();
+        fm.setMatrixAt(j, o.matrix);
+      }
+    }
+    [tm, cm, bm, fm].forEach((m) => m && (m.instanceMatrix.needsUpdate = true));
+    // mgła: gęstość z zakładki, lekki ruch (powietrze płynie ku nieszczelności)
+    if (fogMat.current) fogMat.current.opacity = 0.55 * FUS_LIVE.fog;
+    if (fog.current) {
+      fog.current.visible = FUS_LIVE.fog > 0.01;
+      fog.current.position.x = -0.6 * Math.sin(t * 0.3) - 0.8 * FUS_LIVE.fog;
+    }
+  });
+  return (
+    <group>
+      <instancedMesh ref={tubes} args={[undefined, undefined, n]} frustumCulled={false}>
+        <cylinderGeometry args={[0.006, 0.006, 1, 6]} />
+        <M k="#e8eef4" />
+      </instancedMesh>
+      <instancedMesh ref={cups} args={[undefined, undefined, n]} frustumCulled={false}>
+        <cylinderGeometry args={[0.03, 0.065, 0.075, 16]} />
+        <M k="#f5c518" />
+      </instancedMesh>
+      <instancedMesh ref={bags} args={[undefined, undefined, n]} frustumCulled={false}>
+        <capsuleGeometry args={[0.035, 0.09, 4, 10]} />
+        <meshStandardMaterial color="#cfe9d6" transparent opacity={0.55} roughness={0.3} />
+      </instancedMesh>
+      <instancedMesh ref={flaps} args={[undefined, undefined, Math.ceil(n / 3)]} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <M k="#d6d1c4" />
+      </instancedMesh>
+      <points ref={fog} geometry={fogGeo} visible={false} frustumCulled={false}>
+        <pointsMaterial ref={fogMat} map={getFogTex()} size={1.4} sizeAttenuation transparent depthWrite={false} opacity={0} color="#eef3f8" />
+      </points>
+    </group>
+  );
+}
+
+/** Wszystko do załadunku: stanowisko na płycie, drzwi obu ładowni, podnośniki, pociągi wózków. */
+function CargoOps() {
+  return (
+    <group>
+      <CargoStand />
+      {CARGO_DOORS.map((xd, h) => (
+        <group key={h}>
+          <CargoDoor xd={xd} />
+          <CargoLoader xd={xd} hold={h} />
+          <DollyTrains hold={h} />
+        </group>
+      ))}
+    </group>
+  );
 }

@@ -48,6 +48,8 @@ export interface Step {
   controls?: Control[];
   /** Pozycja kamery dla scen 3D. */
   camera?: [number, number, number];
+  /** Kamera stoi we wnętrzu modelu (np. w kabinie) – na wąskim ekranie nie odsuwa się od celu. */
+  cameraInside?: boolean;
   /** Punkt, na który patrzy kamera (domyślnie środek układu). */
   target?: [number, number, number];
   /** Ujęcie zależne od kontrolek (np. „większy wycinek” odsuwa kamerę); brak – camera/target. */

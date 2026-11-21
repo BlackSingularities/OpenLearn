@@ -10,10 +10,11 @@ import { Line } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Params } from '../../lib/types';
 import { InfoPortal, fmt } from '../../lib/plot';
-import { CockpitDock, Ecam, Pfd } from '../../components/cockpit';
+import { CockpitDock, Ecam, Pfd, Sidestick } from '../../components/cockpit';
 import { useSpeed } from '../../components/ui';
 import { AmbientWind, EngineStreams, FollowPlane, PathStreaks, Tag, useReady, type DirectPose, type PoseState, type Surfaces } from './wingLab';
-import { CONTROL_PTS, PLANE_LEVELS, WING_MAC, controlCycle, macX, wingPoint, wingSurface } from './airliner';
+import { CONTROL_PTS, PLANE_LEVELS, WING_MAC, controlCycle, fuselageSection, macX, wingPoint, wingSurface } from './airliner';
+import { CENTER_TANK, C_FUEL, FuelTanks, TANK, fuelSplit } from './fuelTanks';
 
 type V3 = [number, number, number];
 const DEG = Math.PI / 180;
@@ -34,9 +35,9 @@ const mirrorZ = (p: V3): V3 => [p[0], p[1], -p[2]];
 /* ======================= ustawienia sceny dla zakładki ======================= */
 
 const YAW_MODES: Record<string, { name: string; adverse: number; rudder: boolean; note: string }> = {
-  brak: { name: 'same lotki', adverse: 1, rudder: false, note: 'Opuszczona lotka zwiększa siłę nośną, a z nią opór indukowany. Wznoszące się skrzydło „hamuje”, więc nos ucieka w przeciwną stronę niż zakręt.' },
-  roznicowe: { name: 'lotki różnicowe / spojlery', adverse: 0.35, rudder: false, note: 'Lotka idąca w górę wychyla się bardziej, a w samolotach takich jak A350 pomagają jej spojlery na opadającym skrzydle – dokładają oporu po tej stronie. Odchylenie niekorzystne maleje, ale nie znika.' },
-  ster: { name: 'lotki + ster kierunku', adverse: 0, rudder: true, note: 'Ster kierunku wychyla się w stronę zakrętu i równoważy moment odchylający – lot jest skoordynowany, kulka w środku. W A350 robi to sam system sterowania (fly-by-wire), pilot nie musi naciskać pedału.' },
+  brak: { name: 'same lotki', adverse: 1, rudder: false, note: 'Opuszczona lotka zwiększa siłę nośną, ale też opór. Unoszące się skrzydło „hamuje”, więc nos ucieka w przeciwną stronę niż zakręt.' },
+  roznicowe: { name: 'lotki różnicowe / spojlery', adverse: 0.35, rudder: false, note: 'Lotka idąca w górę wychyla się bardziej, a w samolotach takich jak A350 pomagają jej spojlery na opadającym skrzydle – dokładają oporu po tej stronie. Uciekanie nosa w złą stronę maleje, ale nie znika.' },
+  ster: { name: 'lotki + ster kierunku', adverse: 0, rudder: true, note: 'Ster kierunku wychyla się w stronę zakrętu i równoważy moment odchylający – lot jest skoordynowany, kulka w środku. W A350 robią to same komputery sterowania – pilot nie musi naciskać pedału.' },
 };
 export const YAW_MODE_OPTIONS = Object.entries(YAW_MODES).map(([value, m]) => ({ value, label: m.name }));
 
@@ -267,6 +268,8 @@ const CRZ_FOOT = { tat: -24, sat: -51, isa: 2, flt: '02:14', gw: 268000, gwcg: 2
 function FctlEcam({ surf, trim }: { surf: Surfaces; trim?: () => number }) {
   return <Ecam thrMode={['CLB', 92.4]} n1={[84.6, 84.6]} egt={[688, 692]} page="FCTL" fctl={fctlFrom(surf, trim ? trim() : 0.6)} footer={CRZ_FOOT} width={260} />;
 }
+// w doku kokpitu to ekran ECAM (miejsce wyświetlaczy, nie przełączników)
+(FctlEcam as unknown as { cockpitSlot: string }).cockpitSlot = 'ecam';
 /** Sam ECAM F/CTL w doku kokpitu (zakładki bez PFD) – odświeżany w scenie kilka razy na sekundę. */
 function FctlDock({ surf, trim }: { surf: Surfaces; trim?: () => number }) {
   useTick(10);
@@ -299,24 +302,48 @@ export function TailHomeCockpit() {
 /* ======================= 1. trzy osie i trzy stery ======================= */
 
 function AxesOverlay({ params, pose, direct }: { params: Params; pose: PoseState; direct: DirectPose }) {
-  const ail = Number(params.ail ?? 0.5);
-  const elev = Number(params.elev ?? 0);
+  // suwaki to położenie, do którego pilot prowadzi samolot (przechylenie i pochylenie), oraz pedały
+  const bankT = Number(params.bank ?? 25);
+  const pitchT = Number(params.pitch ?? 2);
   const rud = Number(params.rud ?? 0);
-  const respond = Boolean(params.respond ?? true);
   const forces = Boolean(params.forces ?? true);
   const labels = Boolean(params.labels ?? true);
-  const cur = useRef({ bank: 0, alpha: 2, yaw: 0 });
+  useTick(15);
+  /*
+   * Fly-by-wire A350 (normal law): boczny drążek zadaje prędkość obrotu, nie wychylenie sterów. Pilot wychyla drążek
+   * tylko na czas zmiany: przechylenie do 15°/s, pochylenie do ok. 3°/s; po puszczeniu drążka samolot trzyma
+   * osiągnięte położenie. Lotki (ze spojlerami) i ster wysokości pracują więc tylko w czasie obrotu – stałe pochylenie
+   * utrzymuje trymer statecznika poziomego (THS), a stałe przechylenie nie wymaga wychylenia lotek. Pedały to wprost
+   * ster kierunku: ślizg trwa, dopóki pedał jest wciśnięty.
+   */
+  const cur = useRef({ bank: 0, alpha: 2, yaw: 0, p: 0, q: 0, pc: 0, qc: 0, trim: 0.6 });
   useFrame((_, dtRaw) => {
     const dt = Math.min(0.05, dtRaw);
-    const k = 1 - Math.exp(-dt * 1.4);
     const c = cur.current;
-    // wychylenie wolantu/pedałów → przechylenie, pochylenie, odchylenie (ustalone kąty, żeby było widać kierunek ruchu)
-    c.bank += ((respond ? -ail * 35 : 0) - c.bank) * k;
-    c.alpha += ((respond ? 2 + elev * 10 : 2) - c.alpha) * k;
-    c.yaw += ((respond ? -rud * 14 : 0) - c.yaw) * k;
+    // przechylenie: w pozie dodatnie = lewe skrzydło w dół, a suwak dodatni = w prawo
+    const bt = -bankT;
+    c.pc = Math.max(-15, Math.min(15, 0.9 * (bt - c.bank)));
+    c.p += (c.pc - c.p) * Math.min(1, dt / 0.5);
+    c.bank += c.p * dt;
+    c.qc = Math.max(-3, Math.min(3, 0.7 * (pitchT - c.alpha)));
+    c.q += (c.qc - c.q) * Math.min(1, dt / 0.7);
+    c.alpha += c.q * dt;
+    c.yaw += (-rud * 14 - c.yaw) * (1 - Math.exp(-dt * 1.4));
+    // trymer statecznika przejmuje stałe pochylenie (powoli, ok. 0,3°/s)
+    const trimT = 0.6 + (c.alpha - 2) * 0.35;
+    c.trim += Math.sign(trimT - c.trim) * Math.min(Math.abs(trimT - c.trim), 0.3 * dt);
+    // wychylenia (rad): lotki – utrzymanie prędkości przechylania (tłumienie) i jej zmiana; ster wysokości tak samo
+    const ail = -((c.p / 15) * 0.26 + ((c.pc - c.p) / 15) * 0.12);
+    const elev = (c.q / 3) * 0.2 + ((c.qc - c.q) / 3) * 0.08;
     Object.assign(direct, { pivot: CG_REF, lift: 0, bank: c.bank, alpha: c.alpha, yaw: c.yaw });
-    Object.assign(direct.surf, { aileron: ail * 0.35, elevator: elev * 0.3, rudder: rud * 0.35, spoiler: 0 });
+    Object.assign(direct.surf, { aileron: ail, elevator: elev, rudder: rud * 0.35, spoiler: 0 });
   });
+  const c = cur.current;
+  // drążek: tyle, ile komputer ma zadaną prędkość obrotu (pilot zwalnia go, gdy samolot dochodzi do celu)
+  const stickX = -c.pc / 15;
+  const stickY = c.qc / 3;
+  const ail = direct.surf.aileron / 0.35;
+  const elev = direct.surf.elevator / 0.3;
   const ready = useReady('axes');
   const [cx, cy, cz] = CG_REF;
   const axis = (a: V3, b: V3, color: string) => (
@@ -395,18 +422,22 @@ function AxesOverlay({ params, pose, direct }: { params: Params; pose: PoseState
           </>
         )}
       </FollowPlane>
-      <PosePfd pose={pose} fctl />
+      <PosePfd pose={pose} fctl trim={() => cur.current.trim} extra={<Sidestick x={stickX} y={stickY} pedals={rud} />} />
       <InfoPortal>
         <div>
-          <b style={{ color: C_ROLL }}>lotki</b> {fmt(Math.abs(ail) * 20, 0)}° {ail > 0.02 ? '(lewa ↓, prawa ↑ – przechylenie w prawo)' : ail < -0.02 ? '(lewa ↑, prawa ↓ – przechylenie w lewo)' : ''}
+          <b style={{ color: C_ROLL }}>przechylenie</b> {fmt(Math.abs(c.bank), 0)}° {-c.bank > 0.5 ? 'w prawo' : -c.bank < -0.5 ? 'w lewo' : ''} (cel {fmt(Math.abs(bankT), 0)}°) · prędkość {fmt(Math.abs(c.p), 1)}°/s · lotki{' '}
+          <b>{fmt(Math.abs(ail) * 20, 0)}°</b> {Math.abs(c.p) > 0.3 ? (ail > 0.02 ? '(lewa ↓, prawa ↑)' : ail < -0.02 ? '(lewa ↑, prawa ↓)' : '') : '– w zerze, przechylenie trzyma się samo'}
         </div>
         <div>
-          <b style={{ color: C_PITCH }}>ster wysokości</b> {fmt(Math.abs(elev) * 17, 0)}° {elev > 0.02 ? 'w górę – nos w górę' : elev < -0.02 ? 'w dół – nos w dół' : ''}
+          <b style={{ color: C_PITCH }}>pochylenie</b> {fmt(c.alpha, 1)}° (cel {fmt(pitchT, 0)}°) · ster wysokości <b>{fmt(Math.abs(elev) * 17, 0)}°</b>
+          {Math.abs(c.q) > 0.05 ? (elev > 0 ? ' w górę' : ' w dół') : ' – w zerze'} · trymer THS {fmt(c.trim, 1)}°
         </div>
         <div>
           <b style={{ color: C_YAW }}>ster kierunku</b> {fmt(Math.abs(rud) * 20, 0)}° {rud > 0.02 ? 'w prawo – nos w prawo' : rud < -0.02 ? 'w lewo – nos w lewo' : ''}
         </div>
-        <div style={{ opacity: 0.75, fontSize: 12 }}>Strzałki to siły aerodynamiczne na wychylonych sterach. Mała siła na długim ramieniu od środka ciężkości daje duży moment obrotowy.</div>
+        <div style={{ opacity: 0.75, fontSize: 12 }}>
+          Drążek zadaje prędkość obrotu: lotki i ster wysokości wychylają się tylko w czasie zmiany położenia, a po jej zakończeniu wracają do zera. Stałe pochylenie trzyma trymer statecznika, stałe przechylenie nie wymaga lotek. Strzałki – siły na wychylonych sterach.
+        </div>
       </InfoPortal>
     </>
   );
@@ -636,12 +667,22 @@ function useGustPaths() {
 
 function GustOverlay({ params, pose, direct }: { params: Params; pose: PoseState; direct: DirectPose }) {
   const cgPct = Number(params.cg ?? 25);
-  const fbw = Boolean(params.fbw ?? false);
+  const fbw = Boolean(params.fbw ?? true);
   const sm = X_NP - cgPct / 100;
   const K = 150; // sztywność aerodynamiczna na 1 SCA zapasu (1/s²)
-  const w2 = K * sm + (fbw ? 25 : 0);
+  /*
+   * Podmuch wytrąca samolot we wszystkich trzech osiach: głównie w pochyleniu (zmiana kąta natarcia), ale też trochę
+   * w przechyleniu i odchyleniu (podmuch nigdy nie jest idealnie symetryczny). Sam samolot: pochylenie wraca z
+   * „zapasu” stateczności, przechylenie nie ma siły przywracającej (zostaje), a odchylenie waha się słabo tłumione
+   * (holendrowanie). Fly-by-wire liczy wychylenia sterów (regulator PD): ster wysokości – przeciw zmianie pochylenia,
+   * lotki ze spojlerami – z powrotem do lotu poziomego, ster kierunku – tłumik odchylania (yaw damper).
+   */
+  const ME = 500; // przyspieszenie kątowe (°/s²) na 1 rad wychylenia steru wysokości
+  const MA = 300; // … lotek
+  const MR = 300; // … steru kierunku
+  const w2 = K * sm + (fbw ? 25 : 0); // do opisu: efektywna sztywność z regulatorem
   const damp = 2.5 + (fbw ? 4 : 0);
-  const st = useRef({ a: 0, q: 0, nextGust: 1.2, lastGust: -10, lost: -1, hist: [] as number[], acc: 0, simT: 0 });
+  const st = useRef({ a: 0, q: 0, b: 0, p: 0, y: 0, r: 0, de: 0, da: 0, dr: 0, nextGust: 1.2, lastGust: -10, lost: -1, hist: [] as number[], acc: 0, simT: 0, seed: 7, gp: 0, gr: 0, tq: 0, tp: 0, tr: 0 });
   const gust = useRef<THREE.Group>(null);
   useFrame((_, dtRaw) => {
     const dt = Math.min(0.05, dtRaw);
@@ -650,18 +691,48 @@ function GustOverlay({ params, pose, direct }: { params: Params; pose: PoseState
     s.simT += sim;
     if (s.lost < 0) {
       if (s.simT > s.nextGust) {
-        s.q += 75;
+        // pseudolosowa składowa boczna podmuchu (za każdym razem inna, ale powtarzalna)
+        s.seed = (s.seed * 16807) % 2147483647;
+        const r1 = s.seed / 2147483647 - 0.5;
+        s.seed = (s.seed * 16807) % 2147483647;
+        const r2 = s.seed / 2147483647 - 0.5;
+        // podmuch narasta i opada w ok. 0,6 s (pół sinusoidy) – siła działa przez chwilę, a nie w jednym momencie
+        s.gp = 50 * r1 + (r1 > 0 ? 10 : -10);
+        s.gr = 14 * r2;
         s.lastGust = s.simT;
         s.nextGust = s.simT + 3;
       }
+      // ciągła lekka turbulencja (między podmuchami): szum wygładzony (ok. 0,4 s) w każdej osi
+      const nz = () => Math.random() * 2 - 1;
+      const kf = Math.min(1, sim / 0.4);
+      // siła dobrana tak, żeby samolot kołysał się tylko o 1–3°, a komputer stale pracował sterami (kilka stopni)
+      s.tq += (nz() * 720 - s.tq) * kf;
+      s.tp += (nz() * 270 - s.tp) * kf;
+      s.tr += (nz() * 144 - s.tr) * kf;
+      const GT = 0.6;
+      const gt = s.simT - s.lastGust;
+      const gk = gt >= 0 && gt < GT ? Math.sin((Math.PI * gt) / GT) * (Math.PI / (2 * GT)) : 0; // całka = 1
       for (let i = 0; i < 4; i++) {
-        const acc = -w2 * s.a - damp * s.q;
-        s.q += acc * (sim / 4);
-        s.a += s.q * (sim / 4);
+        const h = sim / 4;
+        // komputer (jeśli włączony): wychylenia sterów w radianach, ograniczone do ±0,3
+        s.de = fbw ? clamp(-(0.05 * s.a + 0.008 * s.q), -0.3, 0.3) : 0;
+        s.da = fbw ? clamp(-(0.03 * s.b + 0.01 * s.p), -0.3, 0.3) : 0;
+        s.dr = fbw ? clamp(-(0.004 * s.y + 0.02 * s.r), -0.3, 0.3) : 0;
+        const qd = -K * sm * s.a - 2.5 * s.q + ME * s.de + 75 * gk + s.tq;
+        const pd = -1.5 * s.p + MA * s.da + s.gp * gk + s.tp;
+        const rd = -4 * s.y - 0.8 * s.r + MR * s.dr + s.gr * gk + s.tr;
+        s.q += qd * h;
+        s.a += s.q * h;
+        s.p += pd * h;
+        s.b += s.p * h;
+        s.r += rd * h;
+        s.y += s.r * h;
       }
+      // bez komputera przechylenie zostaje – po kilku podmuchach pilot musiałby je sam poprawić; tu powoli wraca
+      if (!fbw) s.b *= 1 - sim * 0.8;
       if (Math.abs(s.a) > 35) s.lost = s.simT;
     } else if (s.simT - s.lost > 1.2) {
-      Object.assign(s, { a: 0, q: 0, lost: -1, nextGust: s.simT + 1 });
+      Object.assign(s, { a: 0, q: 0, b: 0, p: 0, y: 0, r: 0, lost: -1, nextGust: s.simT + 1 });
     }
     s.acc += dt;
     while (s.acc > 1 / 30) {
@@ -670,9 +741,9 @@ function GustOverlay({ params, pose, direct }: { params: Params; pose: PoseState
       if (s.hist.length > 270) s.hist.shift();
     }
     if (gust.current) gust.current.visible = s.simT - s.lastGust < 0.9;
-    Object.assign(direct, { pivot: [macX(cgPct / 100), CG_REF[1], 0] as V3, lift: 0, bank: 0, alpha: 2 + clamp(s.a, -40, 40), yaw: 0 });
-    // komputer wychyla ster wysokości przeciw wytrąceniu
-    Object.assign(direct.surf, { aileron: 0, elevator: fbw ? clamp(-s.a * 0.03, -0.3, 0.3) : 0, rudder: 0, spoiler: 0 });
+    Object.assign(direct, { pivot: [macX(cgPct / 100), CG_REF[1], 0] as V3, lift: 0, bank: clamp(s.b, -45, 45), alpha: 2 + clamp(s.a, -40, 40), yaw: clamp(s.y, -20, 20) });
+    // stery z komputera (w modelu: lotka dodatnia – lewa w dół; ster wysokości dodatni – nos w górę; ster kierunku dodatni – nos w prawo)
+    Object.assign(direct.surf, { aileron: -s.da, elevator: s.de, rudder: -s.dr, spoiler: 0 });
   });
   useTick(10);
   const ready = useReady('gust');
@@ -709,7 +780,8 @@ function GustOverlay({ params, pose, direct }: { params: Params; pose: PoseState
           </>
         )}
       </FollowPlane>
-      <PosePfd pose={pose} fctl />
+      {/* pilot nie rusza drążka – stery wychyla sam komputer */}
+      <PosePfd pose={pose} fctl extra={<Sidestick x={0} y={0} />} />
       <InfoPortal>
         <div style={{ fontWeight: 700, color: w2 <= 0 ? '#f87171' : sm < 0 ? '#facc15' : '#4ade80' }}>
           {s.lost >= 0 ? 'wytrącenie narasta – samolot wymyka się spod kontroli' : w2 <= 0 ? 'niestateczny – wychylenie rośnie wykładniczo' : sm < 0 ? 'aerodynamicznie niestateczny, stabilizowany przez komputer' : zeta >= 1 ? 'stateczny, ruch przetłumiony' : 'stateczny – gasnące wahania'}
@@ -718,9 +790,19 @@ function GustOverlay({ params, pose, direct }: { params: Params; pose: PoseState
           środek ciężkości {fmt(cgPct, 0)}% SCA · zapas {fmt(sm * 100, 0)}% · {w2 > 0 ? `okres wahań ≈ ${fmt((2 * Math.PI) / Math.sqrt(w2), 1)} s, tłumienie ζ = ${fmt(zeta, 2)}` : 'brak położenia równowagi'}
         </div>
         <TimeChart data={s.hist} color={w2 > 0 ? '#4ade80' : '#f87171'} range={30} label={`zmiana pochylenia Δθ(t) – teraz ${fmt(s.a, 1)}°`} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto auto', gap: '1px 12px', fontSize: 12 }}>
+          <span style={{ color: C_PITCH }}>pochylenie {fmt(s.a, 1)}°</span>
+          <span style={{ color: C_ROLL }}>przechylenie {fmt(s.b, 1)}°</span>
+          <span style={{ color: C_YAW }}>odchylenie {fmt(s.y, 1)}°</span>
+          <span>ster wys. {fmt(Math.abs(s.de) * 57.3, 0)}°</span>
+          <span>lotki {fmt(Math.abs(s.da) * 57.3, 0)}°</span>
+          <span>ster kier. {fmt(Math.abs(s.dr) * 57.3, 0)}°</span>
+        </div>
         <div style={{ opacity: 0.75, fontSize: 12 }}>
           Czas płynie 2× wolniej. Strzałka nad fioletowym znacznikiem to przyrost siły nośnej – działa w punkcie neutralnym. Gdy leży on za środkiem ciężkości, siła obraca nos z powrotem (zielona), gdy przed – pogłębia wytrącenie (czerwona).
-          {fbw && ' Fioletowa strzałka na ogonie to korekta steru wysokości od komputera.'}
+          {fbw
+            ? ' Komputer sam koryguje wszystkie trzy osie: ster wysokości (fioletowa strzałka na ogonie), lotki ze spojlerami i ster kierunku – widać to na ekranie sterów (F/CTL), a drążek pilota stoi pośrodku.'
+            : ' Bez komputera stery stoją: pochylenie wraca dzięki stateczności, przechylenie zostaje, a odchylenie się waha.'}
         </div>
       </InfoPortal>
     </>
@@ -1089,144 +1171,6 @@ const MB = {
   fuelMax: 125000,
 };
 
-/*
- * Zbiorniki paliwa A350-1000 (przybliżone): lewy i prawy w skrzydłach, między dźwigarami, od boku kadłuba prawie do
- * końcówki (dalej zbiornik odpowietrzający), oraz centralny w centropłacie pod podłogą kabiny. Tankowanie: najpierw
- * skrzydła, potem centralny; w locie centralny zużywany jest pierwszy. Paliwo w skrzydle wypełniamy od kadłuba na
- * zewnątrz – skrzydło ma skos, więc im więcej paliwa, tym dalej do tyłu jego środek ciężkości.
- */
-const TANK = { s0: 0.15, s1: 0.6, r0: 3.3, r1: 25.5, wingMax: 41000, centerMax: 43000, n: 28 };
-type TankSec = { pts: V3[]; x: number };
-/** Przekroje zbiornika skrzydłowego (lewego): 4 narożniki – góra przód, góra tył, dół tył, dół przód – lekko wsunięte w poszycie. */
-const wingTankSections = (() => {
-  const out: { r: number; sec: TankSec; area: number }[] = [];
-  for (let i = 0; i <= TANK.n; i++) {
-    const r = TANK.r0 + ((TANK.r1 - TANK.r0) * i) / TANK.n;
-    const tf = wingSurface(r, TANK.s0, 1);
-    const tr = wingSurface(r, TANK.s1, 1);
-    const br = wingSurface(r, TANK.s1, -1);
-    const bf = wingSurface(r, TANK.s0, -1);
-    const pts = [tf, tr, br, bf];
-    const c = pts.reduce((a, p) => [a[0] + p[0] / 4, a[1] + p[1] / 4, a[2] + p[2] / 4] as V3, [0, 0, 0] as V3);
-    const ins = pts.map((p) => [c[0] + (p[0] - c[0]) * 0.9, c[1] + (p[1] - c[1]) * 0.85, p[2]] as V3);
-    const area = (tr[0] - tf[0]) * ((tf[1] - bf[1] + (tr[1] - br[1])) / 2);
-    out.push({ r, sec: { pts: ins, x: c[0] }, area });
-  }
-  // objętość odcinków między przekrojami (do wypełniania i środka ciężkości paliwa)
-  const seg = out.slice(1).map((o, i) => ({ v: ((o.area + out[i].area) / 2) * (o.r - out[i].r), x: (o.sec.x + out[i].sec.x) / 2 }));
-  return { secs: out, seg, vol: seg.reduce((a, q) => a + q.v, 0) };
-})();
-/** Zbiornik centralny: skrzynia centropłata między dźwigarami, na szerokość kadłuba. */
-const CENTER_TANK = (() => {
-  const f = wingSurface(TANK.r0, TANK.s0, 1);
-  const r = wingSurface(TANK.r0, TANK.s1, 1);
-  const b = wingSurface(TANK.r0, 0.35, -1);
-  return { x0: f[0] + 0.2, x1: r[0] - 0.2, y0: b[1] + 0.1, y1: Math.min(f[1], PLANE_LEVELS.floor) - 0.15, halfW: 2.6 };
-})();
-
-/** Podział paliwa: skrzydła po równo do pełna, reszta do centralnego. Ramiona (x) z faktycznie wypełnionej części. */
-function fuelSplit(fuel: number) {
-  const wing = Math.min(fuel, 2 * TANK.wingMax) / 2;
-  const center = Math.max(0, fuel - 2 * TANK.wingMax);
-  const fw = wing / TANK.wingMax;
-  const fc = center / TANK.centerMax;
-  // wypełnienie od kadłuba: odcinki do objętości fw·V (ostatni częściowo)
-  let left = fw * wingTankSections.vol;
-  let vSum = 0;
-  let mx = 0;
-  let reach = 0; // ile odcinków (z ułamkiem) jest wypełnionych
-  for (const q of wingTankSections.seg) {
-    if (left <= 0) break;
-    const take = Math.min(q.v, left);
-    vSum += take;
-    mx += take * q.x;
-    reach += take / q.v;
-    left -= take;
-  }
-  const wingX = vSum > 0 ? mx / vSum : wingTankSections.seg[0].x;
-  const centerX = (CENTER_TANK.x0 + CENTER_TANK.x1) / 2;
-  const moment = 2 * wing * wingX + center * centerX;
-  return { wing, center, fw, fc, reach, wingX, centerX, x: fuel > 0 ? moment / fuel : centerX, moment };
-}
-
-/** Bryła zbiornika skrzydłowego od kadłuba do „reach” odcinków (ułamek dopuszczalny); mirror – prawe skrzydło. */
-function wingTankGeometry(reach: number, mirror: boolean) {
-  const S = wingTankSections.secs;
-  const full = Math.floor(reach);
-  const secs: V3[][] = S.slice(0, full + 1).map((q) => q.sec.pts);
-  const frac = reach - full;
-  if (frac > 1e-3 && full + 1 < S.length) {
-    const a = S[full].sec.pts;
-    const b = S[full + 1].sec.pts;
-    secs.push(a.map((p, i) => [p[0] + (b[i][0] - p[0]) * frac, p[1] + (b[i][1] - p[1]) * frac, p[2] + (b[i][2] - p[2]) * frac] as V3));
-  }
-  const pos: number[] = [];
-  const put = (p: V3) => pos.push(p[0], p[1], mirror ? -p[2] : p[2]);
-  const tri = (a: V3, b: V3, c: V3) => {
-    put(a);
-    put(b);
-    put(c);
-  };
-  for (let i = 0; i + 1 < secs.length; i++) {
-    const A = secs[i];
-    const B = secs[i + 1];
-    for (let k = 0; k < 4; k++) {
-      const k2 = (k + 1) % 4;
-      tri(A[k], B[k], B[k2]);
-      tri(A[k], B[k2], A[k2]);
-    }
-  }
-  if (secs.length > 1) {
-    for (const C of [secs[0], secs[secs.length - 1]]) {
-      tri(C[0], C[1], C[2]);
-      tri(C[0], C[2], C[3]);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  return g;
-}
-
-const C_FUEL = '#a78bfa';
-const xrayMat = (c: string, o: number) => <meshBasicMaterial color={c} transparent opacity={o} depthTest={false} depthWrite={false} side={THREE.DoubleSide} toneMapped={false} />;
-
-/** Paliwo w zbiornikach, prześwietlone przez poszycie: obrys całego zbiornika blado, paliwo – wypełnieniem. */
-function FuelTanks({ fuel }: { fuel: number }) {
-  const f = fuelSplit(fuel);
-  const rq = Math.round(f.reach * 50) / 50;
-  const outline = useMemo(() => [wingTankGeometry(TANK.n, false), wingTankGeometry(TANK.n, true)], []);
-  const filled = useMemo(() => (rq > 0.01 ? [wingTankGeometry(rq, false), wingTankGeometry(rq, true)] : null), [rq]);
-  useEffect(() => () => filled?.forEach((g) => g.dispose()), [filled]);
-  const ct = CENTER_TANK;
-  const L = ct.x1 - ct.x0;
-  const H = ct.y1 - ct.y0;
-  const hc = H * clamp(f.fc, 0, 1);
-  return (
-    <group>
-      {outline.map((g, i) => (
-        <mesh key={`o${i}`} geometry={g} renderOrder={11} raycast={() => null}>
-          {xrayMat(C_FUEL, 0.07)}
-        </mesh>
-      ))}
-      {filled?.map((g, i) => (
-        <mesh key={`f${rq}-${i}`} geometry={g} renderOrder={12} raycast={() => null}>
-          {xrayMat(C_FUEL, 0.55)}
-        </mesh>
-      ))}
-      <mesh position={[ct.x0 + L / 2, ct.y0 + H / 2, 0]} renderOrder={11} raycast={() => null}>
-        <boxGeometry args={[L, H, 2 * ct.halfW]} />
-        {xrayMat(C_FUEL, 0.07)}
-      </mesh>
-      {hc > 0.02 && (
-        // paliwo w centralnym zbiorniku wypełnia go od dna
-        <mesh position={[ct.x0 + L / 2, ct.y0 + hc / 2, 0]} renderOrder={12} raycast={() => null}>
-          <boxGeometry args={[L - 0.1, hc, 2 * ct.halfW - 0.1]} />
-          {xrayMat(C_FUEL, 0.55)}
-        </mesh>
-      )}
-    </group>
-  );
-}
 /** Obwiednia środka ciężkości: [%SCA, masa w t]. */
 const ENVELOPE: [number, number][] = [
   [17, 150],
@@ -1247,11 +1191,24 @@ function inside(poly: [number, number][], x: number, y: number) {
 }
 const pctOf = (x: number) => ((x - WING_MAC.lemac) / WING_MAC.mac) * 100;
 
-/** Miejsca w strefie kabiny: rzędy wzdłuż kadłuba, kolumny w poprzek, wypełniane od przodu. */
+/**
+ * Połowa szerokości kabiny (m) na wysokości y w przekroju x – z przekroju kadłuba (superelipsa jak w modelu),
+ * pomniejszona o ścianę i miejsce przy oknie, żeby kropki pasażerów nie wychodziły poza kadłub (nos, stożek ogonowy).
+ */
+function cabinHalfWidth(x: number, y: number) {
+  const { yc, h, w } = fuselageSection(x);
+  const u = Math.min(1, Math.abs(y - yc) / h);
+  return Math.max(0, w * Math.pow(Math.max(0, 1 - Math.pow(u, 2.2)), 1 / 2.2) - 0.45);
+}
+/** Miejsca w strefie kabiny: rzędy wzdłuż kadłuba, kolumny w poprzek (zwężone tam, gdzie zwęża się kadłub), wypełniane od przodu. */
 function seatPositions(z: { x0: number; x1: number; rows: number; cols: number; halfW: number }) {
   const out: V3[] = [];
-  for (let r = 0; r < z.rows; r++)
-    for (let c = 0; c < z.cols; c++) out.push([z.x0 + ((r + 0.5) / z.rows) * (z.x1 - z.x0), PLANE_LEVELS.floor + 0.9, -z.halfW + (c / Math.max(1, z.cols - 1)) * 2 * z.halfW]);
+  const y = PLANE_LEVELS.floor + 0.9;
+  for (let r = 0; r < z.rows; r++) {
+    const x = z.x0 + ((r + 0.5) / z.rows) * (z.x1 - z.x0);
+    const hw = Math.min(z.halfW, cabinHalfWidth(x, y));
+    for (let c = 0; c < z.cols; c++) out.push([x, y, -hw + (c / Math.max(1, z.cols - 1)) * 2 * hw]);
+  }
   return out;
 }
 

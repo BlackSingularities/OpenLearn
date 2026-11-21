@@ -958,9 +958,17 @@ kbd {
 .stage-info:empty {
   display: none;
 }
+/*
+ * Ramka wygląda tak samo we wszystkich symulacjach: jedna wielkość czcionki i interlinia dla całej treści
+ * (sceny ustawiają je w swoich elementach różnie), bez zmian w napisach wykresów SVG.
+ */
+.info-box :where(div, span, b, strong, em, small, p, li, a) {
+  font-size: inherit !important;
+  line-height: inherit;
+}
 .info-box {
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
   color: #e9eaee;
   background: rgba(14, 16, 22, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2284,12 +2292,13 @@ kbd {
   .player:not(.kind-page) .panel-scroll {
     padding-top: 22px;
   }
-  /* ramka z wartościami pod nagłówkiem */
+  /* ramka z wartościami tuż pod paskiem nawigacji (u góry sceny) */
   .player:not(.kind-page) .stage-info {
-    /* pod tytułem i przyciskiem wstecz */
-    top: 122px;
+    /* zawsze w tym samym miejscu i tej samej szerokości – niezależnie od zakładki i treści */
+    top: 52px;
     left: 18px;
-    max-width: min(360px, calc(100% - var(--panel-space) - 60px));
+    width: min(360px, calc(100% - var(--panel-space) - 60px));
+    max-width: none;
   }
   /* pasek stanu wtopiony w dół sceny, przełącznik motywu w prawym dolnym rogu */
   .player:not(.kind-page) .stage-status {

@@ -126,6 +126,9 @@ export function applyStoredLabels() {
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const labelsOn = useGlobalLabels();
+  const screensOn = useCockpitPref('screens');
+  const controlsOn = useCockpitPref('controls');
+  const cockpitSize = useCockpitSize();
   const speedUnit = useSpeedUnit();
   const [theme, setTheme] = useState<Theme>(readTheme);
   useEffect(() => {
@@ -169,6 +172,34 @@ export function SettingsMenu() {
               <span className="knob" />
             </button>
           </label>
+          <label className="settings-row">
+            <span>Pokazuj wyświetlacze</span>
+            <button type="button" role="switch" aria-checked={screensOn} className={`switch ${screensOn ? 'on' : ''}`} onClick={() => setCockpitPref('screens', !screensOn)}>
+              <span className="knob" />
+            </button>
+          </label>
+          <label className="settings-row">
+            <span>Pokazuj przełączniki</span>
+            <button type="button" role="switch" aria-checked={controlsOn} className={`switch ${controlsOn ? 'on' : ''}`} onClick={() => setCockpitPref('controls', !controlsOn)}>
+              <span className="knob" />
+            </button>
+          </label>
+          <div className="settings-row col">
+            <span>Wielkość wyświetlaczy i przełączników</span>
+            <div className="segmented" role="radiogroup" aria-label="Wielkość wyświetlaczy i przełączników">
+              {(
+                [
+                  ['small', 'mała'],
+                  ['medium', 'średnia'],
+                  ['large', 'duża'],
+                ] as [CockpitSize, string][]
+              ).map(([v, name]) => (
+                <button key={v} type="button" role="radio" aria-checked={cockpitSize === v} className={cockpitSize === v ? 'active' : ''} onClick={() => setCockpitSize(v)}>
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="settings-row col">
             <span>Jednostka prędkości</span>
             <div className="segmented" role="radiogroup" aria-label="Jednostka prędkości">
@@ -194,6 +225,69 @@ export function SettingsMenu() {
       )}
     </div>
   );
+}
+
+/* ---------- kokpit: czy pokazywać wyświetlacze i przełączniki (ustawienie globalne) ---------- */
+
+export type CockpitPref = 'screens' | 'controls';
+const COCKPIT_KEY: Record<CockpitPref, string> = { screens: 'openlearn-show-screens', controls: 'openlearn-show-controls' };
+const COCKPIT_EVENT = 'openlearn-cockpit-pref';
+function readCockpitPref(k: CockpitPref) {
+  try {
+    return localStorage.getItem(COCKPIT_KEY[k]) !== 'off';
+  } catch {
+    return true;
+  }
+}
+/** Czy pokazywać wyświetlacze kokpitu (PFD, ND, ECAM) albo przełączniki (dźwignie, drążek, przyciski) – domyślnie tak. */
+export function useCockpitPref(k: CockpitPref) {
+  const [on, setOn] = useState(() => readCockpitPref(k));
+  useEffect(() => {
+    const f = () => setOn(readCockpitPref(k));
+    window.addEventListener(COCKPIT_EVENT, f);
+    return () => window.removeEventListener(COCKPIT_EVENT, f);
+  }, [k]);
+  return on;
+}
+export function setCockpitPref(k: CockpitPref, on: boolean) {
+  try {
+    if (on) localStorage.removeItem(COCKPIT_KEY[k]);
+    else localStorage.setItem(COCKPIT_KEY[k], 'off');
+  } catch {
+    /* brak dostępu do pamięci */
+  }
+  window.dispatchEvent(new Event(COCKPIT_EVENT));
+}
+
+/** Rozmiar wyświetlaczy i przełączników kokpitu: mały (100%), średni (110%), duży (120%). */
+export type CockpitSize = 'small' | 'medium' | 'large';
+const SIZE_KEY = 'openlearn-cockpit-size';
+export const COCKPIT_SCALE: Record<CockpitSize, number> = { small: 1, medium: 1.1, large: 1.2 };
+function readCockpitSize(): CockpitSize {
+  try {
+    const v = localStorage.getItem(SIZE_KEY);
+    return v === 'medium' || v === 'large' ? v : 'small';
+  } catch {
+    return 'small';
+  }
+}
+export function useCockpitSize() {
+  const [v, setV] = useState<CockpitSize>(readCockpitSize);
+  useEffect(() => {
+    const f = () => setV(readCockpitSize());
+    window.addEventListener(COCKPIT_EVENT, f);
+    return () => window.removeEventListener(COCKPIT_EVENT, f);
+  }, []);
+  return v;
+}
+export function setCockpitSize(v: CockpitSize) {
+  try {
+    if (v === 'small') localStorage.removeItem(SIZE_KEY);
+    else localStorage.setItem(SIZE_KEY, v);
+  } catch {
+    /* brak dostępu do pamięci */
+  }
+  window.dispatchEvent(new Event(COCKPIT_EVENT));
 }
 
 /* ---------- jednostka prędkości (cała symulacja) ---------- */

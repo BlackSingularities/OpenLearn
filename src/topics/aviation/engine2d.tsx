@@ -56,15 +56,15 @@ export interface Part {
 }
 
 export const PARTS: Part[] = [
-  { id: 'wlot', name: 'wlot', x0: 50, x1: 138, color: '#7dd3fc', ly: 120, desc: 'Gładko prowadzi powietrze do wentylatora i zwalnia je do ok. Ma 0,5. W locie część sprężania odbywa się już tu – powietrze „wbija się” we wlot (spiętrzenie).' },
-  { id: 'fan', name: 'wentylator', x0: 140, x1: 162, color: '#38bdf8', ly: 175, desc: 'Ogromne łopaty (2–3,5 m średnicy) zasysają całe powietrze. Ok. 90% trafia do kanału obejściowego i daje większość ciągu; reszta wpada do rdzenia.' },
-  { id: 'bypass', name: 'kanał obejściowy', x0: 200, x1: 540, color: '#60a5fa', ly: 132, desc: 'Zimny strumień omija rdzeń – nie jest spalany. Dysza zimnego strumienia przyspiesza go i wyrzuca do tyłu.' },
-  { id: 'lpc', name: 'sprężarka NP', x0: 205, x1: 265, color: '#a3e635', ly: 60, desc: 'Sprężarka niskiego ciśnienia (booster) – kilka stopni na wspólnym wale z wentylatorem.' },
-  { id: 'hpc', name: 'sprężarka WP', x0: 280, x1: 440, color: '#facc15', ly: 60, desc: 'Sprężarka wysokiego ciśnienia: ok. 9–10 stopni. Ciśnienie rośnie do 30–50 razy ponad wlotowe, temperatura do ok. 600 °C.' },
-  { id: 'comb', name: 'komora spalania', x0: 450, x1: 540, color: '#fb923c', ly: 48, desc: 'Paliwo spala się w sprężonym powietrzu przy stałym ciśnieniu. Temperatura skacze do 1500–1700 °C – więcej, niż wynosi temperatura topnienia łopat turbiny.' },
-  { id: 'hpt', name: 'turbina WP', x0: 548, x1: 585, color: '#f87171', ly: 46, desc: 'Turbina wysokiego ciśnienia napędza sprężarkę WP. Łopaty są chłodzone powietrzem od środka i pokryte ceramiczną powłoką, która działa jak bariera cieplna.' },
-  { id: 'lpt', name: 'turbina NP', x0: 595, x1: 685, color: '#c084fc', ly: 66, desc: 'Turbina niskiego ciśnienia (4–7 stopni) napędza wentylator i booster przez wał biegnący środkiem silnika.' },
-  { id: 'nozzle', name: 'dysza', x0: 690, x1: 820, color: '#f472b6', ly: 50, desc: 'Dysza gorącego strumienia zamienia resztę ciśnienia na prędkość. Stożek wylotowy (stożek dyszy) wygładza przepływ.' },
+  { id: 'wlot', name: 'wlot', x0: 50, x1: 138, color: '#7dd3fc', ly: 120, desc: 'Przednia część osłony silnika. Gładko prowadzi powietrze do wentylatora i spowalnia je. W locie powietrze samo „wbija się” we wlot z dużą prędkością, więc ściska się już tutaj, zanim dotrze do wentylatora.' },
+  { id: 'fan', name: 'wentylator', x0: 140, x1: 162, color: '#38bdf8', ly: 175, desc: 'Wielkie łopaty z przodu silnika (2–3,5 m średnicy) zasysają całe powietrze. Ok. 90% omija środek silnika i daje większość ciągu – reszta wpada do środka, do sprężarek.' },
+  { id: 'bypass', name: 'kanał obejściowy', x0: 200, x1: 540, color: '#60a5fa', ly: 132, desc: 'Kanał wokół środka silnika. Płynie nim chłodne powietrze z wentylatora, które nie bierze udziału w spalaniu. Na końcu wylatuje z dużą prędkością do tyłu i pcha samolot.' },
+  { id: 'lpc', name: 'sprężarka NP', x0: 205, x1: 265, color: '#a3e635', ly: 60, desc: 'Sprężarka niskiego ciśnienia (NP): kilka rzędów łopatek tuż za wentylatorem, na tym samym wale. Wstępnie ściska powietrze, zanim trafi ono do sprężarki wysokiego ciśnienia.' },
+  { id: 'hpc', name: 'sprężarka WP', x0: 280, x1: 440, color: '#facc15', ly: 60, desc: 'Sprężarka wysokiego ciśnienia (WP): ok. 9–10 rzędów łopatek, które kręcą się bardzo szybko. Ściska powietrze 30–50 razy mocniej niż na wlocie – przy tym rozgrzewa się ono do ok. 600 °C.' },
+  { id: 'comb', name: 'komora spalania', x0: 450, x1: 540, color: '#fb923c', ly: 48, desc: 'Tu paliwo spala się w ściśniętym powietrzu. Temperatura skacze do 1500–1700 °C – więcej, niż wytrzymałby metal łopatek turbiny bez chłodzenia.' },
+  { id: 'hpt', name: 'turbina WP', x0: 548, x1: 585, color: '#f87171', ly: 46, desc: 'Turbina wysokiego ciśnienia (WP): pierwsza za komorą spalania, w najgorętszym miejscu silnika. Gorące gazy kręcą nią, a ona napędza sprężarkę WP. Jej łopatki są chłodzone powietrzem od środka i pokryte ceramiczną warstwą, która chroni je przed żarem.' },
+  { id: 'lpt', name: 'turbina NP', x0: 595, x1: 685, color: '#c084fc', ly: 66, desc: 'Turbina niskiego ciśnienia (NP): 4–7 rzędów łopatek za turbiną WP. Odbiera gazom resztę energii i przez wał biegnący środkiem silnika napędza wentylator z przodu.' },
+  { id: 'nozzle', name: 'dysza', x0: 690, x1: 820, color: '#f472b6', ly: 50, desc: 'Wylot gorących spalin. Zwęża się, więc gazy przyspieszają i wylatują szybko do tyłu. Stożek w środku wygładza strumień.' },
 ];
 
 /* ---------- Ścieżki SVG ---------- */

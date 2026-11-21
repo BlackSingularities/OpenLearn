@@ -137,13 +137,15 @@ export function labPose(mode: LabMode | null, params: Params) {
 /** Bieżąca (płynnie dojeżdżająca) poza samolotu – współdzielona przez samolot i nakładki. */
 /** Wychylenia sterów (rad), wynikające z manewru: lotki (dodatnie = przechylanie w prawo), ster wysokości, ster kierunku. */
 export type Surfaces = { aileron: number; elevator: number; rudder: number; spoiler: number };
-export type PoseState = { pivot: THREE.Vector3; alpha: number; bank: number; yaw: number; lift: number; bankRate: number; alphaRate: number; surf: Surfaces };
-export const newPose = (): PoseState => ({ pivot: new THREE.Vector3(), alpha: 0, bank: 0, yaw: 0, lift: 0, bankRate: 0, alphaRate: 0, surf: { aileron: 0, elevator: 0, rudder: 0, spoiler: 0 } });
+/** shift – przesunięcie całego samolotu po płycie (m), np. kołowanie przy zawracaniu na pasie; oś obrotu jedzie razem z nim. */
+export type PoseState = { pivot: THREE.Vector3; shift: THREE.Vector3; alpha: number; bank: number; yaw: number; lift: number; bankRate: number; alphaRate: number; surf: Surfaces };
+export const newPose = (): PoseState => ({ pivot: new THREE.Vector3(), shift: new THREE.Vector3(), alpha: 0, bank: 0, yaw: 0, lift: 0, bankRate: 0, alphaRate: 0, surf: { aileron: 0, elevator: 0, rudder: 0, spoiler: 0 } });
 /**
  * Poza zadawana wprost przez scenę (zakładki sterowania: symulacja ruchu samolotu co klatkę). Gdy `active`,
  * driver pozy nie wygładza kątów, tylko je przepisuje (oś obrotu i uniesienie nadal dojeżdżają płynnie).
  */
-export type DirectPose = { active: boolean; pivot: V3; alpha: number; bank: number; yaw: number; lift: number; surf: Surfaces };
+/** snap – oś obrotu ustawiana od razu, bez płynnego dojazdu (np. zawracanie wokół środka zakrętu). */
+export type DirectPose = { active: boolean; pivot: V3; alpha: number; bank: number; yaw: number; lift: number; surf: Surfaces; snap?: boolean; shift?: V3 };
 export const newDirectPose = (): DirectPose => ({ active: false, pivot: [0, 0, 0], alpha: 0, bank: 0, yaw: 0, lift: 0, surf: { aileron: 0, elevator: 0, rudder: 0, spoiler: 0 } });
 
 /** Wycinek w zakładce o klapach (szerszy niż przy profilu). */
@@ -161,9 +163,18 @@ export function usePoseDriver(pose: PoseState, target: { pivot: V3; alpha: numbe
     const k = 1 - Math.exp(-dt * 2.6);
     if (direct?.active) {
       // zakładki sterowania: kąty i stery z symulacji sceny, oś obrotu i uniesienie – płynnie
-      pose.pivot.x += (direct.pivot[0] - pose.pivot.x) * k;
-      pose.pivot.y += (direct.pivot[1] - pose.pivot.y) * k;
-      pose.pivot.z += (direct.pivot[2] - pose.pivot.z) * k;
+      const sh = direct.shift ?? [0, 0, 0];
+      if (direct.snap) {
+        pose.pivot.set(direct.pivot[0], direct.pivot[1], direct.pivot[2]);
+        pose.shift.set(sh[0], sh[1], sh[2]);
+      } else {
+        pose.shift.x += (sh[0] - pose.shift.x) * k;
+        pose.shift.y += (sh[1] - pose.shift.y) * k;
+        pose.shift.z += (sh[2] - pose.shift.z) * k;
+        pose.pivot.x += (direct.pivot[0] - pose.pivot.x) * k;
+        pose.pivot.y += (direct.pivot[1] - pose.pivot.y) * k;
+        pose.pivot.z += (direct.pivot[2] - pose.pivot.z) * k;
+      }
       pose.lift += (direct.lift - pose.lift) * Math.min(1, k * 4);
       pose.alpha = direct.alpha;
       pose.bank = direct.bank;
@@ -173,8 +184,9 @@ export function usePoseDriver(pose: PoseState, target: { pivot: V3; alpha: numbe
       Object.assign(pose.surf, direct.surf);
       return;
     }
-    // po wyjściu z zakładki sterowania odchylenie wraca płynnie do zera
+    // po wyjściu z zakładki sterowania odchylenie i przesunięcie wracają płynnie do zera
     pose.yaw += (0 - pose.yaw) * k;
+    pose.shift.multiplyScalar(1 - k);
     pose.pivot.x += (t.current.pivot[0] - pose.pivot.x) * k;
     pose.pivot.y += (t.current.pivot[1] - pose.pivot.y) * k;
     pose.pivot.z += (t.current.pivot[2] - pose.pivot.z) * k;
@@ -212,7 +224,7 @@ export function FollowPlane({ pose, children }: { pose: PoseState; children: Rea
   const inner = useRef<THREE.Group>(null);
   useFrame(() => {
     if (!outer.current || !rot.current || !inner.current) return;
-    outer.current.position.set(pose.pivot.x, pose.pivot.y + pose.lift, pose.pivot.z);
+    outer.current.position.set(pose.pivot.x + pose.shift.x, pose.pivot.y + pose.lift + pose.shift.y, pose.pivot.z + pose.shift.z);
     // kolejność: odchylenie (wokół pionu samolotu), pochylenie, przechylenie
     rot.current.rotation.set(pose.bank * DEG, pose.yaw * DEG, -pose.alpha * DEG, 'XZY');
     inner.current.position.set(-pose.pivot.x, -pose.pivot.y, -pose.pivot.z);
@@ -1831,13 +1843,13 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Samolot „wyciął się” do cienkiego plastra lewego skrzydła – patrzymy na jego <strong>profil</strong>, czyli przekrój. Ma zaokrągloną <strong>krawędź natarcia</strong>, ostrą <strong>krawędź spływu</strong>, a odcinek między nimi to <strong>cięciwa</strong>.
+            Samolot „wyciął się” do cienkiego plasterka lewego skrzydła – patrzymy na jego <strong>profil</strong>, czyli przekrój. Przód profilu – <strong>krawędź natarcia</strong> – jest zaokrąglony, a tył – <strong>krawędź spływu</strong> – ostry. Prosty odcinek od przodu do tyłu to <strong>cięciwa</strong>.
           </p>
           <p>
-            Profil jest <strong>wygięty</strong> – jego linia szkieletowa (w połowie grubości) jest łukiem, a nie prostą. Wygięcie i grubość decydują o tym, ile siły nośnej i oporu daje skrzydło. To skrzydło ma profil nadkrytyczny: płaski z wierzchu, z wybrzuszeniem od spodu przy krawędzi spływu.
+            Profil jest lekko <strong>wygięty</strong>, jak łuk. Od wygięcia i grubości zależy, jak mocno skrzydło niesie samolot i ile stawia oporu. Skrzydła odrzutowców pasażerskich mają profil spłaszczony z wierzchu, z wybrzuszeniem od spodu przy tylnej krawędzi – dobry do lotu z prędkością bliską prędkości dźwięku.
           </p>
           <p>
-            Najważniejszy parametr lotu to <strong>kąt natarcia α</strong> – kąt między cięciwą a napływającym powietrzem. Przesuń suwak: cały samolot unosi nos, a powietrze dalej płynie poziomo.
+            Najważniejszy kąt w lotnictwie to <strong>kąt natarcia α</strong> – kąt między cięciwą a kierunkiem, z którego napływa powietrze. Przesuń suwak: samolot unosi nos, a powietrze dalej płynie poziomo – kąt natarcia rośnie.
           </p>
         </>
       ),
@@ -1863,13 +1875,13 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Wokół plastra skrzydła płynie <strong>obliczony przepływ</strong> (model przepływu potencjalnego dla profilu zbliżonego do tego przekroju). Powietrze nad skrzydłem przyspiesza i ciśnienie spada (niebieskie), a pod nim lekko zwalnia i ciśnienie rośnie (czerwone).
+            Wokół plasterka skrzydła płynie powietrze – jego ruch jest tu obliczony z modelu fizycznego. Nad skrzydłem powietrze przyspiesza i jego ciśnienie spada (kolor niebieski), a pod skrzydłem lekko zwalnia i ciśnienie rośnie (czerwony). Ta różnica ciśnień pcha skrzydło w górę.
           </p>
           <p>
-            Wybierz <strong>linie czasu</strong>: cząstki wypuszczone jednocześnie przelatują nad skrzydłem <strong>szybciej</strong> i nie spotykają się z dolnymi za krawędzią spływu. Popularne wyjaśnienie o „równym czasie przelotu” jest więc mitem.
+            Wybierz <strong>linie czasu</strong>: drobinki powietrza wypuszczone w tej samej chwili przelatują nad skrzydłem <strong>szybciej</strong> niż pod nim i za skrzydłem już się nie spotykają. Popularne wyjaśnienie, że „górą i dołem powietrze musi dolecieć w tym samym czasie”, jest więc mitem.
           </p>
           <p>
-            Za skrzydłem cały strumień jest skierowany <strong>w dół</strong>. Skrzydło odchyla masę powietrza w dół, więc powietrze pcha skrzydło w górę (III zasada dynamiki). Różnica ciśnień i odchylenie strumienia to dwa opisy tego samego zjawiska.
+            Za skrzydłem cały strumień powietrza jest skierowany <strong>w dół</strong>. Skrzydło spycha masę powietrza w dół, więc powietrze pcha skrzydło w górę – jak przy odrzucie. Różnica ciśnień i spychanie powietrza w dół to dwa opisy tego samego zjawiska.
           </p>
         </>
       ),
@@ -1882,12 +1894,12 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Strzałki na przekroju pokazują ciśnienie na każdym fragmencie powierzchni: <span style={{ color: '#60a5fa' }}>niebieskie</span> „ciągną” na zewnątrz (podciśnienie), <span style={{ color: '#f87171' }}>czerwone</span> naciskają (nadciśnienie).
+            Strzałki pokazują ciśnienie na każdym kawałku powierzchni skrzydła: <span style={{ color: '#60a5fa' }}>niebieskie</span> „ciągną” na zewnątrz (podciśnienie), <span style={{ color: '#f87171' }}>czerwone</span> naciskają (nadciśnienie).
           </p>
           <p>
-            Największe podciśnienie powstaje tuż za krawędzią natarcia na górnej powierzchni – to ona daje większość siły nośnej. Na wykresie w ramce pole między krzywą górną a dolną jest proporcjonalne do C<sub>L</sub>.
+            Najsilniejsze podciśnienie jest na górze skrzydła, tuż za przednią krawędzią – to ono daje większość siły nośnej. Skrzydło jest więc bardziej „zasysane” w górę z wierzchu niż pchane od spodu. Na wykresie w ramce pole między krzywą górną i dolną odpowiada sile nośnej.
           </p>
-          <p>Zwiększ kąt natarcia: szczyt podciśnienia rośnie i przesuwa się do przodu. Za nim powietrze musi „wspinać się” pod rosnące ciśnienie – stąd bierze się przeciągnięcie.</p>
+          <p>Zwiększ kąt natarcia: podciśnienie z przodu rośnie. Za nim powietrze musi „wspinać się pod górkę” – w stronę coraz wyższego ciśnienia przy tylnej krawędzi. Z tego bierze się przeciągnięcie (zobacz dalej).</p>
         </>
       ),
     }),
@@ -1904,12 +1916,12 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            <strong>L = ½ · ρ · v² · S · C<sub>L</sub></strong>. Siła nośna zależy od gęstości powietrza ρ, kwadratu prędkości, powierzchni skrzydeł S (u nas {PLANE.S} m²) i współczynnika C<sub>L</sub>, w którym ukryty jest profil i kąt natarcia.
+            <strong>L = ½ · ρ · v² · S · C<sub>L</sub></strong>. Siła nośna (L) rośnie z gęstością powietrza (ρ), z <em>kwadratem</em> prędkości (v – dwa razy szybciej to cztery razy więcej siły), z powierzchnią skrzydeł (S – w A350-1000 to {PLANE.S} m²) i ze współczynnikiem C<sub>L</sub>. W nim kryje się kształt profilu i kąt natarcia.
           </p>
           <p>
-            W locie poziomym siła nośna równoważy ciężar Q. Zmień wysokość: wyżej powietrze jest rzadsze, więc żeby utrzymać się w powietrzu, trzeba lecieć szybciej albo zwiększyć C<sub>L</sub>. Gdy L przewyższa Q, samolot się wznosi, gdy jest mniejsza – opada.
+            W locie poziomym siła nośna równoważy ciężar samolotu (Q). Zmień wysokość: wyżej powietrze jest rzadsze, więc żeby utrzymać się w powietrzu, trzeba lecieć szybciej albo zwiększyć kąt natarcia. Gdy siła nośna jest większa od ciężaru, samolot się wznosi, a gdy mniejsza – opada.
           </p>
-          <p>Dlatego A350-1000 na 11 km leci ok. 905 km/h (0,85 Macha), a przy lądowaniu – ok. 270 km/h: gęstsze powietrze, mniejsza masa (spalone paliwo) i wysunięte klapy pozwalają zwolnić.</p>
+          <p>Dlatego A350-1000 na wysokości 11 km leci ok. 905 km/h, a przy lądowaniu tylko ok. 270 km/h: przy ziemi powietrze jest gęstsze, samolot jest lżejszy o spalone paliwo, a wysunięte klapy powiększają skrzydło.</p>
         </>
       ),
     }),
@@ -1921,13 +1933,13 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Na początku siła nośna rośnie liniowo z kątem natarcia (ok. 0,1 C<sub>L</sub> na stopień). Ale powietrze nad skrzydłem musi płynąć „pod górkę” – z obszaru niskiego ciśnienia do wyższego przy krawędzi spływu.
+            Im większy kąt natarcia, tym większa siła nośna – na początku rośnie równo, stopień po stopniu. Ale powietrze nad skrzydłem musi płynąć „pod górkę”: od niskiego ciśnienia z przodu do wyższego przy tylnej krawędzi.
           </p>
           <p>
-            Przy dużym α warstwa przyścienna traci energię i <strong>odrywa się</strong> od powierzchni – najpierw przy krawędzi spływu, potem coraz bliżej natarcia. Za skrzydłem powstaje burzliwy ślad wirowy.
+            Przy dużym kącie natarcia cienka warstwa powietrza tuż przy skrzydle traci rozpęd i <strong>odrywa się</strong> od powierzchni – najpierw przy tylnej krawędzi, potem coraz bliżej przodu. Za skrzydłem powstają wiry.
           </p>
           <p>
-            Po przekroczeniu <strong>krytycznego kąta natarcia</strong> (ok. 15–16°) siła nośna gwałtownie spada, a opór rośnie: to <strong>przeciągnięcie</strong>. Zależy ono od kąta natarcia, a nie od prędkości.
+            Po przekroczeniu <strong>kąta krytycznego</strong> (ok. 15–16°) siła nośna gwałtownie spada, a opór rośnie – to <strong>przeciągnięcie</strong>. Ważne: zależy ono od kąta natarcia, a nie od prędkości. Samolot może przeciągnąć przy każdej prędkości, jeśli kąt będzie za duży – dlatego komputery w nowoczesnych samolotach na to nie pozwalają.
           </p>
         </>
       ),
@@ -1948,12 +1960,12 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Przy starcie i lądowaniu samolot musi lecieć wolno, a skrzydło zaprojektowane do szybkiego przelotu daje wtedy za mało siły nośnej. Rozwiązaniem są <strong>urządzenia hipernośne</strong> – tu pracuje prawdziwa mechanizacja tego skrzydła.
+            Przy starcie i lądowaniu samolot musi lecieć wolno, a skrzydło zaprojektowane do szybkiego przelotu daje wtedy za mało siły nośnej. Na to są wysuwane <strong>klapy i sloty</strong> – tu porusza się prawdziwy mechanizm tego skrzydła.
           </p>
           <p>
-            <strong>Klapa</strong> obraca się na nisko opuszczonym zawiasie: wychodzi do tyłu i w dół, zwiększa powierzchnię i wygięcie profilu, a spojlery lekko opadają i domykają szczelinę. <strong>Slot</strong> na krawędzi natarcia wysuwa się do przodu i w dół, otwierając szczelinę, przez którą szybki strumień (żółte smugi) zasila górną powierzchnię i opóźnia oderwanie. Niebieskie smugi pokazują, jak cały opływ coraz mocniej skręca w dół.
+            <strong>Klapa</strong> wychodzi do tyłu i w dół: skrzydło robi się większe i bardziej wygięte, a spojlery lekko opadają i domykają szczelinę. <strong>Slot</strong> na przedniej krawędzi wysuwa się do przodu i w dół, otwierając wąską szczelinę. Płynie przez nią szybki strumień powietrza spod skrzydła (żółte smugi), który pomaga powietrzu „trzymać się” górnej powierzchni. Niebieskie smugi pokazują, jak cały strumień coraz mocniej skręca w dół.
           </p>
-          <p>Przełączaj konfiguracje i patrz na prędkość przeciągnięcia: przy lądowaniu jest o kilkadziesiąt węzłów niższa niż przy gładkim skrzydle. Wartości są przybliżone.</p>
+          <p>Przełączaj ustawienia i patrz na prędkość przeciągnięcia: przy lądowaniu jest o kilkadziesiąt km/h niższa niż przy schowanych klapach. Wartości są przybliżone.</p>
         </>
       ),
     }),
@@ -1978,12 +1990,12 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            <strong>Spojlery</strong> to płyty na górnej powierzchni skrzydła, tuż przed klapami. Schowane tworzą gładką część poszycia. Uniesione psują opływ za sobą: <strong>zmniejszają siłę nośną</strong> i <strong>zwiększają opór</strong> – odwrotnie niż klapy.
+            <strong>Spojlery</strong> to płyty na górze skrzydła, tuż przed klapami. Schowane są gładką częścią skrzydła. Podniesione psują przepływ powietrza za sobą: <strong>zmniejszają siłę nośną</strong> i <strong>zwiększają opór</strong> – odwrotnie niż klapy.
           </p>
           <p>
-            Mają trzy zadania: w locie działają jak <strong>hamulce aerodynamiczne</strong>, po przyziemieniu <strong>gaszą siłę nośną</strong>, żeby koła mocno docisnęły pas, a przy przechylaniu <strong>pomagają lotkom</strong> – unoszą się tylko na skrzydle, które ma opaść.
+            Mają trzy zadania. W locie działają jak <strong>hamulce</strong>. Po przyziemieniu <strong>„gaszą” siłę nośną</strong>, żeby koła mocno docisnęły pas i hamulce działały skutecznie. A przy przechylaniu <strong>pomagają lotkom</strong> – podnoszą się tylko na skrzydle, które ma opaść.
           </p>
-          <p>Przełączaj zastosowania i patrz, które płyty się unoszą i jak wysoko. Wychylenia są przybliżone.</p>
+          <p>Przełączaj zastosowania i patrz, które płyty się podnoszą i jak wysoko. Wychylenia są przybliżone.</p>
         </>
       ),
     }),
@@ -2018,16 +2030,16 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Pod skrzydłem ciśnienie jest wyższe niż nad nim. Dlatego pod skrzydłem powietrze ucieka lekko <strong>ku końcówce</strong> (różowe smugi), a nad nim – <strong>ku kadłubowi</strong> (niebieskie). Na samej końcówce przelewa się z dołu na górę (żółte) i zaczyna się kręcić.
+            Pod skrzydłem ciśnienie jest wyższe niż nad nim. Dlatego pod skrzydłem powietrze ucieka lekko <strong>w stronę końca skrzydła</strong> (różowe smugi), a nad nim – <strong>w stronę kadłuba</strong> (niebieskie). Na samym końcu skrzydła powietrze przelewa się z dołu na górę (żółte) i zaczyna się kręcić.
           </p>
           <p>
-            Z całej krawędzi spływu schodzi cienka <strong>warstwa wirowa</strong>, która za samolotem zwija się w dwa <strong>wiry brzegowe</strong>. Ich rozstaw to ok. π/4 rozpiętości, a każdy obraca się do środka nad sobą: między wirami powietrze opada (<strong>odchylenie strumienia</strong>, niebieskie smugi), na zewnątrz – unosi się.
+            Za samolotem ten ruch zwija się w dwa wielkie <strong>wiry</strong>, po jednym za każdym skrzydłem. Między nimi powietrze opada w dół (niebieskie smugi), a po ich zewnętrznej stronie – unosi się.
           </p>
           <p>
-            Przez odchylenie strumienia lokalna siła nośna przechyla się do tyłu o kąt ε. Jej pozioma część to <strong>opór indukowany</strong>: C<sub>Di</sub> = C<sub>L</sub>² / (π·e·λ). Rośnie z kwadratem C<sub>L</sub>, więc przy powolnym podejściu do lądowania to nawet ponad połowa całego oporu, a w przelocie – mniejsza część.
+            Bo powietrze za skrzydłem opada, siła nośna jest lekko pochylona do tyłu – i część jej hamuje samolot. To tzw. <strong>opór indukowany</strong> – cena za to, że skrzydło niesie samolot. Jest tym większy, im wolniej samolot leci, więc przy podejściu do lądowania to nawet ponad połowa całego oporu. Inżynierowie liczą go wzorem C<sub>Di</sub> = C<sub>L</sub>² / (π·e·λ): długie, smukłe skrzydła (duże λ) mają go mniej.
           </p>
           <p>
-            Wiry samolotu tej wielkości są bardzo silne: opadają ok. 2 m/s, utrzymują się 2–3 minuty i znoszone są przez wiatr. Samolot, który w nie wleci, może zostać gwałtownie przechylony – dlatego za A350-1000 (kategoria <strong>Heavy</strong>) kontrolerzy zachowują odstęp 4–6 mil morskich. <strong>Winglety</strong> rozpraszają wir na końcówce i zmniejszają opór indukowany o kilka procent – wyłącz je i porównaj liczby.
+            Wiry za dużym samolotem są bardzo silne: opadają ok. 2 m/s, utrzymują się 2–3 minuty i znosi je wiatr. Mniejszy samolot, który w nie wleci, może zostać gwałtownie przechylony – dlatego za ciężkimi samolotami kontrolerzy zachowują odstęp kilku mil morskich (ok. 7–11 km). <strong>Winglety</strong> na końcach skrzydeł osłabiają wir i zmniejszają opór o kilka procent – wyłącz je i porównaj liczby.
           </p>
         </>
       ),
@@ -2043,16 +2055,16 @@ export function makeWingLabSteps(plane: (s: Omit<Step, 'kind' | 'scene' | 'stage
       body: (
         <>
           <p>
-            Samolot nie skręca sterem kierunku jak statek – <strong>przechyla się</strong> lotkami. Siła nośna, prostopadła do skrzydeł, przechyla się razem z nim: jej <strong>pionowa</strong> część dalej niesie samolot, a <strong>pozioma</strong> staje się siłą dośrodkową, która zakrzywia tor lotu. Ster kierunku tylko koordynuje zakręt, żeby samolot nie ślizgał się na bok.
+            Samolot nie skręca sterem kierunku jak łódka – <strong>przechyla się</strong>, jak rowerzysta na zakręcie. Siła nośna jest prostopadła do skrzydeł, więc przechyla się razem z samolotem. Jej <strong>pionowa</strong> część dalej niesie samolot, a <strong>pozioma</strong> ciągnie go w bok i zakrzywia jego tor. Ster kierunku tylko pilnuje, żeby samolot nie „ślizgał się” na bok.
           </p>
           <p>
-            Pionowa część musi nadal równoważyć ciężar, więc całkowita siła nośna musi wzrosnąć: <strong>n = 1 / cos φ</strong>. Pilot (albo autopilot) lekko ściąga drążek i zwiększa kąt natarcia. Przy 30° skrzydła niosą 1,15 ciężaru, przy 60° – dwa razy więcej.
+            Pionowa część musi dalej równoważyć ciężar, więc cała siła nośna musi wzrosnąć: <strong>n = 1 / cos φ</strong> (φ – kąt przechylenia). Pilot albo autopilot lekko ciągnie drążek i zwiększa kąt natarcia. Przy przechyleniu 30° skrzydła niosą 1,15 ciężaru samolotu, przy 60° – dwa razy więcej.
           </p>
           <p>
-            Pasażerowie tego nie widzą: w zakręcie skoordynowanym <strong>ciężar pozorny</strong> działa zawsze w stronę podłogi, tylko jest n razy większy – herbata w kubku się nie przechyla, ale przy 60° każdy czuje się dwa razy cięższy.
+            Pasażerowie prawie tego nie zauważają: w dobrze wykonanym zakręcie wszystko jest dociskane prosto do podłogi, tylko mocniej – herbata w kubku się nie przechyla, ale przy 60° każdy czułby się dwa razy cięższy.
           </p>
           <p>
-            Prędkość przeciągnięcia rośnie √n razy, a promień zakrętu to r = v² / (g · tg φ): szybciej = szerzej. Samoloty pasażerskie przechylają się zwykle do 25°; w A350 system sterowania sam wraca do 33°, gdy pilot puści drążek, i nie pozwala przekroczyć 67° (n ≈ 2,5). Na wyświetlaczach kokpitu widać przechylenie, obracający się kurs i przewidywany tor zakrętu, a czerwony pas na taśmie prędkości to prędkość przeciągnięcia w tym zakręcie.
+            W zakręcie rośnie też prędkość przeciągnięcia, a promień zakrętu to r = v² / (g · tg φ): im szybciej, tym szerszy łuk. Samoloty pasażerskie przechylają się zwykle najwyżej o 25°. W A350 komputery same cofają przechylenie do 33°, gdy pilot puści drążek, i nie pozwalają przekroczyć 67°. Na ekranach w kokpicie widać przechylenie, zmieniający się kurs i przewidywany tor zakrętu, a czerwony pas na skali prędkości to prędkość przeciągnięcia w tym zakręcie.
           </p>
         </>
       ),

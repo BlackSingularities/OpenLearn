@@ -12,8 +12,8 @@ import { ALONG, CORE_IN, CORE_OUT, COWL_OUT, NAC_IN, PARTS, lerpTable, tempColor
 import { ACC_TH, BEARINGS, COMB_HOLES, COWL3, Flame, VSV_TH, accP, vbvOf, vsvOf, LONG_IN, NAC3_IN, PLUG3, S, SelectionInfo, ax, buildRows, type FlowMode, type SpoolCfg } from './engineModel';
 import { isaRho } from './wingFlow';
 import { EngineOnPlane } from './airliner';
-import { useSceneHidden } from '../../lib/topicNav';
-import { AIRBUS, CockpitDock, ControlStack, Ecam, EngStartPanel, ThrustLevers, leverFromThrust, type EcamEngine } from '../../components/cockpit';
+import { useModuleHome, useSceneHidden } from '../../lib/topicNav';
+import { AIRBUS, CockpitDock, ControlStack, Ecam, EngStartPanel, PanelBox, Pushbutton, ThrustLevers, leverFromThrust, type EcamEngine } from '../../components/cockpit';
 
 /** Parametry silnika do strony ENG: Trent XWB ma trzy wały – model liczy N1 i wał WP (tu N3), N2 leży pomiędzy. */
 function ecamEng(o: { n1: number; n2: number; ff: number; oilP?: number; oilT?: number; oilQ?: number; vib?: number }): EcamEngine {
@@ -43,7 +43,11 @@ const hash = (i: number) => {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 /** Ramka informacyjna: opis klikniętej części + treść kroku. */
-function EngineInfo({ sel, rows, children, hint = 'Kliknij dowolną część silnika (albo jej podpis), aby ją wyróżnić i przeczytać opis.' }: { sel: string | null; rows: ReturnType<typeof buildRows>; children?: ReactNode; hint?: string | null }) {
+function EngineInfo({ sel: sel0, rows, children, hint: hint0 = 'Kliknij dowolną część silnika (albo jej podpis), aby ją wyróżnić i przeczytać opis.' }: { sel: string | null; rows: ReturnType<typeof buildRows>; children?: ReactNode; hint?: string | null }) {
+  // w zakładkach > 0 modułu części nie są klikalne – bez opisu zaznaczenia i bez zachęty do klikania
+  const home = useModuleHome();
+  const sel = home ? sel0 : null;
+  const hint = home ? hint0 : null;
   return (
     <InfoPortal>
       {sel ? (
@@ -62,8 +66,9 @@ function EngineInfo({ sel, rows, children, hint = 'Kliknij dowolną część sil
 
 /** Podpis w scenie. Z onClick działa jak kliknięcie w opisany element modelu (wyróżnia go i pokazuje opis). */
 function Tag({ pos, color, children, onClick }: { pos: [number, number, number]; color: string; children: ReactNode; onClick?: () => void }) {
-  // scena ukryta albo rozgrzewana w tle nie pokazuje podpisów
-  if (useSceneHidden()) return null;
+  const home = useModuleHome();
+  // scena ukryta albo rozgrzewana w tle nie pokazuje podpisów; klikany podpis części – tylko na stronie głównej modułu
+  if (useSceneHidden() || (onClick && !home)) return null;
   return (
     <Html position={pos} center zIndexRange={[5, 0]}>
       <span className="engine-label" style={{ color, pointerEvents: onClick ? 'auto' : 'none', cursor: onClick ? 'pointer' : 'default' }} onClick={onClick}>
@@ -2106,7 +2111,7 @@ function StartInner({ run, sc, speed }: { run: boolean; sc: StartScenario; speed
       <CockpitDock>
         {/* pulpit: tryb IGN/START i ENG MASTER 1 – FAULT po przerwanym rozruchu; dźwignie ciągu na biegu jałowym */}
         <ControlStack>
-          <EngStartPanel mode={run ? 'IGN/START' : 'NORM'} masters={[run, true]} faults={[run && (sc === 'hot' ? t > 21 : sc === 'hung' ? t > 34 : sc === 'wet' ? t > 22 : false), false]} />
+          <EngStartPanel mode={run ? 'IGN/START' : 'NORM'} masters={[run, true]} act={[run && t < 2, false]} faults={[run && (sc === 'hot' ? t > 21 : sc === 'hung' ? t > 34 : sc === 'wet' ? t > 22 : false), false]} />
           <ThrustLevers pos={[0, 0]} size={80} />
         </ControlStack>
         <Ecam
@@ -2154,7 +2159,7 @@ function StartInner({ run, sc, speed }: { run: boolean; sc: StartScenario; speed
             })}
           </div>
         ) : (
-          <div style={{ color: '#facc15' }}>Włącz „Uruchom silnik”, aby zacząć sekwencję.</div>
+          <div style={{ color: '#facc15' }}>Naciśnij „Rozpocznij”, aby zacząć sekwencję.</div>
         )}
       </EngineInfo>
     </>
@@ -2497,6 +2502,62 @@ interface FailState {
   fx: Record<string, number>;
 }
 
+/**
+ * Co robi załoga w kokpicie (czas od startu symulacji, s): dźwignie ciągu (0 – jałowy, 1 – CL), ENG MASTER 1
+ * (chwile przełączeń), przycisk pożarowy ENG 1, butle gaśnicze i przełącznik trybu rozruchu. Użytkownik niczego nie
+ * wciska – przełączniki w doku kokpitu przestawiają się same, a ten właśnie używany jest podświetlony.
+ */
+interface CrewDef {
+  lever: Tb;
+  lever2?: Tb;
+  master?: [number, boolean][];
+  mode?: [number, 'NORM' | 'IGN/START'][];
+  firePb?: number;
+  agents?: [number, number?];
+  /** Lampka FIRE (pętle czujników ognia). */
+  fireLamp?: [number, number];
+}
+const CREW: Record<FailId, CrewDef> = {
+  surge: { lever: [[0, 1], [14, 1], [15.5, 0.7], [60, 0.7]] },
+  bird: { lever: [[0, 1], [12, 1], [13.5, 0.6], [28, 0.6], [29, 0], [60, 0]], master: [[30, false]] },
+  fbo: { lever: [[0, 1], [8, 1], [8.8, 0], [60, 0]], master: [[9, false]] },
+  flameout: { lever: [[0, 0], [60, 0]], lever2: [[0, 0], [60, 0]] },
+  fire: { lever: [[0, 1], [12, 1], [12.8, 0], [70, 0]], master: [[15, false]], firePb: 16, agents: [26, 56], fireLamp: [9, 58] },
+  oil: { lever: [[0, 1], [24, 1], [24.8, 0], [60, 0]], master: [[28, false]] },
+  ash: {
+    lever: [[0, 1], [20, 1], [21, 0], [48, 0], [52, 0.8], [60, 0.8]],
+    lever2: [[0, 1], [20, 1], [21, 0], [48, 0], [52, 0.8], [60, 0.8]],
+    master: [[35, false], [37, true]],
+    mode: [[0, 'NORM'], [36, 'IGN/START'], [46, 'NORM']],
+  },
+  turbine: { lever: [[0, 1], [12, 1], [12.8, 0], [60, 0]], master: [[18, false]] },
+};
+/** Jak długo (s) przełącznik po użyciu jest podświetlony. */
+const CREW_HOLD = 1.6;
+const usedAt = (t: number, at: number | undefined) => at !== undefined && t >= at && t < at + CREW_HOLD;
+/** Stan przełączników kokpitu w chwili t – i które z nich załoga właśnie przestawia. */
+function crewAt(t: number, id: FailId) {
+  const c = CREW[id];
+  const lastOf = <T,>(list: [number, T][] | undefined, def: T) => (list ?? []).filter(([at]) => t >= at).reduce<T>((_, [, v]) => v, def);
+  const fireLamp = !!c.fireLamp && t >= c.fireLamp[0] && t < c.fireLamp[1];
+  const pushed = c.firePb !== undefined && t >= c.firePb;
+  const [a1, a2] = c.agents ?? [];
+  return {
+    lever: [lerpTable(c.lever, t), lerpTable(c.lever2 ?? [[0, 1]], t)] as [number, number],
+    master: lastOf(c.master, true),
+    masterAct: (c.master ?? []).some(([at]) => usedAt(t, at)),
+    mode: lastOf(c.mode, 'NORM' as 'NORM' | 'IGN/START'),
+    fire: c.firePb !== undefined,
+    fireLamp,
+    firePb: pushed,
+    fireAct: usedAt(t, c.firePb),
+    agent: [
+      { squib: pushed && !(a1 !== undefined && t >= a1), disch: a1 !== undefined && t >= a1, act: usedAt(t, a1) },
+      { squib: pushed && !(a2 !== undefined && t >= a2), disch: a2 !== undefined && t >= a2, act: usedAt(t, a2) },
+    ],
+  };
+}
+
 function failModel(t: number, id: FailId): FailState {
   const d = FAILS[id];
   const v = (tb: Tb | undefined, def: number) => (tb ? lerpTable(tb, t) : def);
@@ -2827,6 +2888,7 @@ function FailInner({ run, id, speed }: { run: boolean; id: FailId; speed: number
   const cur = [...def.events].reverse().find(([te]) => t >= te);
   const msgs = def.msgs.filter(([a, b]) => t >= a && t < b);
   const comb = s.flame * clamp((s.egt - 100) / 800, 0.15, 1);
+  const crew = crewAt(t, id);
   return (
     <>
       <Lights />
@@ -2838,6 +2900,19 @@ function FailInner({ run, id, speed }: { run: boolean; id: FailId; speed: number
         EGT {fmt(s.egt, 0)} °C
       </Tag>
       <CockpitDock>
+        {/* pulpit: dźwignie ciągu i ENG MASTER, nad głową – przycisk pożarowy i butle; przestawia je załoga */}
+        <ControlStack>
+          <EngStartPanel mode={crew.mode} masters={[crew.master, true]} fires={[crew.fireLamp, false]} act={[crew.masterAct, false]} />
+          <ThrustLevers pos={crew.lever} size={80} />
+        </ControlStack>
+        {crew.fire && (
+          <PanelBox title="ENG 1 FIRE">
+            <Pushbutton label="ENG 1 FIRE" guard act={crew.fireAct} top={{ text: 'FIRE', color: AIRBUS.red, on: crew.fireLamp }} bottom={{ text: 'PUSH', color: '#f2f4f6', on: crew.firePb }} />
+            {crew.agent.map((a, k) => (
+              <Pushbutton key={k} label={`AGENT ${k + 1}`} act={a.act} top={{ text: 'SQUIB', color: '#f2f4f6', on: a.squib }} bottom={{ text: 'DISCH', color: AIRBUS.amber, on: a.disch }} />
+            ))}
+          </PanelBox>
+        )}
         <Ecam
           thrMode={['CLB', 92]}
           n1={[s.n1, 88]}
@@ -2899,7 +2974,7 @@ function FailInner({ run, id, speed }: { run: boolean; id: FailId; speed: number
             })}
           </div>
         ) : (
-          <div style={{ color: '#facc15' }}>Wybierz awarię i włącz „Start symulacji”.</div>
+          <div style={{ color: '#facc15' }}>Wybierz awarię i naciśnij „Rozpocznij”.</div>
         )}
         <div style={{ opacity: 0.7, fontSize: 12 }}>{def.note}</div>
       </EngineInfo>
@@ -2945,26 +3020,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Tak wygląda <strong>turbowentylator</strong> – silnik niemal każdego współczesnego samolotu pasażerskiego. Obróć
-            model, zajrzyj do środka przez wycięcie i <strong>kliknij</strong> dowolną część, aby przeczytać jej opis.
+            To <strong>silnik turbowentylatorowy</strong> – taki napędza prawie każdy współczesny samolot pasażerski. Obracaj model myszą, zajrzyj do środka przez wycięcie i <strong>kliknij</strong> dowolną część, żeby przeczytać, do czego służy.
           </p>
           <p>
-            Przesuń suwak <strong>„Rozłożenie silnika”</strong>: gondola unosi się, a moduły rozsuwają wzdłuż osi. Kliknij
-            wtedy moduł – rozłoży się dalej na pojedyncze wieńce łopatek, wtryskiwacze czy świece, i każdy z nich też da się
-            kliknąć.
+            Przesuń suwak <strong>„Rozłożenie silnika”</strong>. Osłona się uniesie, a główne zespoły rozsuną się wzdłuż osi, jak na rysunku technicznym. Kliknij wtedy któryś zespół – rozłoży się dalej, aż do pojedynczych rzędów łopatek, wtryskiwaczy paliwa czy świec zapłonowych. Każdą z tych części też można kliknąć.
           </p>
           <p>
-            Silnik ma dwa niezależne wały: <strong>N1</strong> (wentylator + sprężarka i turbina NP) i <strong>N2</strong>{' '}
-            (sprężarka i turbina WP). Kręcą się wszystkie wirniki, a jasna łopatka na każdym z nich pokazuje, że N2 obraca się
-            szybciej niż N1. Zwróć uwagę na spiralę na kołpaku – po niej obsługa na lotnisku widzi, czy wentylator się kręci.
+            Wirniki silnika siedzą na dwóch niezależnych <strong>wałach</strong>, które kręcą się z różną prędkością. Wał <strong>N1</strong> obraca wielki wentylator z przodu, a wał <strong>N2</strong> – sprężarkę i turbinę w środku silnika. Jasna łopatka na każdym wirniku pozwala zobaczyć, że N2 kręci się dużo szybciej. Spirala na środku wentylatora jest dla ludzi na lotnisku – od razu widać, czy silnik się obraca.
           </p>
           <p>
-            Zmień <strong>średnicę wentylatora</strong> – od CFM56 z Boeinga 737 (1,5 m) po GE9X z Boeinga 777X (3,4 m).
-            W ramce zmieniają się masa, ciąg, <strong>spręż całkowity</strong> (ile razy sprężarki podnoszą ciśnienie),
-            stosunek obejścia i liczba łopat: małe wentylatory mają wiele wąskich łopat z tytanu, duże – kilkanaście
-            szerokich z kompozytu. Większy wentylator kręci się wolniej, bo końcówki łopat nie mogą przekroczyć ok. 450 m/s.
-            Tryb <strong>rentgen</strong> pokazuje wnętrze bez wycinania, a <strong>obracanie</strong> pozwala obejrzeć silnik
-            ze wszystkich stron.
+            Zmień <strong>średnicę wentylatora</strong> – od 1,5 m (silnik Boeinga 737) do 3,4 m (największy dziś silnik, z Boeinga 777X). W ramce zobaczysz, jak zmieniają się masa, siła ciągu i liczba łopat: małe wentylatory mają wiele wąskich łopat z tytanu, duże – kilkanaście szerokich z kompozytu. Duży wentylator musi kręcić się wolniej, bo końce jego łopat nie mogą pędzić dużo szybciej niż dźwięk. <strong>Rentgen</strong> pokazuje wnętrze bez wycinania, a <strong>obracanie</strong> pozwala obejrzeć silnik ze wszystkich stron.
           </p>
         </>
       ),
@@ -2994,28 +3059,19 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Silnik odrzutowy to <strong>pompa pędu</strong>: zasysa powietrze, przyspiesza je i wyrzuca do tyłu. Zmiana pędu
-            powietrza oznacza siłę – a reakcją na nią jest <strong>ciąg</strong> pchający samolot do przodu (zielona strzałka).
+            Silnik odrzutowy zasysa powietrze, rozpędza je i wyrzuca do tyłu. Skoro pcha powietrze do tyłu, to powietrze pcha silnik – a z nim cały samolot – do przodu. Tę siłę nazywa się <strong>ciągiem</strong> (zielona strzałka). Działa to tak samo jak odrzut przy wypuszczeniu nadmuchanego balonika.
           </p>
           <p>
-            <strong>F = ṁ · (vⱼ − v₀)</strong>: ciąg zależy od tego, ile powietrza na sekundę przechodzi przez silnik (ṁ) i o
-            ile zostaje przyspieszone. Pilot nie ustawia tych wielkości osobno – przesuwa <strong>dźwignię ciągu</strong>, a
-            wentylator kręci się szybciej, zasysa więcej powietrza i mocniej je rozpędza.
+            Ciąg zależy od dwóch rzeczy: <strong>ile powietrza</strong> przechodzi przez silnik w każdej sekundzie i <strong>o ile szybciej</strong> wylatuje, niż wpadło. Inżynier zapisze to wzorem <strong>F = ṁ · (vⱼ − v₀)</strong> (ṁ – ilość powietrza na sekundę, vⱼ – prędkość wylotu, v₀ – prędkość lotu). Pilot nie ustawia tych wielkości osobno, tylko przesuwa <strong>dźwignię ciągu</strong>: wentylator kręci się szybciej, zasysa więcej powietrza i mocniej je rozpędza.
           </p>
           <p>
-            Zwiększ prędkość lotu v₀: powietrze „wpada” do silnika już rozpędzone, więc różnica vⱼ − v₀ maleje i ciąg spada,
-            choć ṁ trochę rośnie (spiętrzenie we wlocie). Podnieś wysokość: powietrze jest rzadsze, ṁ maleje – na 11 km ten
-            sam silnik daje ok. 20–25% ciągu startowego, i tyle wystarcza w przelocie.
+            Zwiększ <strong>prędkość lotu</strong>: powietrze wpada do silnika już rozpędzone, więc silnik mniej je przyspiesza i ciąg spada. Podnieś <strong>wysokość</strong>: powietrze jest rzadsze, więc przez silnik przechodzi go mniej. Na wysokości 11 km ten sam silnik daje tylko ok. 20–25% ciągu ze startu – i tyle w przelocie wystarcza.
           </p>
           <p>
-            Ten sam ciąg można uzyskać, przyspieszając <em>dużo</em> powietrza <em>trochę</em> albo <em>mało</em> powietrza{' '}
-            <em>bardzo</em> – to klucz do zrozumienia bypassu. W turbowentylatorze większość ciągu daje zimny strumień
-            z wentylatora, choć jest wolniejszy od gorącego.
+            Ten sam ciąg można dostać na dwa sposoby: rozpędzić <em>dużo</em> powietrza <em>trochę</em> albo <em>mało</em> powietrza <em>bardzo</em>. Silniki samolotów pasażerskich wybierają pierwszy sposób – większość ciągu daje u nich chłodne powietrze z wielkiego wentylatora, choć leci wolniej niż gorące spaliny ze środka.
           </p>
           <p>
-            Przełącz <strong>widok</strong>. „Siły na częściach” pokazuje, że ciąg to suma ciśnień na wielu powierzchniach:
-            wentylator, sprężarki i komora są pchane do przodu, a turbiny i dysza – do tyłu. „Objętość kontrolna” to sposób
-            inżyniera: wystarczy porównać pęd powietrza wchodzącego i wychodzącego z pudełka wokół silnika.
+            Przełącz <strong>widok</strong>. „Siły na częściach” pokazuje, że ciąg to suma nacisków na wiele powierzchni w silniku: jedne części powietrze pcha do przodu, inne do tyłu. „Objętość kontrolna” to sposób inżynierów: zamiast liczyć każdą część, wystarczy porównać powietrze wchodzące do wyobrażonego pudełka wokół silnika z tym, które z niego wychodzi.
           </p>
         </>
       ),
@@ -3045,20 +3101,14 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Silnik działa jak ciągły, „rozciągnięty” silnik spalinowy: <strong>ssanie → sprężanie → spalanie →
-            rozprężanie</strong>. W tłokowym te takty dzieją się po kolei w jednym cylindrze, tu – jednocześnie, w różnych
-            miejscach.
+            Silnik odrzutowy działa podobnie jak silnik samochodu: <strong>ssanie → sprężanie → spalanie → rozprężanie</strong>. Różnica jest taka, że w samochodzie te cztery etapy dzieją się po kolei w jednym cylindrze, a tu – wszystkie naraz, każdy w innym miejscu silnika, bez przerwy.
           </p>
           <p>
-            Jasny znacznik to jedna porcja powietrza. Leci przez silnik, a model podświetla moduł, w którym akurat jest – w
-            ramce widać bieżący takt, ciśnienie i temperaturę. Przełącz <strong>strumień</strong> na zimny: ta droga omija
-            spalanie i turbiny, a mimo to daje większość ciągu.
+            Jasny znacznik to jedna porcja powietrza. Leci przez silnik, a model podświetla część, w której akurat jest. W ramce widać, na jakim etapie jest porcja oraz jakie ma ciśnienie i temperaturę. Przełącz <strong>strumień</strong> na zimny: to powietrze omija środek silnika – nie trafia do spalania ani do turbin – a mimo to daje większość ciągu.
           </p>
-          <p>Zwróć uwagę: kropki w komorze zwalniają (tam powietrze musi płynąć wolno, żeby płomień nie zgasł), a w dyszy wyraźnie przyspieszają.</p>
+          <p>Zwróć uwagę: w komorze spalania kropki zwalniają, bo powietrze musi tam płynąć wolno, żeby płomień nie zgasł. W dyszy na końcu wyraźnie przyspieszają.</p>
           <p>
-            Pasek w ramce pokazuje całą drogę porcji podzieloną na takty, a rysunek pod nim – te same takty w cylindrze
-            silnika tłokowego. Naprawdę cała podróż przez rdzeń trwa kilkadziesiąt milisekund; tempo porcji możesz zmienić
-            suwakiem, a pauzą na dole sceny – zatrzymać ją w dowolnym miejscu.
+            Pasek w ramce dzieli drogę porcji na te cztery etapy, a rysunek pod nim pokazuje te same etapy w cylindrze silnika samochodu. Naprawdę cała podróż przez środek silnika trwa ułamek sekundy. Suwakiem możesz ją zwolnić albo przyspieszyć, a pauzą na dole sceny – zatrzymać w dowolnym miejscu.
           </p>
         </>
       ),
@@ -3100,24 +3150,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Przesuwaj różową płaszczyznę przekroju wzdłuż silnika. Kropki przepływu są pokolorowane według wybranej wielkości,
-            a wykres w ramce pokazuje jej przebieg. W sprężarce ciśnienie rośnie ok. <strong>40 razy</strong>, a temperatura do
-            ok. 600 °C – samo sprężanie mocno grzeje.
+            Przesuwaj różową płaszczyznę wzdłuż silnika. Kropki są pokolorowane według wybranej wielkości, a wykres w ramce pokazuje, jak zmienia się ona w kolejnych miejscach. W sprężarce ciśnienie rośnie ok. <strong>40 razy</strong>, a temperatura – do ok. 600 °C. Samo ściskanie mocno grzeje powietrze, tak jak pompka rowerowa robi się ciepła przy pompowaniu.
           </p>
           <p>
-            W komorze spalania ciśnienie prawie się nie zmienia, za to temperatura skacze do ok. <strong>1600 °C</strong>.
-            Turbiny odbierają gazom energię (spadek ciśnienia i temperatury), a dysza zamienia resztę ciśnienia na prędkość.
+            W komorze spalania ciśnienie prawie się nie zmienia, za to temperatura skacze do ok. <strong>1600 °C</strong> – więcej, niż wytrzymuje wiele metali. Turbiny odbierają gorącym gazom energię, więc za nimi ciśnienie i temperatura spadają. Dysza na końcu zamienia resztę ciśnienia na prędkość wylotu.
           </p>
           <p>
-            Wybierz <strong>obieg Braytona</strong>: to idealny model termodynamiczny silnika. Cztery przemiany tworzą
-            pętlę – jej pole odpowiada pracy, którą silnik oddaje na każdy kilogram powietrza. W wersji <strong>T–s</strong>
-            (temperatura–entropia) widać też straty: sprężanie i rozprężanie nie są idealnie pionowe.
+            Wybierz <strong>obieg Braytona</strong> – to uproszczony, podręcznikowy model pracy silnika. Cztery etapy tworzą na wykresie zamkniętą pętlę: im większe jej pole, tym więcej pracy silnik wykonuje z każdego kilograma powietrza. Wersja <strong>T–s</strong> (temperatura–entropia) pokazuje też straty: w prawdziwym silniku nic nie działa idealnie.
           </p>
           <p>
-            Inżynierowie opisują silnik <strong>stacjami</strong>: 2 – przed wentylatorem, 3 – za sprężarką, 4 – za komorą,
-            5 – za turbiną, 9 – wylot dyszy. Tabela w ramce podaje wartości w każdej z nich. Zmień <strong>stan pracy</strong>:
-            w przelocie na 11 km ciśnienia są ok. trzy razy niższe, bo powietrze jest rzadkie, a na biegu jałowym sprężarka
-            prawie nie spręża i komora jest znacznie chłodniejsza.
+            Inżynierowie numerują ważne miejsca w silniku – to tzw. <strong>stacje</strong>: 2 – przed wentylatorem, 3 – za sprężarką, 4 – za komorą spalania, 5 – za turbiną, 9 – wylot dyszy. Tabela w ramce podaje wartości w każdej z nich. Zmień <strong>stan pracy</strong>: w przelocie na 11 km ciśnienia są ok. trzy razy niższe, bo powietrze jest rzadkie, a na biegu jałowym sprężarka prawie nie ściska powietrza i komora jest dużo chłodniejsza.
           </p>
         </>
       ),
@@ -3138,25 +3180,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Każdy <strong>stopień</strong> sprężarki to para wieńców: <strong>wirnik</strong> (tytanowe, obracające się łopatki)
-            i <strong>kierownica</strong> (nieruchome). Z tyłu łopatki są krótsze, węższe i jest ich więcej, a ostatnie wirniki
-            są stalowe, bo powietrze jest tam już gorące. Zmieniaj liczbę stopni – model przebudowuje się na bieżąco.
+            <strong>Sprężarka</strong> ściska powietrze, zanim trafi ono do spalania. Składa się z wielu <strong>stopni</strong>. Każdy stopień to dwa rzędy łopatek: <strong>wirnik</strong> (łopatki, które się obracają) i <strong>kierownica</strong> (łopatki nieruchome). Im dalej w głąb silnika, tym łopatki są mniejsze i jest ich więcej, bo ściśnięte powietrze zajmuje coraz mniej miejsca. Ostatnie wirniki są ze stali, bo powietrze jest tam już gorące. Zmieniaj liczbę stopni – model przebudowuje się na bieżąco.
           </p>
           <p>
-            Wirnik nadaje powietrzu energię i skręca je w kierunku obrotu. Kanały między łopatkami się rozszerzają, więc
-            powietrze zwalnia, a ciśnienie rośnie (dyfuzor). Kierownica prostuje strumień i dalej podnosi ciśnienie. Włącz
-            rozłożenie i klikaj pojedyncze wieńce – zobaczysz ciśnienie i temperaturę w każdym miejscu.
+            Wirnik popycha powietrze i nadaje mu energię. Kanały między łopatkami się rozszerzają, więc powietrze zwalnia, a jego ciśnienie rośnie. Kierownica prostuje strumień i jeszcze trochę podnosi ciśnienie. Włącz rozłożenie i klikaj pojedyncze rzędy łopatek – zobaczysz ciśnienie i temperaturę w każdym miejscu.
           </p>
           <p>
-            Jeden stopień daje tylko 1,2–1,4 razy więcej ciśnienia, ale spręże kolejnych stopni się <strong>mnożą</strong>: 1,3⁹ ≈ 10.
-            Gdy stopień próbuje sprężyć za dużo, przepływ się odrywa i może dojść do <strong>pompażu</strong> – gwałtownego
-            cofnięcia strumienia. Kanał zwęża się ku tyłowi, bo sprężone powietrze zajmuje coraz mniej miejsca.
+            Jeden stopień podnosi ciśnienie tylko 1,2–1,4 razy, ale efekty kolejnych stopni się <strong>mnożą</strong>: dziewięć stopni po 1,3 daje razem ok. 10 razy. Jeśli stopień próbuje ścisnąć powietrze za mocno, przepływ się zrywa i może dojść do <strong>pompażu</strong> – powietrze gwałtownie cofa się do przodu z hukiem, jak przy kichnięciu silnika.
           </p>
           <p>
-            Zmniejsz <strong>N2</strong>: <strong>kierownice przestawne (VSV)</strong> przymykają się – widać, jak obraca się
-            pierścień, dźwigienki i łopatki – a <strong>zawory VBV</strong> za sprężarką NP otwierają się i wypuszczają nadmiar
-            powietrza. Wyłącz geometrię zmienną: przy niskich obrotach kąt natarcia rośnie, a punkt pracy na mapie przechodzi
-            nad linię pompażu. Na obudowie widać też kolektory, którymi pobiera się sprężone powietrze dla samolotu.
+            Zmniejsz obroty <strong>N2</strong>. Część kierownic jest <strong>przestawna</strong> – przy małych obrotach przymykają się (widać obracający się pierścień, dźwigienki i łopatki), a <strong>zawory upustowe</strong> wypuszczają nadmiar powietrza. Wyłącz te mechanizmy: przy niskich obrotach łopatki ustawiają się do powietrza pod złym kątem i punkt pracy na wykresie wchodzi w obszar pompażu. Na obudowie widać też rury, którymi silnik oddaje część sprężonego powietrza samolotowi – np. do klimatyzacji.
           </p>
         </>
       ),
@@ -3187,21 +3220,13 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Za sprężarką powietrze pędzi zbyt szybko, by utrzymać płomień – jak zapałka na wietrze. <strong>Dyfuzor</strong>{' '}
-            je spowalnia, a <strong>zawirowywacze</strong> przy 18 wtryskiwaczach tworzą wiry, w których gorące spaliny krążą i
-            stale zapalają świeżą mieszankę.
+            Za sprężarką powietrze pędzi tak szybko, że płomień by się w nim nie utrzymał – jak zapałka na wietrze. Dlatego najpierw zwalnia w rozszerzającym się kanale (<strong>dyfuzorze</strong>). Przy każdym z 18 wtryskiwaczy paliwa są <strong>zawirowywacze</strong>: łopatki, które zakręcają powietrze w wir. Gorące spaliny krążą w tym wirze i przez cały czas zapalają świeżą mieszankę.
           </p>
           <p>
-            Łukowate <strong>osłony</strong> dzielą strumień. Tylko ok. ¼ powietrza wchodzi przez zawirowywacze do
-            <strong> strefy pierwotnej</strong>. Reszta płynie kanałami nad i pod pierścieniową <strong>płomieniówką</strong> i
-            wpada przez otwory. Mniejsze <strong>otwory pierwotne</strong> zamykają wir od tyłu, większe
-            <strong> rozcieńczające</strong> studzą spaliny, a szczeliny chłodzące tworzą przy ściankach chłodną warstwę. Wybierz
-            jedną drogę w „Powietrze”, aby prześledzić ją osobno.
+            Spalanie odbywa się w pierścieniowej rurze – <strong>płomieniówce</strong>. Tylko ok. ¼ powietrza wchodzi do niej od przodu, przez zawirowywacze, do <strong>strefy pierwotnej</strong>, gdzie płonie paliwo. Reszta opływa płomieniówkę z zewnątrz i wpada do niej przez otwory w ściankach. Mniejsze <strong>otwory pierwotne</strong> domykają wir od tyłu, większe <strong>otwory rozcieńczające</strong> studzą spaliny przed turbiną, a drobne szczeliny tworzą przy ściankach chłodną warstwę, która je chroni. Wybierz jedną drogę w polu „Powietrze”, żeby prześledzić ją osobno.
           </p>
           <p>
-            Zwiększ przepływ paliwa – płomienie rosną, rośnie temperatura przed turbiną (TIT), a z nią moc silnika. To właśnie
-            TIT jest granicą: łopaty turbiny wytrzymują ją tylko dzięki chłodzeniu i powłokom ceramicznym. Świece zapłonowe
-            pracują przy rozruchu i w warunkach ryzyka zgaśnięcia płomienia.
+            Zwiększ <strong>przepływ paliwa</strong>: płomienie rosną, rośnie temperatura gazów przed turbiną, a z nią moc silnika. To ta temperatura ogranicza moc silnika – łopatki turbiny wytrzymują ją tylko dzięki chłodzeniu powietrzem od środka i ceramicznym powłokom. <strong>Świece zapłonowe</strong> pracują przy uruchamianiu silnika i wtedy, gdy płomień mógłby zgasnąć, np. w ulewie.
           </p>
         </>
       ),
@@ -3225,23 +3250,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            <strong>Turbina</strong> to „odwrócona sprężarka”: gorące gazy rozprężają się na jej łopatach i kręcą wałem.
-            Turbina oddaje tę moc sprężarce i wentylatorowi – sama nie daje ciągu.
+            <strong>Turbina</strong> działa odwrotnie niż sprężarka: gorące gazy rozprężają się na jej łopatkach i kręcą nią jak wiatr wiatrakiem. Turbina nie daje ciągu – całą swoją moc przekazuje wałem do przodu, do sprężarki i wentylatora.
           </p>
           <p>
-            Wentylator jest wielki, więc musi kręcić się wolno (końcówki łopat nie mogą mocno przekroczyć prędkości
-            dźwięku). Mała sprężarka WP potrzebuje za to dużych obrotów. Dlatego elementy połączono w osobne{' '}
-            <strong>wały</strong> – na modelu wirniki mają kolor swojego wału. Kliknij wał, aby go wyróżnić.
+            Wentylator jest wielki, więc musi kręcić się wolno – końce jego łopat nie mogą pędzić dużo szybciej niż dźwięk. Mała sprężarka w środku działa dobrze dopiero przy dużych obrotach. Dlatego części silnika połączono w osobne <strong>wały</strong>, które kręcą się z różną prędkością. Na modelu wirniki mają kolor swojego wału – kliknij wał, żeby go wyróżnić.
           </p>
           <p>
-            Porównaj układy: jedno-, dwu- i trójwałowy oraz turbowentylator z <strong>przekładnią</strong>, w którym
-            wentylator kręci się ok. trzy razy wolniej niż napędzająca go turbina.
+            Porównaj różne układy: z jednym, dwoma albo trzema wałami (trzy ma np. silnik A350) oraz silnik z <strong>przekładnią</strong>, w którym wentylator kręci się ok. trzy razy wolniej niż napędzająca go turbina – jak przy redukcji biegów.
           </p>
           <p>
-            Wały opierają się na <strong>łożyskach</strong>: kulkowe przejmują siły wzdłuż osi (ciąg wentylatora), wałeczkowe –
-            tylko poprzeczne, i pozwalają wałom wydłużać się od ciepła. Siły trafiają przez stożkowe podpory na ramy silnika.
-            Za turbiną NP widać <strong>tylną ramę</strong>, a na obudowie turbin – rury <strong>aktywnej regulacji luzów</strong>,
-            które chłodzą obudowę, by szczelina nad łopatkami była jak najmniejsza.
+            Wały obracają się w <strong>łożyskach</strong>. Łożyska kulkowe przejmują siłę wzdłuż osi – to przez nie ciąg wentylatora trafia na obudowę silnika. Łożyska wałeczkowe trzymają wał tylko na boki i pozwalają mu się wydłużać, gdy się nagrzeje. Za turbiną widać <strong>tylną ramę</strong>, która podpiera wały, a na obudowie turbin – rury, którymi silnik chłodzi własną obudowę, żeby szczelina nad łopatkami była jak najmniejsza i nie uciekały nią gazy.
           </p>
         </>
       ),
@@ -3258,25 +3276,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            <strong>Stosunek obejścia (BPR)</strong> mówi, ile kilogramów powietrza omija rdzeń na każdy kilogram, który
-            przez niego przechodzi. Przesuwaj suwak – wentylator i gondola rosną, a rdzeń zostaje ten sam.
+            Większość powietrza zassanego przez wentylator <strong>omija</strong> środek silnika – po angielsku <em>bypass</em>. <strong>Stosunek obejścia</strong> mówi, ile kilogramów powietrza omija środek na każdy kilogram, który przez niego przechodzi. Przesuwaj suwak – wentylator i osłona rosną, a środek silnika zostaje ten sam.
           </p>
           <p>
-            Przy tej samej mocy rdzenia większy wentylator przyspiesza <strong>więcej powietrza, ale wolniej</strong>.
-            Energia, która zostaje w strumieniu za samolotem, to strata – im mniejsza różnica vⱼ − v₀, tym wyższa{' '}
-            <strong>sprawność napędowa</strong>, większy ciąg i mniejsze zużycie paliwa. Do tego wolniejszy strumień jest
-            dużo cichszy (hałas rośnie mniej więcej z 8. potęgą prędkości).
+            Przy tej samej mocy środka silnika większy wentylator rozpędza <strong>więcej powietrza, ale wolniej</strong>. To się opłaca: powietrze wyrzucone za samolot zbyt szybko unosi ze sobą zmarnowaną energię. Im mniejsza różnica między prędkością wylotu a prędkością lotu, tym mniej paliwa się marnuje. Do tego wolniejszy strumień jest dużo cichszy – hałas rośnie bardzo szybko wraz z prędkością spalin.
           </p>
           <p>
-            Czemu więc myśliwce mają małe obejście? Potrzebują dużej prędkości strumienia przy dużych prędkościach lotu i
-            smukłego kadłuba. A w samolotach pasażerskich wentylator ogranicza masa, opór gondoli i prześwit pod skrzydłem.
+            Dlaczego więc myśliwce mają małe obejście? Latają bardzo szybko i potrzebują szybkiego strumienia oraz smukłego kadłuba. A w samolotach pasażerskich wentylatora nie da się powiększać bez końca: rośnie masa, opór osłony i brakuje miejsca pod skrzydłem.
           </p>
           <p>
-            Zwróć uwagę, jak zmienia się budowa: bez wentylatora to <strong>turboodrzutowy</strong>; przy małym obejściu
-            gondola ciągnie się do końca, a oba strumienie mieszają się przed <strong>wspólną dyszą</strong>; przy dużym –
-            gondola jest krótka i zimny strumień ma własną dyszę. Przy BPR powyżej ok. 12 wentylator musiałby kręcić się za
-            wolno dla turbiny NP – dlatego pojawia się <strong>przekładnia</strong>. Na wykresie widać, że sprawność rośnie
-            coraz wolniej, a opór i masa coraz większej gondoli zjadają zysk.
+            Zobacz, jak zmienia się budowa. Bez wentylatora to silnik <strong>turboodrzutowy</strong>, jak w pierwszych odrzutowcach. Przy małym obejściu osłona ciągnie się do końca, a oba strumienie mieszają się przed <strong>wspólną dyszą</strong>. Przy dużym osłona jest krótka, a chłodne powietrze ma własny wylot. Gdy obejście przekracza ok. 12, wentylator musiałby kręcić się zbyt wolno dla napędzającej go turbiny – dlatego pojawia się <strong>przekładnia</strong>. Wykres pokazuje, że zysk rośnie coraz wolniej, a coraz cięższa i większa osłona w końcu go zjada.
           </p>
         </>
       ),
@@ -3303,17 +3312,13 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Po przyziemieniu <strong>rewers</strong> kieruje część strumienia skośnie do przodu – silnik zaczyna hamować
-            samolot. Odciąża to hamulce kół, co szczególnie pomaga na mokrym lub oblodzonym pasie.
+            Po przyziemieniu <strong>odwracacz ciągu</strong> (potocznie „rewers”) kieruje część strumienia z silnika skośnie do przodu – silnik zaczyna hamować samolot. Odciąża to hamulce kół, co szczególnie pomaga na mokrym albo oblodzonym pasie.
           </p>
           <p>
-            Przesuń suwak „Wysunięcie”. W turbowentylatorze zawraca się głównie <strong>zimny strumień</strong>: osłona
-            odsuwa się do tyłu, odsłania <strong>kaskady</strong>, a <strong>drzwi blokujące</strong> zamykają kanał
-            obejściowy. Rdzeń wciąż pcha do przodu, więc wypadkowa siła hamująca to tylko część pełnego ciągu.
+            Przesuń suwak „Wysunięcie”. W silniku z dużym wentylatorem zawraca się głównie <strong>chłodne powietrze z wentylatora</strong>: tylna część osłony odsuwa się, odsłania <strong>kratki</strong> z zakrzywionymi łopatkami, a klapki w środku zamykają drogę powietrza do tyłu. Środek silnika dalej pcha do przodu, więc siła hamowania to tylko część pełnego ciągu. Typ odwracacza możesz zmienić w polu „Typ”.
           </p>
           <p>
-            Rewers da się włączyć tylko na ziemi (czujniki obciążenia podwozia) i przy dźwigni na biegu jałowym. Przy ok. 60–70
-            węzłach pilot zmniejsza go do biegu jałowego, aby silnik nie zassał zawróconych spalin i zanieczyszczeń z pasa.
+            Odwracacz da się włączyć tylko na ziemi (czujniki w podwoziu muszą wyczuć ciężar samolotu) i tylko przy dźwigni ciągu ustawionej na minimum. Przy ok. 60–70 węzłach (110–130 km/h) pilot zmniejsza go do minimum, żeby silnik nie zassał z powrotem własnych spalin i brudu z pasa.
           </p>
         </>
       ),
@@ -3331,20 +3336,13 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Za turbiną w spalinach zostaje jeszcze sporo tlenu – w komorze spalono tylko część powietrza. <strong>Dopalacz</strong>{' '}
-            (używany w samolotach wojskowych i w Concorde) wtryskuje tam dodatkowe paliwo, a stabilizatory płomienia
-            utrzymują ogień w szybkim strumieniu. To zupełnie inny silnik niż pasażerski: smukły kadłub bez gondoli,
-            trzystopniowy wentylator, wąski kanał obejściowy i <strong>mieszalnik</strong>, który łączy oba strumienie przed
-            dopalaczem. Kliknij osłonę termiczną, kolektory, stabilizatory i płatki dyszy, aby poznać ich rolę.
+            Ta zakładka wychodzi poza samoloty pasażerskie. Za turbiną w spalinach zostaje jeszcze sporo tlenu – w komorze spala się tylko część powietrza. <strong>Dopalacz</strong> wtryskuje tam dodatkowe paliwo i spala je jeszcze raz. Mają go samoloty wojskowe (miał też naddźwiękowy Concorde). To zupełnie inny silnik niż pasażerski: smukły, bez wielkiej osłony, z małym wentylatorem i wąskim kanałem obejściowym. <strong>Mieszalnik</strong> łączy oba strumienie przed dopalaczem, a <strong>stabilizatory płomienia</strong> utrzymują ogień w szybkim strumieniu. Kliknij części, żeby poznać ich rolę.
           </p>
           <p>
-            Dysza jest <strong>zbieżno-rozbieżna</strong>: w gardzieli strumień osiąga prędkość dźwięku, a w rozszerzającej się
-            części za nią – naddźwiękową. Gorętsze gazy mają większą objętość, więc <strong>gardziel musi się otworzyć</strong>.
-            Włącz dopalacz przy wąskiej dyszy i zobacz ostrzeżenie, a potem otwórz dyszę do ok. 0,75.
+            Dysza najpierw się zwęża, potem rozszerza. W najwęższym miejscu (<strong>gardzieli</strong>) strumień osiąga prędkość dźwięku, a za nią – przekracza ją. Gorętsze gazy zajmują więcej miejsca, więc po włączeniu dopalacza <strong>gardziel musi się otworzyć</strong>. Włącz dopalacz przy wąskiej dyszy i zobacz ostrzeżenie, a potem otwórz dyszę do ok. 0,75.
           </p>
           <p>
-            Zysk: ok. 50% więcej ciągu. Koszt: kilkukrotnie większe zużycie paliwa – dlatego dopalacza używa się krótko.
-            Jasne „diamenty” w płomieniu to układ fal uderzeniowych w naddźwiękowym strumieniu.
+            Zysk: ok. 50% więcej ciągu. Koszt: kilka razy większe zużycie paliwa – dlatego dopalacza używa się tylko przez krótką chwilę, np. przy starcie myśliwca. Jasne „diamenty” w płomieniu to fale uderzeniowe w strumieniu szybszym niż dźwięk.
           </p>
         </>
       ),
@@ -3355,7 +3353,7 @@ export const jetEngine: Topic = {
       scene: StartScene,
       camera: CAM,
       controls: [
-        { type: 'toggle', key: 'run', label: 'Uruchom silnik', default: false },
+        { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
         {
           type: 'select',
           key: 'scenario',
@@ -3373,25 +3371,16 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Silnik odrzutowy nie zapali „na korbie” – najpierw trzeba rozkręcić rdzeń, aby sprężarka dała wystarczająco
-            dużo powietrza. Robi to <strong>rozrusznik pneumatyczny</strong> zasilany sprężonym powietrzem z APU albo z
-            drugiego silnika.
+            Silnika odrzutowego nie da się po prostu „odpalić”. Najpierw trzeba rozkręcić jego środek, żeby sprężarka tłoczyła dość powietrza do spalania. Robi to <strong>rozrusznik</strong> – mała turbinka napędzana sprężonym powietrzem z APU (pomocniczego silnika w ogonie) albo z drugiego, już pracującego silnika.
           </p>
           <p>
-            Włącz „Uruchom silnik” i patrz na model: najpierw rusza rdzeń (<strong>N2</strong>), potem wentylator. Przy ok.
-            20–25% N2 iskrzą świece i pojawia się płomień w komorze, skacze <strong>EGT</strong>, a przy ok. 50% N2 silnik
-            przyspiesza już sam.
+            Naciśnij „Rozpocznij” i patrz na model. Załoga ustawia przełączniki rozruchu – widać to w kokpicie w rogu ekranu. Najpierw rusza środek silnika (wał <strong>N2</strong>), potem wentylator. Przy ok. 20–25% obrotów iskrzą świece, w komorze pojawia się płomień i gwałtownie rośnie <strong>temperatura spalin</strong> (EGT). Przy ok. 50% silnik przyspiesza już sam, a rozrusznik się wyłącza.
           </p>
           <p>
-            W wyciętej ćwiartce widać całą instalację: powietrze z APU płynie przez <strong>zawór rozrusznika</strong> do
-            turbinki <strong>rozrusznika</strong>, ta przez <strong>skrzynkę napędów</strong> i wał promieniowy kręci wałem WP.
-            Ze skrzynki napędzany jest też <strong>regulator paliwa</strong>, a <strong>wzbudnica</strong> zasila świece. Paliwo (pomarańczowe kropki) płynie od pomp w zbiorniku skrzydła przez zawór LP i pylon – dopiero od chwili, gdy regulator je otworzy; tempo kropek odpowiada wskazaniu <strong>FF</strong> na ECAM.
+            W wyciętej ćwiartce widać całą instalację. Powietrze z APU płynie przez <strong>zawór rozrusznika</strong> do <strong>rozrusznika</strong>, a ten przez <strong>skrzynkę napędów</strong> (zestaw kół zębatych) i wałek kręci środkiem silnika. Ze skrzynki napędzany jest też <strong>regulator paliwa</strong>, a osobne urządzenie zasila świece. Paliwo (pomarańczowe kropki) płynie z pomp w zbiorniku w skrzydle, przez zawór odcinający i pylon – ale dopiero wtedy, gdy regulator je wpuści. Tempo kropek odpowiada przepływowi paliwa (FF) na ekranie w kokpicie.
           </p>
           <p>
-            Wypróbuj nieudane rozruchy. <strong>Gorący start</strong>: EGT przekracza limit. <strong>Zawis</strong>: silnik się
-            zapala, ale obroty zatrzymują się na ok. 40%. <strong>Mokry start</strong>: paliwo płynie, ale się nie zapala. W każdym
-            przypadku sterownik odcina paliwo, a rozrusznik dalej kręci silnik „na sucho”, by go schłodzić i przedmuchać.
-            Wartości na wskaźnikach są przykładowe.
+            Wypróbuj też nieudane rozruchy. <strong>Gorący start</strong>: temperatura spalin przekracza dozwoloną granicę. <strong>Zawis</strong>: silnik się zapala, ale obroty utykają na ok. 40%. <strong>Mokry start</strong>: paliwo płynie, ale się nie zapala. W każdym przypadku komputer silnika odcina paliwo, a rozrusznik dalej kręci silnikiem „na sucho”, żeby go schłodzić i wydmuchać resztki paliwa. Wartości na wskaźnikach są przykładowe.
           </p>
         </>
       ),
@@ -3406,21 +3395,13 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Pod osłoną rdzenia, w wyciętej ćwiartce, siedzi <strong>osprzęt</strong> – wszystko, czego silnik potrzebuje do pracy
-            i czym zasila samolot. Napęd bierze ze sprężarki WP: koło stożkowe na wale WP kręci <strong>wał promieniowy</strong>,
-            a ten – <strong>skrzynkę napędów</strong> z rzędem kół zębatych.
+            Pod osłoną, w wyciętej ćwiartce, jest <strong>osprzęt</strong> – urządzenia, których silnik potrzebuje do pracy, i te, którymi zasila samolot. Napędza je sam silnik: koło zębate na wale w środku silnika kręci <strong>wałek</strong>, a ten – <strong>skrzynkę napędów</strong> z rzędem kół zębatych.
           </p>
           <p>
-            Na skrzynce wiszą <strong>rozrusznik</strong>, <strong>generator IDG</strong>, <strong>pompa hydrauliczna</strong>,
-            <strong> prądnica PMA</strong> sterownika, <strong>pompa olejowa</strong> i <strong>pompa paliwa z regulatorem</strong>.
-            Obok leżą urządzenia bez własnego napędu: <strong>zbiornik</strong> i <strong>filtr oleju</strong>,
-            <strong> filtr paliwa</strong> i <strong>wymiennik ciepła paliwo–olej</strong>. Wyżej, na obudowie wentylatora, siedzi <strong>sterownik EEC</strong> – jego wiązki schodzą do rdzenia przez przegrodę kanału obejściowego przy pylonie.
+            Na skrzynce wiszą: <strong>rozrusznik</strong>, <strong>generator prądu</strong> dla samolotu, <strong>pompa hydrauliczna</strong> (dla sterów, podwozia i hamulców), mała <strong>prądnica</strong> zasilająca komputer silnika, <strong>pompa oleju</strong> i <strong>pompa paliwa z regulatorem</strong>. Obok są części bez własnego napędu: <strong>zbiornik</strong> i <strong>filtr oleju</strong>, <strong>filtr paliwa</strong> i <strong>wymiennik ciepła</strong>, w którym zimne paliwo chłodzi gorący olej. Wyżej, na obudowie wentylatora, siedzi <strong>komputer silnika</strong> – jego przewody schodzą do środka silnika obok pylonu.
           </p>
           <p>
-            Gdy silnik pracuje, widać dwa obiegi. <strong>Olej</strong> (żółte kropki) płynie ze zbiornika przez pompę i filtr do
-            komory łożysk, a wraca przez wymiennik, w którym oddaje ciepło. <strong>Paliwo</strong> (pomarańczowe) przychodzi z
-            zbiornika w skrzydle (pompy i zawór LP, prześwietlone) przez pylon, ogrzewa się w wymienniku, przechodzi przez filtr do regulatora i dalej do wtryskiwaczy – tempo kropek odpowiada wskazaniu FF na ECAM. Wyłącz silnik – oba
-            obiegi stają, bo pompy kręci ten sam wał WP.
+            Gdy silnik pracuje, widać dwa obiegi. <strong>Olej</strong> (żółte kropki) płynie ze zbiornika przez pompę i filtr do łożysk, a wraca przez wymiennik, w którym oddaje ciepło. <strong>Paliwo</strong> (pomarańczowe) przychodzi ze zbiornika w skrzydle przez pylon, ogrzewa się w wymienniku, przechodzi przez filtr i regulator do wtryskiwaczy. Tempo kropek odpowiada przepływowi paliwa (FF) na ekranie w kokpicie. Wyłącz silnik – oba obiegi stają, bo pompy napędza ten sam wał.
           </p>
         </>
       ),
@@ -3431,7 +3412,7 @@ export const jetEngine: Topic = {
       scene: FailureScene,
       camera: [3.6, 1.8, 10.2],
       controls: [
-        { type: 'toggle', key: 'run', label: 'Start symulacji', default: false },
+        { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false },
         {
           type: 'select',
           key: 'failure',
@@ -3453,18 +3434,13 @@ export const jetEngine: Topic = {
       body: (
         <>
           <p>
-            Silniki są dziś bardzo niezawodne – jeden wyłączony w locie przypada na setki tysięcy godzin pracy. Mimo to każdy
-            samolot dwusilnikowy musi bezpiecznie dolecieć na jednym, a załogi ćwiczą awarie na symulatorach.
+            Dzisiejsze silniki są bardzo niezawodne – wyłączenie w locie zdarza się raz na setki tysięcy godzin pracy. Mimo to każdy samolot dwusilnikowy musi bezpiecznie dolecieć na jednym silniku, a piloci regularnie ćwiczą awarie w symulatorach.
           </p>
           <p>
-            Wybierz awarię i włącz „Start symulacji”. Obserwuj model, wskaźniki (także <strong>ciśnienie i temperaturę
-            oleju</strong> oraz <strong>drgania</strong>) i komunikaty ostrzegawcze, jakie widzi załoga. Każdą awarię zdradza inny
-            zestaw objawów: pompaż – huki i skoki EGT, utrata oleju – spadające ciśnienie, uszkodzenie wirnika – drgania.
+            Wybierz awarię i naciśnij „Rozpocznij”. Załoga reaguje według listy czynności wyświetlonej na ekranie ECAM. W kokpicie w lewym dolnym rogu widać, jak przestawia dźwignie ciągu, wyłącznik silnika i przyciski gaśnicze – używany przełącznik jest podświetlony. Obserwuj model, wskaźniki (także <strong>ciśnienie i temperaturę oleju</strong> oraz <strong>drgania</strong>) i komunikaty, które widzą piloci. Każda awaria daje inne objawy: pompaż – huki i skoki temperatury, wyciek oleju – spadające ciśnienie oleju, uszkodzony wirnik – drgania.
           </p>
           <p>
-            Zwróć uwagę na <strong>wiatrakowanie</strong>: wyłączony silnik dalej się obraca, napędzany pędem powietrza. Dzięki
-            temu można go ponownie uruchomić w locie, a pompy napędzane ze skrzynki napędów jeszcze pracują. Przebiegi są
-            przykładowe, oparte na typowych zdarzeniach.
+            Zwróć uwagę na <strong>wiatrakowanie</strong>: wyłączony silnik dalej się obraca, kręcony pędem powietrza jak wiatrak. Dzięki temu w locie da się go ponownie uruchomić, a napędzane przez niego pompy jeszcze przez chwilę pracują. Przebiegi są przykładowe, wzorowane na typowych zdarzeniach.
           </p>
         </>
       ),
