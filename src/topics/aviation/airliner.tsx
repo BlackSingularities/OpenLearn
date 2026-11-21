@@ -96,7 +96,13 @@ const MATS: Record<string, { color: string; metal: number; rough: number; clear?
  * skrzydła nad silnikiem). Fragmenty poza zakresem rozpiętości z0…z1 są odrzucane w shaderze, a granica jest
  * poszarpana (szum zależny od położenia), więc wygląda jak wyrwany kawałek konstrukcji.
  */
-type ClipUniforms = { uInv: { value: THREE.Matrix4 }; uClip: { value: THREE.Vector3 } };
+/**
+ * Uniformy przycinania. `id` jest nowy przy każdym włączeniu przycinania: wchodzi do klucza programu shadera, więc
+ * materiał kompiluje się na nowo i wiąże świeże uniformy – inaczej three.js użyłby programu skompilowanego z
+ * poprzednim obiektem i część brył zostałaby przycięta według starej, „zamrożonej” granicy.
+ */
+type ClipUniforms = { id: number; uInv: { value: THREE.Matrix4 }; uClip: { value: THREE.Vector3 } };
+let clipSeq = 0;
 const ClipCtx = createContext<ClipUniforms | null>(null);
 const CLIP_GLSL = `
 uniform vec3 uClip;
@@ -141,7 +147,7 @@ function M({ k, side = THREE.FrontSide, opacity = 1, color, emit, matRef }: { k:
     <meshPhysicalMaterial
       ref={matRef}
       onBeforeCompile={onCompile}
-      customProgramCacheKey={clip ? () => 'plane-clip' : () => 'plane'}
+      customProgramCacheKey={clip ? () => `plane-clip-${clip.id}` : () => 'plane'}
       color={color ?? m.color}
       metalness={m.metal}
       roughness={m.rough}
@@ -1633,10 +1639,17 @@ function ClipCull({ children }: { children: ReactNode }) {
       if (m.userData.noCull) return;
       if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
       v.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld).applyMatrix4(clip.uInv.value);
-      // tylko chowamy – widoczność pozostałych brył zostaje taka, jak ustawia ją samo podwozie
-      // krawędź cięcia jest poszarpana w pasie lo…lo+amp – wszystko ze środkiem przed nim (prawa połowa) znika
+      // chowamy bryły poza wycinkiem i przywracamy tylko te, które schowaliśmy sami – resztą widoczności rządzi podwozie
+      // krawędź cięcia jest poszarpana w pasie lo…lo+amp – wszystko ze środkiem przed nim znika
       const amp = clip.uClip.value.z;
-      if ((lo > -50 && v.z < lo + amp) || (hi < 50 && v.z > hi - amp)) m.visible = false;
+      const out = (lo > -50 && v.z < lo + amp) || (hi < 50 && v.z > hi - amp);
+      if (out && m.visible) {
+        m.visible = false;
+        m.userData.clipHid = true;
+      } else if (!out && m.userData.clipHid) {
+        m.visible = true;
+        delete m.userData.clipHid;
+      }
     });
   });
   return <group ref={ref}>{children}</group>;
@@ -5055,7 +5068,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
   const show = (k: keyof NonNullable<AirlinerProps['layers']>) => layers[k] !== false;
   const root = useRef<THREE.Group>(null);
   // uniformy przycinania tworzone raz (shadery ich używają); zmiana zakresu – płynny dojazd, bez przebudowy
-  const clipU = useMemo<ClipUniforms | null>(() => (clip ? { uInv: { value: new THREE.Matrix4() }, uClip: { value: new THREE.Vector3(clip.z0, clip.z1, clip.amp ?? 0.8) } } : null), [Boolean(clip)]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clipU = useMemo<ClipUniforms | null>(() => (clip ? { id: ++clipSeq, uInv: { value: new THREE.Matrix4() }, uClip: { value: new THREE.Vector3(clip.z0, clip.z1, clip.amp ?? 0.8) } } : null), [Boolean(clip)]); // eslint-disable-line react-hooks/exhaustive-deps
   const clipT = useRef(clip);
   clipT.current = clip;
   const clipLast = useRef(0);
@@ -5067,8 +5080,9 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
     const now = performance.now();
     const dt = Math.min(0.05, (now - (clipLast.current || now)) / 1000);
     clipLast.current = now;
-    const k = 1 - Math.exp(-dt * 2.2);
     const u = clipU.uClip.value;
+    // zmiana na przeciwną połowę (np. z lewej na prawą) – od razu, bez przesuwania granicy przez cały samolot
+    const k = Math.abs(c.z0 - u.x) > 40 && Math.abs(c.z1 - u.y) > 40 ? 1 : 1 - Math.exp(-dt * 2.2);
     u.x += (c.z0 - u.x) * k;
     u.y += (c.z1 - u.y) * k;
     u.z += ((c.amp ?? 0.8) - u.z) * k;
