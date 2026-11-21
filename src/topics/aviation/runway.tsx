@@ -110,6 +110,13 @@ function labelTexture(text: string) {
 
 /* ---------- tekstury nawierzchni, trawy i fasady (wspólne, rysowane raz) ---------- */
 
+/**
+ * Kolejność płaskich warstw lotniska (większa liczba – głębiej): trawa, pobocza, drogi, płyta, pas, a na wierzchu
+ * linie i znaki. Przesunięcie głębi działa niezależnie od odległości kamery – bez niego warstwy leżące centymetry nad
+ * sobą migoczą z daleka (z-fighting).
+ */
+const lay = (n: number) => ({ polygonOffset: true, polygonOffsetFactor: n, polygonOffsetUnits: n * 4 });
+
 const TEX = new Map<string, THREE.CanvasTexture>();
 /** Tekstura z kanwy (rysowana raz) – kopia z własnym powtórzeniem dla każdego użycia. */
 function canvasTex(key: string, size: number, draw: (x: CanvasRenderingContext2D, n: number) => void, rep: [number, number]) {
@@ -467,16 +474,16 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
       {/* trawa wokół pasa, asfalt pasa, jaśniejsze pobocza i przedpola za końcami pasa z żółtymi strzałami */}
       <mesh position={[-L / 2, -0.05, -200]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
         <planeGeometry args={[L + 6000, 5000]} />
-        <meshStandardMaterial map={tx.grass} color={night ? '#1c241b' : '#ffffff'} roughness={1} />
+        <meshStandardMaterial {...lay(12)} map={tx.grass} color={night ? '#1c241b' : '#ffffff'} roughness={1} />
       </mesh>
       <mesh position={[-L / 2, -0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
         <planeGeometry args={[L, W]} />
-        <meshStandardMaterial map={tx.rwy} color={night ? '#666' : '#ffffff'} roughness={0.92} />
+        <meshStandardMaterial {...lay(2)} map={tx.rwy} color={night ? '#666' : '#ffffff'} roughness={0.92} />
       </mesh>
       {[-1, 1].map((sd) => (
         <mesh key={sd} position={[-L / 2, -0.02, sd * (W / 2 + 3.75)]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
           <planeGeometry args={[L + 240, 7.5]} />
-          <meshStandardMaterial color={night ? '#26282a' : '#62676c'} roughness={0.95} />
+          <meshStandardMaterial {...lay(9)} color={night ? '#26282a' : '#62676c'} roughness={0.95} />
         </mesh>
       ))}
       {[-1, 1].map((dir) => {
@@ -486,7 +493,7 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
           <group key={dir}>
             <mesh position={[-u, -0.015, 0]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
               <planeGeometry args={[120, W]} />
-              <meshStandardMaterial map={tx.pad} color={night ? '#666' : '#ffffff'} roughness={0.92} />
+              <meshStandardMaterial {...lay(3)} map={tx.pad} color={night ? '#666' : '#ffffff'} roughness={0.92} />
             </mesh>
             {[0, 1, 2].flatMap((k) =>
               [-1, 1].map((sd) => {
@@ -494,7 +501,7 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
                 return (
                   <mesh key={`${k}${sd}`} position={[-uu, 0.002, sd * W * 0.2]} rotation={[-Math.PI / 2, 0, -dir * sd * 0.62]} raycast={() => null}>
                     <planeGeometry args={[W * 0.5, 1.2]} />
-                    <meshStandardMaterial color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.2} />
+                    <meshStandardMaterial {...lay(-2)} color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.2} />
                   </mesh>
                 );
               }),
@@ -504,13 +511,13 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
       })}
       <instancedMesh ref={marks} args={[undefined, undefined, m.rects.length]} raycast={() => null} frustumCulled={false}>
         <boxGeometry args={[1, 0.004, 1]} />
-        <meshStandardMaterial color="#d9dde2" roughness={0.7} emissive="#d9dde2" emissiveIntensity={night ? 0 : 0.35} />
+        <meshStandardMaterial {...lay(-2)} color="#d9dde2" roughness={0.7} emissive="#d9dde2" emissiveIntensity={night ? 0 : 0.35} />
       </instancedMesh>
       {m.labels.map((l, i) => (
         // napis leży na nawierzchni; góra liter w głąb pasa (czytany przez lądującego na tym kierunku)
         <mesh key={l.text} position={[-l.u, 0.014, l.v]} rotation={[-Math.PI / 2, l.up > 0 ? Math.PI / 2 : -Math.PI / 2, 0, 'YXZ']} raycast={() => null}>
           <planeGeometry args={[W * 0.36, W * 0.72]} />
-          <meshStandardMaterial map={tex[i]} transparent depthWrite={false} roughness={0.7} emissive="#ffffff" emissiveMap={tex[i]} emissiveIntensity={night ? 0 : 0.35} />
+          <meshStandardMaterial {...lay(-2)} map={tex[i]} transparent depthWrite={false} roughness={0.7} emissive="#ffffff" emissiveMap={tex[i]} emissiveIntensity={night ? 0 : 0.35} />
         </mesh>
       ))}
       <instancedMesh ref={lights} args={[undefined, undefined, m.lights.length]} raycast={() => null} frustumCulled={false}>
@@ -528,33 +535,33 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
       {tw && (
         <>
           <mesh geometry={tw.arc} raycast={() => null}>
-            <meshStandardMaterial color={night ? '#26282c' : '#3a3e43'} roughness={0.92} side={THREE.DoubleSide} />
+            <meshStandardMaterial {...lay(5)} color={night ? '#26282c' : '#3a3e43'} roughness={0.92} side={THREE.DoubleSide} />
           </mesh>
           <mesh position={[-(EXIT.u + EXIT.R), -0.012, straight]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
             <planeGeometry args={[EXIT.w, -EXIT.R - EXIT.vEnd]} />
-            <meshStandardMaterial map={tx.twy} color={night ? '#666' : '#ffffff'} roughness={0.92} />
+            <meshStandardMaterial {...lay(5)} map={tx.twy} color={night ? '#666' : '#ffffff'} roughness={0.92} />
           </mesh>
           {/* pobocza drogi kołowania i podwójne żółte linie jej krawędzi */}
           {[-1, 1].map((sd) => (
             <mesh key={`sh${sd}`} position={[-(EXIT.u + EXIT.R) - sd * (EXIT.w / 2 + 5), -0.02, straight]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
               <planeGeometry args={[10, -EXIT.R - EXIT.vEnd]} />
-              <meshStandardMaterial color={night ? '#26282a' : '#62676c'} roughness={0.95} />
+              <meshStandardMaterial {...lay(9)} color={night ? '#26282a' : '#62676c'} roughness={0.95} />
             </mesh>
           ))}
           {[-1, 1].flatMap((sd) =>
             [0, 0.3].map((d) => (
               <mesh key={`${sd}${d}`} position={[-(EXIT.u + EXIT.R) - sd * (EXIT.w / 2 - 0.4 - d), 0.004, straight - 6]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
                 <planeGeometry args={[0.15, -EXIT.R - EXIT.vEnd - 12]} />
-                <meshStandardMaterial color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.2} />
+                <meshStandardMaterial {...lay(-2)} color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.2} />
               </mesh>
             )),
           )}
           <mesh geometry={tw.line} raycast={() => null}>
-            <meshStandardMaterial color="#d9a520" roughness={0.7} side={THREE.DoubleSide} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.25} />
+            <meshStandardMaterial {...lay(-2)} color="#d9a520" roughness={0.7} side={THREE.DoubleSide} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.25} />
           </mesh>
           <mesh position={[-(EXIT.u + EXIT.R), 0.004, straight]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
             <planeGeometry args={[0.3, -EXIT.R - EXIT.vEnd]} />
-            <meshStandardMaterial color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.25} />
+            <meshStandardMaterial {...lay(-2)} color="#d9a520" roughness={0.7} emissive="#d9a520" emissiveIntensity={night ? 0 : 0.25} />
           </mesh>
         </>
       )}
@@ -565,15 +572,78 @@ export function RunwayModel({ W, L = RWY.L, exit = true, eye }: { W: number; L?:
 }
 
 /** Prostokąt na płycie w układzie lotniska (u0…u1, v0…v1): nawierzchnia, linia, znak. */
-function Rect({ u0, u1, v0, v1, y = 0.003, color, map, emissive = 0, night = false }: { u0: number; u1: number; v0: number; v1: number; y?: number; color: string; map?: THREE.Texture; emissive?: number; night?: boolean }) {
+function Rect({ u0, u1, v0, v1, y = 0.003, color, map, emissive = 0, night = false, layer = -2 }: { u0: number; u1: number; v0: number; v1: number; y?: number; color: string; map?: THREE.Texture; emissive?: number; night?: boolean; layer?: number }) {
   return (
     <mesh position={[-(u0 + u1) / 2, y, (v0 + v1) / 2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
       <planeGeometry args={[Math.max(0.1, Math.abs(u1 - u0)), Math.max(0.1, Math.abs(v1 - v0))]} />
-      <meshStandardMaterial color={color} map={map} roughness={0.85} emissive={emissive ? color : '#000'} emissiveIntensity={night ? 0 : emissive} />
+      <meshStandardMaterial {...lay(layer)} color={color} map={map} roughness={0.85} emissive={emissive ? color : '#000'} emissiveIntensity={night ? 0 : emissive} />
     </mesh>
   );
 }
 const YEL = '#d9a520';
+
+type P2 = [number, number];
+/** Łamana a → b → c z narożnikiem b zaokrąglonym łukiem o promieniu r (punkty co ok. 1 m). */
+function filletPath(a: P2, b: P2, c: P2, r: number): P2[] {
+  const n = (d: P2): P2 => {
+    const l = Math.hypot(d[0], d[1]) || 1;
+    return [d[0] / l, d[1] / l];
+  };
+  const d0 = n([b[0] - a[0], b[1] - a[1]]);
+  const d1 = n([c[0] - b[0], c[1] - b[1]]);
+  const turn = Math.atan2(d0[0] * d1[1] - d0[1] * d1[0], d0[0] * d1[0] + d0[1] * d1[1]);
+  const tl = r * Math.tan(Math.abs(turn) / 2);
+  const p0: P2 = [b[0] - d0[0] * tl, b[1] - d0[1] * tl];
+  const nr: P2 = turn > 0 ? [-d0[1], d0[0]] : [d0[1], -d0[0]];
+  const cc: P2 = [p0[0] + nr[0] * r, p0[1] + nr[1] * r];
+  const a0 = Math.atan2(p0[1] - cc[1], p0[0] - cc[0]);
+  const k = Math.max(6, Math.round(Math.abs(turn) * r));
+  const out: P2[] = [a];
+  for (let i = 0; i <= k; i++) {
+    const an = a0 + (turn * i) / k;
+    out.push([cc[0] + Math.cos(an) * r, cc[1] + Math.sin(an) * r]);
+  }
+  out.push(c);
+  return out;
+}
+/** Pasek wzdłuż łamanej (u, v) o szerokości 2·hw – linie łuków na nawierzchni. */
+function ribbonGeo(pts: P2[], hw: number) {
+  const pos: number[] = [];
+  const idx: number[] = [];
+  pts.forEach((p, i) => {
+    const q = pts[Math.min(pts.length - 1, i + 1)];
+    const o = pts[Math.max(0, i - 1)];
+    const du = q[0] - o[0];
+    const dv = q[1] - o[1];
+    const l = Math.hypot(du, dv) || 1;
+    const nu = -dv / l;
+    const nv = du / l;
+    pos.push(-(p[0] + nu * hw), 0, p[1] + nv * hw, -(p[0] - nu * hw), 0, p[1] - nv * hw);
+    if (i > 0) {
+      const b = (i - 1) * 2;
+      idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    }
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(Array.from({ length: pos.length / 3 }, () => [0, 1, 0]).flat(), 3));
+  g.setIndex(idx);
+  return g;
+}
+/** Żółte linie prowadzące po łukach (skręty między drogami, wjazd na pas i na stanowiska). */
+function LeadLines({ paths, night }: { paths: P2[][]; night: boolean }) {
+  const geos = useMemo(() => paths.map((p) => ribbonGeo(p, 0.15)), [paths]);
+  useEffect(() => () => geos.forEach((g) => g.dispose()), [geos]);
+  return (
+    <group position={[0, 0.004, 0]}>
+      {geos.map((g, i) => (
+        <mesh key={i} geometry={g} raycast={() => null}>
+          <meshStandardMaterial {...lay(-3)} color={YEL} roughness={0.7} side={THREE.DoubleSide} emissive={YEL} emissiveIntensity={night ? 0 : 0.25} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
 /** Tablica informacyjna przy drodze kołowania (czerwona z białym napisem – oznaczenie pasa przed punktem oczekiwania). */
 function signTexture(text: string, bg: string, fg: string) {
@@ -763,7 +833,7 @@ export function AirportModel({ W = 45 }: { W?: number }) {
   const night = useContext(NightCtx);
   const S = STAND;
   const w = TWY_W;
-  const apron = { u0: TERM.u0, u1: EXIT.u + EXIT.R - w / 2 - 6, v0: TERM.v, v1: TWY_V - w / 2 - 10 };
+  const apron = { u0: TERM.u0, u1: EXIT.u + EXIT.R - w / 2 - 6, v0: TERM.v, v1: TWY_V - w / 2 };
   const tx = useMemo(
     () => ({
       apron: concreteTex([(apron.u1 - apron.u0) / 40, (apron.v1 - apron.v0) / 40]),
@@ -796,6 +866,21 @@ export function AirportModel({ W = 45 }: { W?: number }) {
     return { blue, green, red, masts, windows };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const cols = (pts: number[], c: [number, number, number]) => pts.map((_, i) => c[i % 3]);
+  // łuki osi dróg kołowania: zjazd ↔ droga równoległa, droga ↔ łącznik A1, A1 → oś pasa (w obie strony),
+  // droga ↔ linia wjazdu na stanowisko A1 (z obu kierunków), droga zjazdu → linia wjazdu na stanowisko A2
+  const lead = useMemo<P2[][]>(() => {
+    const X = EXIT.u + EXIT.R;
+    return [
+      filletPath([X, TWY_V + 50], [X, TWY_V], [X - 80, TWY_V], 40),
+      filletPath([X - 80, TWY_V], [X, TWY_V], [X, TWY_V - 60], 40),
+      filletPath([A1_U + 80, TWY_V], [A1_U, TWY_V], [A1_U, TWY_V + 50], 40),
+      filletPath([A1_U, -70], [A1_U, 0], [A1_U + 90, 0], 36),
+      filletPath([A1_U, -70], [A1_U, 0], [A1_U - 50, 0], 36),
+      filletPath([GATE.u + 80, TWY_V], [GATE.u, TWY_V], [GATE.u, TWY_V - 70], 34),
+      filletPath([GATE.u - 80, TWY_V], [GATE.u, TWY_V], [GATE.u, TWY_V - 70], 34),
+      filletPath([X, S.v + 60], [X, S.v], [X - 70, S.v], 30),
+    ];
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const mastPts = d.masts.flatMap(([u, v]) => [-u, 26, v]);
   // stanowiska: linia wjazdu (od osi drogi), linia zatrzymania przedniego koła i czerwone linie ograniczenia sprzętu
   const stand = (u: number, from: number, to: number, stop: number, along: 'v' | 'u') =>
@@ -812,16 +897,24 @@ export function AirportModel({ W = 45 }: { W?: number }) {
     <group>
       <RunwayModel W={W} />
       {/* droga równoległa i łącznik A1 do progu: asfalt, pobocza, oś i podwójne krawędzie */}
-      <Rect u0={A1_U - w / 2 - 10} u1={EXIT.u + EXIT.R + w / 2} v0={TWY_V - w / 2 - 10} v1={TWY_V + w / 2 + 10} y={-0.025} color={night ? '#26282a' : '#62676c'} />
-      <Rect u0={A1_U - w / 2} u1={EXIT.u + EXIT.R + w / 2} v0={TWY_V - w / 2} v1={TWY_V + w / 2} y={-0.012} color={night ? '#666' : '#ffffff'} map={tx.par} />
-      <Rect u0={A1_U - w / 2 - 10} u1={A1_U + w / 2 + 10} v0={TWY_V} v1={-W / 2 - 7.5} y={-0.024} color={night ? '#26282a' : '#62676c'} />
-      <Rect u0={A1_U - w / 2} u1={A1_U + w / 2} v0={TWY_V} v1={-W / 2} y={-0.011} color={night ? '#666' : '#ffffff'} map={tx.a1} />
+      <Rect u0={A1_U - w / 2 - 10} u1={EXIT.u + EXIT.R + w / 2} v0={TWY_V - w / 2 - 10} v1={TWY_V + w / 2 + 10} y={-0.025} color={night ? '#26282a' : '#62676c'} layer={10} />
+      <Rect u0={A1_U - w / 2} u1={EXIT.u + EXIT.R + w / 2} v0={TWY_V - w / 2} v1={TWY_V + w / 2} y={-0.012} color={night ? '#666' : '#ffffff'} map={tx.par} layer={6} />
+      <Rect u0={A1_U - w / 2 - 10} u1={A1_U + w / 2 + 10} v0={TWY_V} v1={-W / 2 - 7.5} y={-0.024} color={night ? '#26282a' : '#62676c'} layer={10} />
+      <Rect u0={A1_U - w / 2} u1={A1_U + w / 2} v0={TWY_V} v1={-W / 2} y={-0.011} color={night ? '#666' : '#ffffff'} map={tx.a1} layer={6.5} />
       <Rect u0={A1_U + w / 2} u1={EXIT.u + EXIT.R} v0={TWY_V - 0.15} v1={TWY_V + 0.15} color={YEL} emissive={0.25} night={night} />
       <Rect u0={A1_U - 0.15} u1={A1_U + 0.15} v0={TWY_V + w / 2} v1={-W / 2 - 1} color={YEL} emissive={0.25} night={night} />
       {[-1, 1].flatMap((sd) =>
         [0, 0.3].map((dd) => (
           <group key={`${sd}${dd}`}>
-            <Rect u0={A1_U + w / 2 + 2} u1={EXIT.u + EXIT.R - w / 2 - 2} v0={TWY_V + sd * (w / 2 - 0.4 - dd) - 0.075} v1={TWY_V + sd * (w / 2 - 0.4 - dd) + 0.075} color={YEL} emissive={0.2} night={night} />
+            {(sd > 0
+              ? [[A1_U + w / 2 + 2, EXIT.u + EXIT.R - w / 2 - 2]]
+              : [
+                  [A1_U + w / 2 + 2, apron.u0 - 4],
+                  [apron.u1 + 4, EXIT.u + EXIT.R - w / 2 - 2],
+                ]
+            ).map(([a0, a1]) => (
+              <Rect key={a0} u0={a0} u1={a1} v0={TWY_V + sd * (w / 2 - 0.4 - dd) - 0.075} v1={TWY_V + sd * (w / 2 - 0.4 - dd) + 0.075} color={YEL} emissive={0.2} night={night} />
+            ))}
             <Rect u0={A1_U + sd * (w / 2 - 0.4 - dd) - 0.075} u1={A1_U + sd * (w / 2 - 0.4 - dd) + 0.075} v0={TWY_V + w / 2 + 2} v1={-W / 2 - 3} color={YEL} emissive={0.2} night={night} />
           </group>
         )),
@@ -836,13 +929,12 @@ export function AirportModel({ W = 45 }: { W?: number }) {
           <Rect u0={A1_U - w / 2 + i * 3.4} u1={A1_U - w / 2 + i * 3.4 + 2} v0={-81} v1={-80.7} color={YEL} emissive={0.25} night={night} />
         </group>
       ))}
+      <LeadLines paths={lead} night={night} />
       <Sign u={A1_U - w / 2 - 6} v={-79} text={`${RWY.name}-${RWY.opp}`} bg="#c62828" fg="#ffffff" yaw={Math.PI / 2} />
       <Sign u={A1_U + w / 2 + 6} v={-79} text="A1" bg="#111111" fg="#fde047" yaw={Math.PI / 2} />
       <Sign u={EXIT.u + EXIT.R + w / 2 + 7} v={TWY_V + 20} text="A" bg="#fde047" fg="#111111" />
       {/* płyta postojowa: beton w płytach */}
-      <Rect u0={apron.u0} u1={apron.u1} v0={apron.v0} v1={apron.v1} y={-0.008} color={night ? '#555' : '#ffffff'} map={tx.apron} />
-      {/* łączniki płyty z drogą równoległą */}
-      <Rect u0={apron.u0 + 20} u1={apron.u1 - 10} v0={apron.v1} v1={TWY_V - w / 2} y={-0.01} color={night ? '#555' : '#ffffff'} map={tx.apron} />
+      <Rect u0={apron.u0} u1={apron.u1} v0={apron.v0} v1={apron.v1} y={-0.008} color={night ? '#555' : '#ffffff'} map={tx.apron} layer={4} />
       {/* stanowisko A1 (cykl obsługi: nos w stronę terminalu) */}
       {stand(GATE.u, TWY_V, GATE.stopV - 1, GATE.stopV, 'v')}
       {/* stanowisko A2 (moduły kadłuba i świateł: samolot stoi nosem w stronę drogi kołowania) */}

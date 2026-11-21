@@ -43,8 +43,8 @@ const HINGE: V3 = [RADOME_X, fp(RADOME_X, 0)[1], 0];
 /** Kąt otwarcia owiewki (rad). */
 const OPEN_ANG = 95 * DEG;
 /** Antena: środek płyty (oś obrotu w poziomie leży 0,3 m za płytą, na wsporniku przy grodzi), promień płyty. */
-const ANT_Y = fuselageSection(-35.6).yc;
-const ANT_PIVOT: V3 = [-35.33, ANT_Y, 0];
+const ANT_Y = fuselageSection(RADOME_X - 0.5).yc;
+const ANT_PIVOT: V3 = [RADOME_X - 0.23, ANT_Y, 0];
 const ANT_ARM = 0.3;
 const ANT_R = 0.38;
 /** Środek płyty anteny w układzie samolotu (przy kącie 0) – stąd w scenie wychodzi wiązka. */
@@ -250,7 +250,8 @@ export type RadarSim = RadarView & {
   /** Środek przedniej powierzchni płyty anteny w scenie (z kołysaniem samolotu i przemiataniem) – stąd wychodzi wiązka. */
   antPos: THREE.Vector3;
 };
-const newSim = (): RadarSim => ({
+/** Stan początkowy radaru (antena na wprost) – także dla radaru wbudowanego w samolot poza modułem radaru. */
+export const newRadarSim = (): RadarSim => ({
   ac: { X: 0, Y: 0, hdg: 0, alt: 35000 },
   az: 0,
   dir: 1,
@@ -280,7 +281,7 @@ const K_PWS = 7;
 
 /** Wspólny stan radaru dla modelu, miniatury i ekranu; w zakładkach lotu ustawia też pozę samolotu. */
 export function useRadarDriver(mode: RadarMode | null, params: Params, direct?: DirectPose) {
-  const sim = useRef<RadarSim>(newSim());
+  const sim = useRef<RadarSim>(newRadarSim());
   useFrame((_, dtRaw) => {
     if (!mode) return;
     const dt = Math.min(0.05, dtRaw);
@@ -288,7 +289,7 @@ export function useRadarDriver(mode: RadarMode | null, params: Params, direct?: 
     const conf = radarConf(mode, params);
     const key = `${mode}|${conf.scenario}|${params.side ?? ''}|${params.pwsOn ?? ''}`;
     if (key !== s.key) {
-      Object.assign(s, newSim(), { key, open: s.open, az: s.az, dir: s.dir });
+      Object.assign(s, newRadarSim(), { key, open: s.open, az: s.az, dir: s.dir });
       s.ac.alt = conf.alt;
     }
     if (mode !== 'pws' && mode !== 'avoid') s.ac.alt = conf.alt;
@@ -415,7 +416,11 @@ function stepPws(s: RadarSim, dt: number, pwsOn: boolean) {
 /* ======================= model w nosie ======================= */
 
 /** Owiewka, gródź, antena z napędem, nadajnik-odbiornik i anteny ILS – w układzie samolotu. */
-export function RadarModel({ mode, sim }: { mode: RadarMode; sim: MutableRefObject<RadarSim> }) {
+/**
+ * Radar w nosie (układ samolotu). `section` – do przekroju kadłuba: bez owiewki i grodzi (rysuje je kadłub), tylko
+ * antena, napędy i nadajniki. `detail` – poziom szczegółów: bez niego (kamera daleko) bez anten ILS, falowodu i żeberek.
+ */
+export function RadarModel({ mode, sim, section = false, detail = true }: { mode: RadarMode; sim: MutableRefObject<RadarSim>; section?: boolean; detail?: boolean }) {
   const g = useMemo(() => {
     const outer = radomeGeo(0);
     const inner = radomeGeo(0.035);
@@ -456,14 +461,16 @@ export function RadarModel({ mode, sim }: { mode: RadarMode; sim: MutableRefObje
   return (
     <group>
       {/* przednia gródź ciśnieniowa (podkład antykorozyjny) z usztywnieniami */}
-      <mesh geometry={g.wall}>
-        <meshStandardMaterial color="#a9a66a" roughness={0.8} side={THREE.DoubleSide} />
-      </mesh>
-      {g.ribs.map((r, i) => (
+      {!section && (
+        <mesh geometry={g.wall}>
+          <meshStandardMaterial color="#a9a66a" roughness={0.8} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {!section && detail && g.ribs.map((r, i) => (
         <Line key={i} points={r} color="#8b874f" lineWidth={3} />
       ))}
       {/* owiewka na zawiasie u góry: na ziemi otwarta, w locie zamknięta i półprzezroczysta (żeby było widać antenę) */}
-      <group ref={hinge} position={HINGE}>
+      {!section && <group ref={hinge} position={HINGE}>
         <group position={[-HINGE[0], -HINGE[1], -HINGE[2]]}>
           <mesh geometry={g.outer}>
             <meshStandardMaterial ref={outerMat} color="#eef1f4" roughness={0.45} transparent={flight} opacity={flight ? 0.16 : 1} depthWrite={!flight} side={THREE.FrontSide} />
@@ -477,7 +484,7 @@ export function RadarModel({ mode, sim }: { mode: RadarMode; sim: MutableRefObje
             <Line key={i} points={p} color="#4a5058" lineWidth={2.2} dashed dashSize={0.07} gapSize={0.03} transparent opacity={flight ? 0.35 : 1} />
           ))}
         </group>
-      </group>
+      </group>}
       {/* wspornik anteny na grodzi i silnik obrotu w poziomie */}
       <mesh position={[RADOME_X - 0.11, ANT_Y, 0]} rotation={[0, 0, Math.PI / 2]}>
         <cylinderGeometry args={[0.17, 0.2, 0.22, 24]} />
@@ -534,7 +541,7 @@ export function RadarModel({ mode, sim }: { mode: RadarMode; sim: MutableRefObje
           ))}
         </group>
       ))}
-      <Line
+      {detail && <><Line
         points={[
           [RADOME_X - 0.16, ANT_Y - 0.57, -0.42],
           [RADOME_X - 0.16, ANT_Y - 0.4, -0.2],
@@ -558,6 +565,7 @@ export function RadarModel({ mode, sim }: { mode: RadarMode; sim: MutableRefObje
         <boxGeometry args={[0.06, 0.06, 0.8]} />
         <meshStandardMaterial color="#c9ccd0" metalness={0.4} roughness={0.4} />
       </mesh>
+      </>}
     </group>
   );
 }
@@ -1248,7 +1256,7 @@ export function RadarLab({ mode, sim, params }: { mode: RadarMode; sim: MutableR
 
 /** Numery zakładek na modelu – przy części nosa, o której jest zakładka (owiewka otwarta). */
 export const RADAR_SPOTS: V3[] = [
-  [-35.2, 0.9, 1.2], // budowa – gródź u góry
+  [RADOME_X + 0.05, fp(RADOME_X, 0)[1] - 0.2, 1.0], // budowa – gródź u góry
   [ANT_CENTER[0] - 0.15, ANT_Y + 0.1, 0.55], // wiązka – płyta anteny
   [-36.1, -1.2, 1.1], // kolory – przed anteną
   [ANT_PIVOT[0], ANT_Y - 0.3, 0.6], // pochylenie – napęd

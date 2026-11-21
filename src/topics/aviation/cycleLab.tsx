@@ -17,10 +17,12 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import type { PartModule, SceneProps, Step } from '../../lib/types';
 import { InfoPortal } from '../../lib/plot';
+import { useSceneHidden } from '../../lib/topicNav';
 import { AIRBUS, CockpitDock, Ecam, Nd, Pfd } from '../../components/cockpit';
-import { Spd, speedInText, useSpeed } from '../../components/ui';
+import { speedInText, useSpeed, useSpeedUnit } from '../../components/ui';
 import {
   Airliner,
   CARGO_DOORS,
@@ -212,6 +214,8 @@ const R_IN = makeRoute(
 const S_TD = 450 - 300;
 /** Samolot opuścił pas (cały za linią krawędzi drogi startowej). */
 const S_VAC = sOf(R_IN, (q) => q.v < -58);
+/** Początek skrętu z drogi równoległej w linię wjazdu na stanowisko (łuk przed linią wjazdu). */
+const S_TURN_IN = sOf(R_IN, (q) => q.v <= TWY_V + 0.5 && q.u < GATE.u + 45);
 /** Wypychanie: tyłem od terminalu na drogę kołowania, z obrotem nosem w stronę progu pasa. */
 const R_PUSH = makeRoute(
   [
@@ -276,6 +280,8 @@ export type CycSt = {
   gpuPlug: boolean;
   /** Załadunek: czas scenariusza ładowni (jak w module kadłuba) albo null – brak podnośników. */
   cargoT: number | null;
+  /** Rozładunek (kontenery z ładowni na wózki), a nie załadunek. */
+  unload: boolean;
   catering: [number, number];
   lav: number;
   water: number;
@@ -336,6 +342,7 @@ function parked(): CycSt {
     gpu: 1,
     gpuPlug: true,
     cargoT: null,
+    unload: false,
     catering: [0, 0],
     lav: 0,
     water: 0,
@@ -402,7 +409,7 @@ const SEG_ARRIVE: Seg = {
   events: [
     [0, 'Samolot zjechał z pasa. Kontroler ruchu naziemnego podaje trasę: drogą kołowania równoległą do pasa do stanowiska przy terminalu.'],
     [6, 'Kołowanie z prędkością ok. 30 km/h na jednym lub dwóch silnikach. Światła kołowania i zjazdowe świecą, stroboskopy są wyłączone.'],
-    [IN_T * 0.55, 'Skręt w linię wjazdu. Żółta linia na płycie prowadzi przednie koło dokładnie na miejsce postoju.'],
+    [IN_T * 0.55, 'Skręt w linię wjazdu. Żółta linia na płycie prowadzi przednie koło dokładnie na miejsce postoju. Na skręcie gasną światła zjazdowe, a zaraz potem światło kołowania – żeby nie oślepiać obsługi.'],
     [IN_T * 0.75, 'Na ścianie terminalu świeci tablica dokowania: pokazuje odległość do zatrzymania i czy samolot jest na osi. Kapitan jedzie bardzo wolno.'],
     [IN_T, '„STOP” na tablicy – kapitan zatrzymuje samolot i włącza hamulec postojowy.'],
   ],
@@ -422,7 +429,9 @@ const SEG_ARRIVE: Seg = {
     onRoute(st, R_IN, s);
     const vNow = RUN_IN.v(t);
     st.n1 = t < IN_T ? 21 + (vNow < 1.5 ? 0 : 1.5) : Math.max(0, 21 - (t - IN_T) * 6);
-    st.lights = { ...LT_OFF, nav: true, logo: true, beacon: true, taxi: t < IN_T - 6, turnoff: t < IN_T * 0.62 };
+    // przy skręcie w stronę stanowiska gasną światła zjazdowe, chwilę później światło kołowania – żeby nie oślepiać
+    // obsługi naziemnej i nie zasłaniać pilotowi tablicy dokowania
+    st.lights = { ...LT_OFF, nav: true, logo: true, beacon: true, taxi: s < S_TURN_IN + 30, turnoff: s < S_TURN_IN };
     st.mech = MECH0;
     st.chocks = 0;
     st.cones = 0;
@@ -547,8 +556,9 @@ const SEG_UNLOAD: Seg = {
   ],
   at(t) {
     const st = turnBase();
-    // ten sam scenariusz ładowni co przy załadunku, puszczony od końca: kontenery wyjeżdżają z ładowni na wózki
-    st.cargoT = Math.max(0, CARGO_TEND - Math.max(0, t - 1));
+    // rozładunek: puste pociągi podjeżdżają, kontenery wyjeżdżają z ładowni na podnośnik i na kolejne wózki
+    st.cargoT = Math.max(0, t - 1);
+    st.unload = true;
     st.pax = 0;
     st.clock = 6 + (24 * t) / UNLOAD_T;
     return st;
@@ -639,6 +649,7 @@ const SEG_FUEL: Seg = {
 /* ----- 7. obchód samolotu ----- */
 /** Trasa obchodu (układ stanowiska): od nosa wzdłuż lewej burty, ogon, prawa burta i z powrotem do nosa. */
 const ENG = engineOrigin();
+const ENG_POS = ENG;
 const WALK: { p: P2; note: string }[] = [
   { p: [NOSE_X - 4, 0], note: 'nos: osłona radaru, czujniki ciśnienia (rurki Pitota) i czujniki kąta natarcia – czyste, nieuszkodzone' },
   { p: [NOSE_X - 0.5, 2.2], note: 'podwozie przednie: opony, ugięcie amortyzatora, brak wycieków płynu' },
@@ -1106,6 +1117,117 @@ const SEG_ROLL: Seg = {
 };
 
 export const SEGS: Seg[] = [SEG_ARRIVE, SEG_SECURE, SEG_BRIDGE, SEG_UNLOAD, SEG_SERVICE, SEG_FUEL, SEG_WALK, SEG_LOAD, SEG_READY, SEG_PUSH, SEG_TAXI, SEG_TAKEOFF, SEG_FLY, SEG_LAND, SEG_ROLL];
+/** Początki odcinków na wspólnej osi czasu i długość całego cyklu (s). */
+const SEG_T0 = SEGS.reduce<number[]>((a, _, i) => [...a, i ? a[i - 1] + SEGS[i - 1].dur : 0], []);
+const TOTAL = SEG_T0[SEGS.length - 1] + SEGS[SEGS.length - 1].dur;
+/** Odcinek i czas w nim z czasu cyklu (cykl się zapętla: po zjeździe z pasa – znowu wjazd na stanowisko). */
+function segAt(T: number): { i: number; t: number } {
+  const x = ((T % TOTAL) + TOTAL) % TOTAL;
+  for (let i = SEGS.length - 1; i >= 0; i--) if (x >= SEG_T0[i]) return { i, t: Math.min(SEGS[i].dur, x - SEG_T0[i]) };
+  return { i: 0, t: 0 };
+}
+
+/* ---------- dymki: przy miejscu, w którym dzieje się opisywana rzecz ---------- */
+
+/**
+ * Punkt dymka: w układzie samolotu albo stanowiska (gate – rzeczy stojące na płycie), stały albo ruchomy, oraz ujęcie
+ * kamery na to miejsce: kierunek od punktu do kamery (układ samolotu) i odległość. dir === 'out' – kamera od strony
+ * zewnętrznej (od osi samolotu na zewnątrz), np. przy pilocie na obchodzie.
+ */
+type Anchor = { p: V3 | ((st: CycSt) => V3); gate?: boolean; dir: V3 | 'out'; d: number };
+const sillUp = (i: number, side = 1): V3 => {
+  const x = PAX_DOOR.xs[i];
+  const q = fusPt(x, fusTheta(x, FLOOR + 1.6), 0.4);
+  return [q[0], q[1] + 0.6, q[2] * side];
+};
+const ANCH: Record<string, Anchor> = {
+  cockpit: { p: [-35.2, 2.2, 1.2], dir: [-1, 0.4, 0.55], d: 24 },
+  beacon: { p: [-6, 3.6, 0], dir: [0.35, 0.75, 0.6], d: 55 },
+  nose: { p: [NOSE_X - 1.5, G + 2.4, 0], dir: [-0.75, 0.25, 0.6], d: 17 },
+  lead: { p: [NOSE_X - 9, G + 0.8, 0], dir: [-0.2, 0.75, 0.65], d: 42 },
+  board: { p: [-47.6, G + 12.4, 0], gate: true, dir: [1, 0.25, 0.45], d: 38 },
+  cones: { p: [ENG_POS[0] - 3.2, G + 1.4, -ENG_POS[2]], gate: true, dir: [-0.45, 0.7, -0.6], d: 42 },
+  gpu: { p: [-33.5, G + 2.4, -4.6], gate: true, dir: [-0.6, 0.45, -0.75], d: 16 },
+  mlg: { p: [MLG.x, G + 2.6, -MLG.z - 1], dir: [0.15, 0.2, -1], d: 17 },
+  door1L: { p: sillUp(0), dir: [0.15, 0.3, 1], d: 22 },
+  door2L: { p: sillUp(1), dir: [0.35, 0.35, 1], d: 24 },
+  cargoF: { p: [CARGO_DOORS[0], -1.2, -4.2], dir: [0.25, 0.35, -1], d: 26 },
+  cargoA: { p: [CARGO_DOORS[1], -1.4, -4.2], dir: [-0.25, 0.35, -1], d: 26 },
+  cat1R: { p: sillUp(0, -1), dir: [-0.25, 0.25, -1], d: 24 },
+  cat4R: { p: sillUp(3, -1), dir: [0.3, 0.25, -1], d: 24 },
+  lav: { p: [26, G + 3.2, -7], gate: true, dir: [0.5, 0.3, -1], d: 20 },
+  water: { p: [-22, G + 3.2, -7], gate: true, dir: [-0.5, 0.3, -1], d: 20 },
+  fuel: { p: [REFUEL_LAY.cpl[0], REFUEL_LAY.cpl[1] + 0.6, REFUEL_LAY.cpl[2]], gate: true, dir: [-0.75, 0.25, -0.8], d: 17 },
+  walker: { p: (st) => { const w = walkPos(st.walk ?? 0); return [w.p[0], G + 2.4, w.p[1]]; }, gate: true, dir: 'out', d: 15 },
+  apu: { p: [34.5, 1.6, 0], dir: [0.85, 0.35, 0.55], d: 24 },
+  tug: { p: [NOSE_X - 9, G + 3, 0], dir: [-0.8, 0.45, -0.55], d: 30 },
+  engL: { p: [ENG_POS[0] - 1, ENG_POS[1] + 2, ENG_POS[2]], dir: [-0.75, 0.25, 0.75], d: 19 },
+  engR: { p: [ENG_POS[0] - 1, ENG_POS[1] + 2, -ENG_POS[2]], dir: [-0.75, 0.25, -0.75], d: 19 },
+  flaps: { p: [9, 0.4, 14], dir: [0.75, 0.55, 0.55], d: 24 },
+  wing: { p: [6, 0.6, 24], dir: [0.3, 0.65, 0.9], d: 40 },
+  plane: { p: [-14, 5, 0], dir: [0.6, 0.3, 0.8], d: 95 },
+};
+/** Punkt dymka każdego zdarzenia (w kolejności zdarzeń odcinka). */
+const ANCHORS: Record<string, string[]> = {
+  arrive: ['cockpit', 'nose', 'lead', 'board', 'cockpit'],
+  secure: ['cockpit', 'beacon', 'nose', 'cones', 'gpu', 'cockpit'],
+  bridge: ['door1L', 'door1L', 'door2L', 'door1L', 'door2L', 'door1L'],
+  unload: ['cargoF', 'cargoF', 'cargoA', 'cargoA'],
+  service: ['door1L', 'cat1R', 'cat4R', 'lav', 'water', 'cat1R'],
+  fuel: ['cockpit', 'fuel', 'fuel', 'fuel', 'cockpit'],
+  walk: WALK.map(() => 'walker'),
+  load: ['cargoF', 'cargoA', 'door2L', 'door1L'],
+  ready: ['apu', 'gpu', 'door1L', 'door2L', 'tug', 'nose', 'beacon'],
+  push: ['tug', 'engR', 'tug', 'engL', 'nose', 'tug'],
+  taxi: ['nose', 'flaps', 'wing', 'nose', 'cockpit'],
+  takeoff: ['engL', 'cockpit', 'cockpit', 'nose', 'mlg', 'mlg'],
+  fly: ['engL', 'plane', 'plane', 'engL', 'mlg'],
+  land: ['cockpit', 'cockpit', 'nose', 'mlg'],
+  roll: ['engL', 'engL', 'mlg', 'flaps', 'plane'],
+};
+/** Punkt stanowiska (układ samolotu zaparkowanego) w układzie samolotu w jego bieżącym położeniu na lotnisku. */
+function gateToPlane(p: V3, st: CycSt): V3 {
+  // stanowisko → lotnisko (x = −u, z = v) → układ samolotu (przesunięcie i obrót o kurs)
+  const c = Math.cos(GATE_PSI);
+  const sn = Math.sin(GATE_PSI);
+  const X = -GATE.u + c * p[0] + sn * p[2];
+  const Z = GATE.v - sn * p[0] + c * p[2];
+  const dx = X + st.u;
+  const dz = Z - st.v;
+  const c2 = Math.cos(-st.psi);
+  const s2 = Math.sin(-st.psi);
+  return [c2 * dx + s2 * dz, p[1] - st.h, -s2 * dx + c2 * dz];
+}
+/** Położenie punktu dymka w układzie samolotu. */
+function anchorPos(a: Anchor, st: CycSt): V3 {
+  const p = typeof a.p === 'function' ? a.p(st) : a.p;
+  return a.gate ? gateToPlane(p, st) : p;
+}
+/** Ujęcie kamery na zdarzenie: z kierunku i odległości punktu; przy stanowisku – przed fasadą terminalu i nad płytą. */
+function anchorView(a: Anchor, st: CycSt): { cam: V3; tgt: V3 } {
+  const t = anchorPos(a, st);
+  let d: V3;
+  if (a.dir === 'out') {
+    const l = Math.hypot(t[0] * 0.4, t[2]) || 1;
+    d = [(t[0] * 0.4) / l, 0.55, t[2] / l];
+  } else d = a.dir;
+  const l = Math.hypot(d[0], d[1], d[2]) || 1;
+  const cam: V3 = [t[0] + (d[0] / l) * a.d, Math.max(G + 1.5 - st.h, t[1] + (d[1] / l) * a.d), t[2] + (d[2] / l) * a.d];
+  const parked = st.h === 0 && Math.hypot(st.u - GATE.u, st.v - GATE.v) < 80;
+  if (parked && cam[0] < -43) cam[0] = -43;
+  return { cam, tgt: t };
+}
+
+/** Bieżące zdarzenie odcinka: tekst i punkt dymka. */
+function eventAt(i: number, t: number): { k: number; text: string; a: Anchor } {
+  const list = SEGS[i].events;
+  let k = 0;
+  list.forEach(([tt], j) => {
+    if (t >= tt) k = j;
+  });
+  const key = ANCHORS[SEGS[i].id]?.[k] ?? 'plane';
+  return { k, text: list[k]?.[1] ?? '', a: ANCH[key] ?? ANCH.plane };
+}
 /* ======================= sterowanie modelem ======================= */
 
 /** Wspólny stan (obiekty zmieniane co klatkę, czytane przez model samolotu). */
@@ -1223,81 +1345,158 @@ const BRIDGE_ROT: V3[] = [
   [-44.5, G + 5.2, 9],
   [-44.5, G + 5.2, 21],
 ];
+/** Ustawia grupę tunelu między punktami a i b: środek, obrót wzdłuż odcinka (oś z grupy), długość jako skala dziecka. */
+const tmpA = new THREE.Vector3();
+const tmpB = new THREE.Vector3();
+function spanGroup(g: THREE.Group, body: THREE.Group, a: V3, b: V3) {
+  tmpA.set(...a);
+  tmpB.set(...b);
+  g.position.copy(tmpA).add(tmpB).multiplyScalar(0.5);
+  g.lookAt(tmpB);
+  body.scale.z = tmpA.distanceTo(tmpB);
+}
+/** Segment tunelu rękawu: blaszana rura z żebrami, pasem okien po obu bokach i dachem (długość 1 – skalowana). */
+function TunnelBody({ w, h, color }: { w: number; h: number; color: string }) {
+  return (
+    <>
+      <mesh>
+        <boxGeometry args={[w, h, 1]} />
+        <meshStandardMaterial color={color} roughness={0.45} metalness={0.35} />
+      </mesh>
+      {[1, -1].map((sd) => (
+        <mesh key={sd} position={[(sd * w) / 2 + sd * 0.005, 0.25, 0]}>
+          <boxGeometry args={[0.01, h * 0.32, 0.96]} />
+          <meshStandardMaterial color="#2d4256" roughness={0.1} metalness={0.6} />
+        </mesh>
+      ))}
+      <mesh position={[0, h / 2 + 0.04, 0]}>
+        <boxGeometry args={[w * 0.92, 0.08, 1]} />
+        <meshStandardMaterial color="#8f979f" roughness={0.6} />
+      </mesh>
+    </>
+  );
+}
+/**
+ * Rękaw (most pasażerski): rotunda na słupie przy terminalu, dwa teleskopowe segmenty tunelu (zewnętrzny nasuwa się
+ * na wewnętrzny), wózek jezdny z kołami na podporze z siłownikami wysokości i kabina operatora z przeszkleniem
+ * i miechem, który przylega do kadłuba przy drzwiach.
+ */
 function JetBridge({ i, get }: { i: number; get: () => number }) {
   const sill = useMemo(() => doorSill(i), [i]);
   const dock: V3 = [sill[0], sill[1] - 0.15, sill[2] + 2.0];
   const park: V3 = [BRIDGE_ROT[i][0] + 8, G + 4.6, BRIDGE_ROT[i][2] + 7 + i * 3];
-  const tunA = useRef<THREE.Mesh>(null);
-  const tunB = useRef<THREE.Mesh>(null);
+  const R = BRIDGE_ROT[i];
+  const segA = useRef<THREE.Group>(null);
+  const segAb = useRef<THREE.Group>(null);
+  const segB = useRef<THREE.Group>(null);
+  const segBb = useRef<THREE.Group>(null);
   const cab = useRef<THREE.Group>(null);
   const leg = useRef<THREE.Group>(null);
-  const bel = useRef<THREE.Mesh>(null);
-  const R = BRIDGE_ROT[i];
+  const legCol = useRef<THREE.Mesh>(null);
+  const bel = useRef<THREE.Group>(null);
   useFrame(() => {
     const k = sm(get());
     const c = lerp3(park, dock, k);
-    // tunel w dwóch częściach (zewnętrzna wsuwa się na wewnętrzną) od rotundy do kabiny
-    const back: V3 = [c[0] - 0.2, c[1] + 1.2, c[2] + 2.3];
-    const mid = lerp3([R[0] + 2, R[1] + 1.2, R[2]], back, 0.55);
-    if (tunA.current) placeBetween(tunA.current, [R[0] + 2, R[1] + 1.2, R[2]], mid);
-    if (tunB.current) placeBetween(tunB.current, lerp3([R[0] + 2, R[1] + 1.2, R[2]], back, 0.4), back);
+    const root: V3 = [R[0] + 2.2, R[1] + 1.3, R[2]];
+    const back: V3 = [c[0] - 0.1, c[1] + 1.3, c[2] + 2.6];
+    const midA = lerp3(root, back, 0.56);
+    if (segA.current && segAb.current) spanGroup(segA.current, segAb.current, root, midA);
+    if (segB.current && segBb.current) spanGroup(segB.current, segBb.current, lerp3(root, back, 0.42), back);
     if (cab.current) {
       cab.current.position.set(c[0], c[1], c[2]);
-      cab.current.rotation.y = lerp(0.5, 0, k);
+      cab.current.rotation.y = lerp(0.55, 0, k);
     }
-    if (leg.current) leg.current.position.set(lerp(mid[0], back[0], 0.6), G, lerp(mid[2], back[2], 0.6));
-    if (bel.current) bel.current.scale.z = 0.3 + 0.7 * clamp01((k - 0.9) * 10);
+    // podpora z wózkiem jezdnym pod zewnętrznym segmentem
+    const lp = lerp3(midA, back, 0.55);
+    if (leg.current) {
+      leg.current.position.set(lp[0], G, lp[2]);
+      leg.current.rotation.y = Math.atan2(back[0] - root[0], back[2] - root[2]);
+    }
+    if (legCol.current) {
+      const hgt = lp[1] - 1.4 - G - 0.9;
+      legCol.current.scale.y = hgt;
+      legCol.current.position.y = 0.9 + hgt / 2;
+    }
+    if (bel.current) bel.current.scale.z = 0.35 + 0.65 * clamp01((k - 0.88) * 9);
   });
-  const C = '#b9c0c8';
+  const C = '#c3c9cf';
   return (
     <group>
-      {/* rotunda na słupie przy terminalu */}
-      <mesh position={[R[0], R[1] + 1.2, R[2]]}>
-        <cylinderGeometry args={[2.2, 2.2, 3.2, 20]} />
-        <meshStandardMaterial color={C} roughness={0.6} />
+      {/* rotunda: okrągła, z dachem i oknami, na słupie */}
+      <mesh position={[R[0], R[1] + 1.3, R[2]]}>
+        <cylinderGeometry args={[2.4, 2.4, 3.2, 28]} />
+        <meshStandardMaterial color={C} roughness={0.5} metalness={0.3} />
+      </mesh>
+      <mesh position={[R[0], R[1] + 1.55, R[2]]}>
+        <cylinderGeometry args={[2.42, 2.42, 1, 28, 1, true]} />
+        <meshStandardMaterial color="#2d4256" roughness={0.1} metalness={0.6} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[R[0], R[1] + 3.0, R[2]]}>
+        <cylinderGeometry args={[2.7, 2.7, 0.25, 28]} />
+        <meshStandardMaterial color="#8f979f" />
       </mesh>
       <mesh position={[R[0], (G + R[1]) / 2, R[2]]}>
-        <cylinderGeometry args={[0.55, 0.65, R[1] - G, 12]} />
-        <meshStandardMaterial color="#6b7280" />
+        <cylinderGeometry args={[0.55, 0.7, R[1] - G, 14]} />
+        <meshStandardMaterial color="#6b7280" roughness={0.7} />
       </mesh>
-      {/* tunel: dwie rury prostokątne (zewnętrzna większa) */}
-      <mesh ref={tunA}>
-        <boxGeometry args={[2.9, 1, 2.9]} />
-        <meshStandardMaterial color={C} roughness={0.55} metalness={0.2} />
-      </mesh>
-      <mesh ref={tunB}>
-        <boxGeometry args={[3.2, 1, 3.2]} />
-        <meshStandardMaterial color="#cfd5db" roughness={0.5} metalness={0.2} />
-      </mesh>
-      {/* podpora z kołami (napęd rękawu) */}
+      {/* tunel: segment wewnętrzny (węższy) i zewnętrzny */}
+      <group ref={segA}>
+        <group ref={segAb}>
+          <TunnelBody w={2.8} h={2.7} color={C} />
+        </group>
+      </group>
+      <group ref={segB}>
+        <group ref={segBb}>
+          <TunnelBody w={3.1} h={3.0} color="#d0d6dc" />
+        </group>
+      </group>
+      {/* podpora z siłownikami i wózek jezdny */}
       <group ref={leg}>
-        <mesh position={[0, (R[1] - G) / 2 - 0.4, 0]}>
-          <boxGeometry args={[0.5, R[1] - G - 0.8, 0.5]} />
-          <meshStandardMaterial color="#6b7280" />
+        <mesh ref={legCol}>
+          <boxGeometry args={[0.45, 1, 0.45]} />
+          <meshStandardMaterial color="#5b636c" metalness={0.4} />
         </mesh>
-        <mesh position={[0, 0.45, 0]}>
-          <boxGeometry args={[3.6, 0.5, 1.2]} />
+        {[-0.5, 0.5].map((dx) => (
+          <mesh key={dx} position={[dx, 2.4, 0]}>
+            <cylinderGeometry args={[0.09, 0.09, 3.2, 8]} />
+            <meshStandardMaterial color="#d1d5db" metalness={0.7} roughness={0.3} />
+          </mesh>
+        ))}
+        <mesh position={[0, 0.55, 0]}>
+          <boxGeometry args={[3.8, 0.45, 1.1]} />
           <meshStandardMaterial color="#374151" />
         </mesh>
-        {[-1.4, 1.4].map((dx) => (
-          <GseWheel key={dx} p={[dx, 0.45, 0.7]} r={0.45} w={0.35} />
+        <HazardPlate p={[0, 0.55, 0.56]} s={[3.8, 0.3, 0.02]} rep={8} />
+        {[-1.5, 1.5].map((dx) => (
+          <GseWheel key={dx} p={[dx, 0.5, 0]} r={0.5} w={0.4} />
         ))}
       </group>
-      {/* kabina rękawu z miechem (od strony kadłuba) */}
+      {/* kabina rękawu: przeszklona z boków, z miechem od strony kadłuba i daszkiem */}
       <group ref={cab}>
-        <mesh position={[0, 1.25, 0.6]}>
-          <boxGeometry args={[3.4, 2.7, 3.2]} />
-          <meshStandardMaterial color="#d6dbe0" roughness={0.5} />
+        <mesh position={[0, 1.3, 0.9]}>
+          <boxGeometry args={[3.6, 2.8, 3.4]} />
+          <meshStandardMaterial color="#dde2e7" roughness={0.45} />
         </mesh>
-        <mesh position={[1.3, 1.6, 2.21]}>
-          <planeGeometry args={[0.9, 0.8]} />
-          <meshStandardMaterial color="#2c3e50" roughness={0.1} metalness={0.5} />
+        {[1, -1].map((sd) => (
+          <mesh key={sd} position={[sd * 1.81, 1.6, 0.9]} rotation={[0, sd * (Math.PI / 2), 0]}>
+            <planeGeometry args={[2.8, 1.1]} />
+            <meshStandardMaterial color="#2d4256" roughness={0.1} metalness={0.6} />
+          </mesh>
+        ))}
+        <mesh position={[0, 2.85, 0.5]}>
+          <boxGeometry args={[3.9, 0.18, 4]} />
+          <meshStandardMaterial color="#8f979f" />
         </mesh>
-        <mesh ref={bel} position={[0, 1.2, -1.1]}>
-          <boxGeometry args={[2.6, 2.5, 0.6]} />
-          <meshStandardMaterial color="#1f2328" roughness={0.95} />
-        </mesh>
-        <HazardPlate p={[0, 0, -1.0]} s={[3.2, 0.12, 0.05]} rep={6} />
+        {/* miech: kilka fałd, przy dokowaniu wysuwa się do kadłuba */}
+        <group ref={bel} position={[0, 1.25, -0.8]}>
+          {[0, 1, 2, 3].map((f) => (
+            <mesh key={f} position={[0, 0, -0.18 * f]}>
+              <boxGeometry args={[2.9 - f * 0.05, 2.6 - f * 0.05, 0.16]} />
+              <meshStandardMaterial color={f % 2 ? '#2a2f35' : '#1b1f24'} roughness={0.95} />
+            </mesh>
+          ))}
+        </group>
+        <HazardPlate p={[0, -0.05, -0.75]} s={[3.4, 0.14, 0.05]} rep={7} />
       </group>
     </group>
   );
@@ -1719,30 +1918,27 @@ function PlanePose({ live, children }: { live: Live; children: ReactNode }) {
   );
 }
 
-function CycleScene({ params }: SceneProps) {
-  const segId = typeof params.seg === 'string' ? params.seg : SEGS[0].id;
-  const idx = Math.max(0, SEGS.findIndex((s) => s.id === segId));
+function CycleScene(_: SceneProps) {
   const live = useLive();
-  const clock = useRef({ t: 0, seg: segId });
-  if (clock.current.seg !== segId) clock.current = { t: 0, seg: segId };
-  // każda zakładka rusza sama; po końcu stan zostaje (to także początek następnej zakładki)
-  const stOf = (t: number): { st: CycSt; i: number; t: number } => {
-    const tt = Math.min(SEGS[idx].dur, t);
-    return { st: SEGS[idx].at(tt), i: idx, t: tt };
+  // jeden zegar całego cyklu (pauza z paska stanu zatrzymuje zegar sceny, więc i tę animację)
+  const clock = useRef({ T: 0 });
+  const stOf = (T: number): { st: CycSt; i: number; t: number } => {
+    const q = segAt(T);
+    return { st: SEGS[q.i].at(q.t), i: q.i, t: q.t };
   };
-  const [view, setView] = useState(0);
+  const [view, setView] = useState('0:0');
   const [, tick] = useState(0);
   const acc = useRef(0);
   const cur = useRef(stOf(0));
-  // pierwsza klatka zakładki – stan od razu (bez skoku po zmianie zakładki)
   applyLive(live, cur.current.st);
   useFrame((_, dt) => {
-    clock.current.t += Math.min(0.05, dt);
-    cur.current = stOf(clock.current.t);
+    clock.current.T = (clock.current.T + Math.min(0.05, dt)) % TOTAL;
+    cur.current = stOf(clock.current.T);
     applyLive(live, cur.current.st);
-    // załadunek ładowni: wspólny czas scenariusza (te same modele podnośników, wózków i kontenerów)
+    // ładownie: wspólny czas scenariusza (te same modele podnośników, wózków i kontenerów)
     FUS_LIVE.cargoT = cur.current.st.cargoT ?? 1e9;
-    const v = viewOf(SEGS[idx].viewAt, cur.current.t);
+    FUS_LIVE.cargoUnload = cur.current.st.unload;
+    const v = `${cur.current.i}:${eventAt(cur.current.i, cur.current.t).k}`;
     if (v !== view) setView(v);
     acc.current += dt;
     if (acc.current > 0.2) {
@@ -1753,11 +1949,16 @@ function CycleScene({ params }: SceneProps) {
   useEffect(
     () => () => {
       FUS_LIVE.cargoT = 1e9;
+      FUS_LIVE.cargoUnload = false;
     },
     [],
   );
   const st = cur.current.st;
-  const seg = SEGS[idx];
+  const seg = SEGS[cur.current.i];
+  const ev = eventAt(cur.current.i, cur.current.t);
+  // ujęcie liczone raz na zdarzenie (przy ruchomym punkcie – w chwili zdarzenia), kamera dojeżdża do niego płynnie
+  const evKey = `${cur.current.i}:${ev.k}`;
+  const camView = useMemo(() => anchorView(ev.a, st), [evKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const cargoOn = st.cargoT !== null;
   const S = () => live.st;
   return (
@@ -1768,7 +1969,7 @@ function CycleScene({ params }: SceneProps) {
       <directionalLight position={[30, 20, -40]} intensity={0.35} color="#c8d8ff" />
       <fog attach="fog" args={['#d3e0ec', 220, 430]} />
       <Sky />
-      {seg && <StageCamera view={far(seg.views[Math.min(view, seg.views.length - 1)], GATE_SEGS.has(seg.id) && live.st.v < -200)} />}
+      <StageCamera view={camView} />
       <MovingWorld live={live}>
         <group position={[0, G - 0.03, 0]}>
           <AirportModel />
@@ -1795,6 +1996,7 @@ function CycleScene({ params }: SceneProps) {
                 <DollyTrains hold={h} />
               </group>
             ))}
+          {ev.a.gate && <Bubble key={`${cur.current.i}:${ev.k}`} anchor={ev.a} text={ev.text} live={live} />}
           {st.crew.map((c, i) => (
             <Person key={i} p={[c[0], c[1]]} color={c[2]} />
           ))}
@@ -1833,8 +2035,61 @@ function CycleScene({ params }: SceneProps) {
         <PaxStream door={0} get={() => paxFlow(S(), 0)} />
         <PaxStream door={1} get={() => paxFlow(S(), 1)} />
       </PlanePose>
-      <CycleOverlay st={st} seg={seg} segIdx={cur.current.i} t={cur.current.t} />
+      {!ev.a.gate && <Bubble key={`${cur.current.i}:${ev.k}`} anchor={ev.a} text={ev.text} live={live} />}
+      <CycleOverlay st={st} seg={seg} segIdx={cur.current.i} />
     </>
+  );
+}
+
+/**
+ * Dymek z opisem przy miejscu zdarzenia: jasna chmurka nad punktem, z „ogonkiem” wskazującym ten punkt. Pojawia się
+ * płynnie przy każdym nowym zdarzeniu.
+ */
+function Bubble({ anchor, text, live }: { anchor: Anchor; text: string; live: Live }) {
+  const g = useRef<THREE.Group>(null);
+  const u = useSpeedUnit();
+  const hidden = useSceneHidden();
+  const tail = useRef<HTMLDivElement>(null);
+  const fixed = typeof anchor.p === 'function' ? null : anchor.p;
+  const v = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    if (g.current && typeof anchor.p === 'function') g.current.position.set(...anchor.p(live.st));
+  });
+  if (hidden || !text) return null;
+  return (
+    <group ref={g} position={fixed ?? [0, 0, 0]}>
+      <Html
+        zIndexRange={[7, 0]}
+        style={{ pointerEvents: 'none' }}
+        calculatePosition={(el, camera, size) => {
+          // punkt na ekranie; dymek nad nim, ale zawsze w widocznej części sceny – z dala od krawędzi, od ekranów kokpitu
+          // w prawym górnym rogu i od nazwy etapu w lewym dolnym; gdy punkt jest poza kadrem, dymek staje przy krawędzi
+          v.setFromMatrixPosition(el.matrixWorld).project(camera);
+          const behind = v.z > 1;
+          let x = ((v.x + 1) / 2) * size.width;
+          let y = ((1 - v.y) / 2) * size.height;
+          if (behind) {
+            x = size.width - x;
+            y = size.height * 0.8;
+          }
+          const W2 = 150;
+          const inView = !behind && x > 0 && x < size.width && y > 0 && y < size.height;
+          const nx = Math.min(size.width - W2 - 16, Math.max(W2 + 16, x));
+          let ny = Math.min(size.height - 70, Math.max(150, y));
+          const dockL = size.width - 300;
+          if (nx + W2 > dockL && ny < 380) ny = Math.max(ny, 380);
+          if (tail.current) tail.current.style.visibility = inView && Math.abs(nx - x) < 4 && Math.abs(ny - y) < 4 ? 'visible' : 'hidden';
+          return [nx, ny];
+        }}
+      >
+        <div className="cycle-bubble" style={{ transform: 'translate(-50%, calc(-100% - 14px))', width: 'max-content', maxWidth: 280, animation: 'cycleBubbleIn 0.35s ease-out' }}>
+          <div style={{ background: 'rgba(250,251,252,0.96)', color: '#16202b', borderRadius: 12, padding: '8px 11px', fontSize: 13, lineHeight: 1.35, boxShadow: '0 6px 20px rgba(0,0,0,0.28)', border: '1px solid rgba(15,23,42,0.12)' }}>
+            {speedInText(text, u)}
+          </div>
+          <div ref={tail} style={{ width: 14, height: 14, background: 'rgba(250,251,252,0.96)', transform: 'rotate(45deg)', margin: '-8px auto 0', boxShadow: '3px 3px 6px rgba(0,0,0,0.12)' }} />
+        </div>
+      </Html>
+    </group>
   );
 }
 
@@ -1904,223 +2159,59 @@ function CycleEcam({ st }: { st: CycSt }) {
 // w doku ECAM stoi w miejscu wyświetlaczy (prawy górny róg)
 (CycleEcam as unknown as { cockpitSlot: string }).cockpitSlot = 'ecam';
 
-function CycleOverlay({ st, seg, segIdx, t }: { st: CycSt; seg: Seg | null; segIdx: number; t: number }) {
-  // prędkości w opisach i w ramce – w jednostce z ustawień
-  const sp = useSpeed();
+function CycleOverlay({ st, seg, segIdx }: { st: CycSt; seg: Seg; segIdx: number }) {
   const flying = st.flight || st.altFt > 1;
-  const pfd = <Pfd pitch={st.pitch} bank={st.bank} ias={st.ias} alt={st.altFt} vs={st.vs} heading={((st.psi / DEG) % 360 + 360 + 90) % 360} ra={st.altFt < 2500 ? st.altFt : undefined} fma={flying ? ['SPEED', st.vs > 300 ? 'CLB' : st.vs < -300 ? 'DES' : 'ALT CRZ', 'NAV', '', 'AP1\n1FD2\nA/THR'] : ['', '', '', '', '1FD2']} />;
-  const events = seg ? seg.events : null;
+  const hdg = (((st.psi / DEG) % 360) + 360 + 90) % 360;
+  // PFD, dopóki samolot się porusza (kołowanie, start, lot, lądowanie, dobieg) – do zatrzymania na stanowisku
+  const moving = flying || st.ias > 0.3 || seg.id === 'arrive' || seg.id === 'takeoff';
+  const hidden = useSceneHidden();
   return (
     <>
       <CockpitDock>
-        {(flying || seg?.id === 'takeoff') && pfd}
-        {seg?.id === 'taxi' && <Nd heading={((st.psi / DEG) % 360 + 360 + 90) % 360} gs={st.ias} tas={st.ias} range={flying ? 40 : 2} target={flying ? 'RW27R' : 'GATE'} />}
+        {moving && <Pfd pitch={st.pitch} bank={st.bank} ias={st.ias} alt={st.altFt} vs={st.vs} heading={hdg} ra={st.altFt < 2500 ? st.altFt : undefined} fma={flying ? ['SPEED', st.vs > 300 ? 'CLB' : st.vs < -300 ? 'DES' : 'ALT CRZ', 'NAV', '', 'AP1\n1FD2\nA/THR'] : ['', '', '', '', '1FD2']} />}
+        {seg.id === 'taxi' && <Nd heading={hdg} gs={st.ias} tas={st.ias} range={2} target="RW27R" />}
         {st.ecam && <CycleEcam st={st} />}
       </CockpitDock>
-      <InfoPortal>
-        <div style={{ fontSize: 12 }}>
-          <b style={{ color: '#7cc7ff' }}>{SEGS[segIdx].title}</b>
-          <span style={{ opacity: 0.8 }}>
-            {' · '}
-            godz. {clockStr(st.clock)}
-            {st.clock >= 0 && st.clock < 100 ? ` · ${f0(st.clock)} min od przylotu` : ''}
-          </span>
-        </div>
-        {(() => {
-          const list = SEGS[segIdx].events;
-          let k = 0;
-          list.forEach(([tt], i) => {
-            if (t >= tt) k = i;
-          });
-          const next = events && k + 1 < list.length ? speedInText(list[k + 1][1], sp.u) : null;
-          return (
-            <>
-              <div style={{ fontSize: 13, color: AIRBUS.cyan }}>{speedInText(list[k]?.[1] ?? '', sp.u)}</div>
-              {next && <div style={{ fontSize: 12, opacity: 0.5 }}>Dalej: {next}</div>}
-              {events && (
-                <div style={{ display: 'flex', gap: 3 }} aria-label={`krok ${k + 1} z ${list.length}`}>
-                  {list.map((_, i) => (
-                    <span key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= k ? AIRBUS.cyan : 'rgba(255,255,255,0.2)' }} />
-                  ))}
-                </div>
-              )}
-            </>
-          );
-        })()}
-        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '1px 14px', fontSize: 12, opacity: 0.85 }}>
-          <span>pasażerowie na pokładzie</span>
-          <b>{f0(st.pax)}</b>
-          <span>paliwo</span>
-          <b>{(st.fob / 1000).toLocaleString('pl-PL', { maximumFractionDigits: 1 })} t</b>
-          {st.ias > 1 && (
-            <>
-              <span>prędkość</span>
-              <b>{sp.fmt(st.ias * 0.5144)}</b>
-            </>
-          )}
-          {flying && (
-            <>
-              <span>wysokość</span>
-              <b>{f0(st.altFt * 0.3048)} m</b>
-            </>
-          )}
-        </div>
-        <div style={{ fontSize: 11, opacity: 0.55 }}>Czas animacji jest skrócony; godziny pokazują przybliżony przebieg prawdziwej obsługi.</div>
-      </InfoPortal>
+      {!hidden && (
+        <Html calculatePosition={(_el, _cam, size) => [18, size.height - 58]} zIndexRange={[8, 0]} style={{ pointerEvents: 'none' }}>
+          <div style={{ transform: 'translateY(-100%)', whiteSpace: 'nowrap', fontSize: 15, fontWeight: 700, color: '#f8fafc', background: 'rgba(15,23,42,0.62)', padding: '6px 12px', borderRadius: 8, letterSpacing: '0.01em' }}>
+            {SEGS[segIdx].title}
+          </div>
+        </Html>
+      )}
     </>
   );
 }
 
 /* ======================= zakładki modułu ======================= */
 
-const step = (id: string, title: string, body: ReactNode, view: { cam: V3; tgt: V3 }): Step => ({
-  title,
-  kind: '3d',
-  scene: CycleScene,
-  stageKey: 'cycle',
-  camera: view.cam,
-  target: view.tgt,
-  preset: { seg: id },
-  body,
-});
-
 const P = ({ children }: { children: ReactNode }) => <p>{children}</p>;
-
-const BODIES: Record<string, ReactNode> = {
-  arrive: (
-    <>
-      <P>Po lądowaniu samolot zjechał z pasa. Kontroler ruchu naziemnego prowadzi go drogami kołowania do <b>stanowiska</b> przy terminalu – miejsca, w którym stanie na czas obsługi.</P>
-      <P>
-        Na płycie postojowej przednie koło jedzie po żółtej <b>linii wjazdu</b>. Na ścianie terminalu świeci <b>tablica dokowania</b>: pokazuje, ile metrów zostało do zatrzymania i czy samolot jest na osi. Kapitan zatrzymuje samolot co do kilkudziesięciu centymetrów – tak, żeby rękawy sięgnęły drzwi.
-      </P>
-    </>
-  ),
-  secure: (
-    <>
-      <P>Samolot stoi. Zanim ktokolwiek do niego podejdzie, trzeba wyłączyć silniki i zabezpieczyć samolot na płycie.</P>
-      <P>
-        Gaśnie czerwona migająca lampa <b>BEACON</b> – dla obsługi znak, że silniki stoją i można podejść. Pod koła trafiają <b>kliny</b>, wokół samolotu stają <b>pachołki</b>, a pod nos podjeżdża <b>agregat prądotwórczy (GPU)</b>. Od tej chwili prąd daje lotnisko, a nie silniki ani APU – tak jest taniej, ciszej i czyściej.
-      </P>
-    </>
-  ),
-  bridge: (
-    <>
-      <P>
-        Pasażerowie wysiadają przez <b>rękawy</b> – ruchome korytarze z terminalu do drzwi. Zanim drzwi się otworzą, personel musi je <b>rozbroić</b> (zjeżdżalnie awaryjne są uzbrojone przez cały lot).
-      </P>
-      <P>Rękaw prowadzi operator z kabiny na jego końcu: wydłuża go, skręca i podnosi do wysokości drzwi, a na koniec dosuwa miech do kadłuba. A350 obsługują zwykle dwa rękawy – przy drzwiach 1L i 2L.</P>
-    </>
-  ),
-  unload: (
-    <>
-      <P>
-        Bagaż leci w ładowni pod podłogą kabiny, w aluminiowych <b>kontenerach</b>. Ładownie mają drzwi po prawej stronie kadłuba. Pod każde podjeżdża <b>podnośnik</b>: przednią częścią sięga progu drzwi, a tylną platformą zjeżdża do wysokości wózka.
-      </P>
-      <P>Kontenery wyjeżdżają z ładowni po rolkach, zjeżdżają na wózki, a ciągnik zabiera całe pociągi wózków do sortowni bagażu. W tym samym czasie po lewej stronie wysiadają pasażerowie.</P>
-    </>
-  ),
-  service: (
-    <>
-      <P>
-        Kabina musi być gotowa na kolejny lot: <b>sprzątanie</b>, nowe jedzenie i napoje, pełne zbiorniki wody i puste zbiorniki ścieków. Do prawych drzwi podjeżdżają samochody <b>cateringowe</b> – ich skrzynia unosi się na nożycach aż do progu.
-      </P>
-      <P>Pod spód kadłuba podjeżdżają dwa mniejsze wozy: jeden opróżnia zbiorniki toalet, drugi napełnia zbiorniki wody pitnej. Każdy z nich łączy się wężem z zaworem w spodzie kadłuba.</P>
-    </>
-  ),
-  fuel: (
-    <>
-      <P>
-        Paliwa nie wozi się cysternami z daleka – na dużych lotniskach płynie rurociągami pod płytą. Pod skrzydło podjeżdża <b>dystrybutor</b>, który łączy studzienkę w płycie z samolotem i mierzy, ile paliwa przepłynęło.
-      </P>
-      <P>
-        Złącze tankowania jest w spodzie prawego skrzydła. Paliwo płynie pod ciśnieniem i komputer samolotu sam rozdziela je do zbiorników. Na ECAM, na stronie FUEL, widać, jak przybywa paliwa: z ok. 10 t po przylocie do ok. 64 t na następny lot.
-      </P>
-    </>
-  ),
-  walk: (
-    <>
-      <P>
-        Przed każdym lotem jeden z pilotów robi <b>obchód</b> samolotu (ang. <i>walkaround</i>). Idzie zawsze tą samą trasą, w tym samym kierunku, i sprawdza na oko to, czego nie widać z kokpitu: opony, hamulce, wycieki, łopaty silników, czujniki, światła, powierzchnie sterowe.
-      </P>
-      <P>Obchód trwa kilka–kilkanaście minut. Jeśli coś budzi wątpliwości, decyzję podejmuje mechanik – samolot nie poleci, dopóki usterka nie zostanie usunięta albo uznana za dopuszczalną.</P>
-    </>
-  ),
-  load: (
-    <>
-      <P>
-        Teraz wszystko w drugą stronę: kontenery z bagażem nowych pasażerów <b>wjeżdżają</b> do ładowni, a pasażerowie <b>wsiadają</b> rękawami. Miejsce każdego kontenera wyznacza plan załadunku, bo od rozłożenia ciężaru zależy <b>wyważenie</b> samolotu.
-      </P>
-      <P>Po zakończeniu załadunku powstaje arkusz masy i wyważenia: pilot sprawdza, czy masa nie przekracza granic i czy środek ciężkości jest w dopuszczalnym zakresie, a potem wpisuje te dane do komputera.</P>
-    </>
-  ),
-  ready: (
-    <>
-      <P>
-        Kilkanaście minut przed odlotem samolot przestaje być „połączony” z lotniskiem. Działa <b>APU</b>, które daje prąd i sprężone powietrze. Odjeżdżają agregat i rękawy, drzwi są zamknięte i <b>uzbrojone</b>.
-      </P>
-      <P>
-        Pod nos podjeżdża <b>holownik</b>. Samolot nie umie jechać tyłem, więc od terminalu musi go odepchnąć holownik. Mechanik łączy dyszel z kołem przednim i wkłada bolec, który odłącza sterowanie koła od kokpitu. Na końcu kapitan włącza <b>BEACON</b> – znak, że zaraz ruszą silniki.
-      </P>
-    </>
-  ),
-  push: (
-    <>
-      <P>
-        <b>Wypychanie</b> (ang. <i>pushback</i>): holownik pcha samolot tyłem, skręcając tak, by na końcu samolot stał nosem wzdłuż drogi kołowania. Mechanik idzie obok i przez słuchawki rozmawia z kapitanem.
-      </P>
-      <P>W tym czasie piloci uruchamiają silniki – zwykle najpierw ten po prawej, potem lewy. Powietrze z APU kręci silnikiem, przy ok. 25% obrotów zapala się paliwo, a silnik sam rozpędza się do biegu jałowego.</P>
-    </>
-  ),
-  taxi: (
-    <>
-      <P>Samolot kołuje do pasa o własnych siłach – wystarczy mu ciąg silników na biegu jałowym. Kapitan skręca kołem przednim małym kółkiem przy fotelu (ang. <i>tiller</i>), a hamuje pedałami.</P>
-      <P>
-        W czasie kołowania piloci ustawiają <b>klapy</b> do startu i <b>sprawdzają stery</b>: wychylają drążek i pedały do oporu, a na ekranie patrzą, czy lotki, spojlery i stery chodzą swobodnie. Przed pasem samolot zatrzymuje się w <b>punkcie oczekiwania</b> – na pas wolno wjechać tylko za zgodą kontrolera.
-      </P>
-    </>
-  ),
-  takeoff: (
-    <>
-      <P>
-        Samolot stoi na osi pasa. Kapitan przesuwa dźwignie ciągu, silniki wchodzą na moc startową i samolot przyspiesza – ok. 2 m/s², czyli od zera do ok. <Spd kmh={280} /> w niecałe 40 s.
-      </P>
-      <P>
-        Przy prędkości <b>VR</b> (ok. <Spd kmh={280} />) pilot ciągnie drążek i nos się unosi. Chwilę później koła odrywają się od pasa. Gdy wskaźniki potwierdzą wznoszenie, drugi pilot chowa <b>podwozie</b>.
-      </P>
-    </>
-  ),
-  fly: (
-    <>
-      <P>Lot w przyspieszeniu: wznoszenie na wysokość przelotu (ok. 11 km), kilka godzin przelotu i zniżanie. Klapy chowane są zaraz po starcie, a wysuwane dopiero przed lądowaniem. Podwozie przez cały lot jest schowane.</P>
-      <P>W tym czasie samolotem kieruje autopilot, a piloci pilnują trasy, paliwa, pogody i łączności. Nad 3000 m gasną reflektory, a światło logo na ogonie wyłącza się przy wysokim przelocie.</P>
-    </>
-  ),
-  land: (
-    <>
-      <P>
-        Samolot zniża się po <b>ścieżce 3°</b> wyznaczonej przez system ILS – ok. 50 m w dół na każdy kilometr. Podwozie jest wypuszczone, klapy w pełni wysunięte (FULL), świecą reflektory lądowania.
-      </P>
-      <P>
-        Kilka metrów nad pasem pilot lekko unosi nos – to <b>wyrównanie</b> (ang. <i>flare</i>) – a dźwignie ciągu idą na bieg jałowy. Po przyziemieniu wysuwają się <b>spojlery</b>, które „gaszą” siłę nośną, otwierają się <b>odwracacze ciągu</b> i zaczyna hamować autobrake.
-      </P>
-    </>
-  ),
-  roll: (
-    <>
-      <P>Samolot hamuje na pasie odwracaczami ciągu i hamulcami kół. Przy ok. <Spd kmh={130} /> pilot chowa odwracacze – przy małej prędkości mogłyby wyrzucać kamienie i spaliny do wlotów silników.</P>
-      <P>
-        Zjazd szybki pozwala opuścić pas przy prędkości ok. <Spd kmh={30} />, bez zatrzymywania się – kolejny samolot może lądować wcześniej. Gdy samolot jest za linią pasa, gasną stroboskopy i reflektory, a klapy się chowają. Tu cykl się zamyka: w zakładce „Wjazd na stanowisko” zaczyna się od nowa.
-      </P>
-    </>
-  ),
-};
 
 export const cycleModule: PartModule = {
   id: 'cykl',
   title: 'Od lądowania do lądowania',
-  summary: 'Jeden pełny cykl pracy samolotu: wjazd na stanowisko, obsługa naziemna (rękawy, bagaż, catering, woda, tankowanie, obchód), wypychanie, kołowanie, start, lot, lądowanie i zjazd z pasa – wszystko na jednym lotnisku, krok po kroku',
+  summary: 'Jedna ciągła animacja pełnego cyklu pracy samolotu: wjazd na stanowisko, obsługa naziemna, wypychanie, kołowanie, start, lot, lądowanie i zjazd z pasa – z opisami w dymkach przy tym, co się właśnie dzieje',
   steps: [
-    ...SEGS.map((s) => step(s.id, s.title, BODIES[s.id], far(s.views[0], GATE_SEGS.has(s.id) && s.id !== 'arrive'))),
+    {
+      title: 'Od lądowania do lądowania',
+      kind: '3d',
+      scene: CycleScene,
+      stageKey: 'cycle',
+      camera: far(SEGS[0].views[0]).cam,
+      target: far(SEGS[0].views[0]).tgt,
+      body: (
+        <>
+          <P>
+            Samolot zarabia, tylko gdy lata, dlatego czas na ziemi między dwoma lotami – <b>obsługa naziemna</b> (ang. <i>turnaround</i>) – jest zaplanowany co do minuty. Dla A350 na trasie dalekiego zasięgu to zwykle ok. <b>1,5–2 godziny</b>, a wiele rzeczy dzieje się równocześnie: pasażerowie wysiadają, z ładowni wyjeżdża bagaż, a pod skrzydło podjeżdża paliwo.
+          </P>
+          <P>
+            Animacja pokazuje jeden pełny cykl bez przerw: od chwili, gdy samolot zjechał z pasa po lądowaniu, przez obsługę przy terminalu, wypychanie, kołowanie, start i lot, aż do zjazdu z pasa po kolejnym lądowaniu. Potem zaczyna się od nowa. Dymki pojawiają się przy tym, co się właśnie dzieje – przy kołach, drzwiach, rękawie, cysternie, silnikach.
+          </P>
+          <P>
+            Animację zatrzymasz przyciskiem „Wstrzymaj animację” (albo klawiszem P). Kamera sama podjeżdża do tego, o czym mówi dymek; widok możesz obracać i przybliżać myszą, a kamera wróci do swojej trasy przy następnym zdarzeniu. Nazwa etapu jest w lewym dolnym rogu, a ekrany kokpitu w prawym górnym: PFD, dopóki samolot jedzie albo leci, i ECAM ze stroną pasującą do tego, co się dzieje. Czas animacji jest skrócony.
+          </P>
+        </>
+      ),
+    },
   ],
 };
-

@@ -12,8 +12,8 @@ import { FollowPlane, WingLab, isSliceMode, labPose, makeWingLabSteps, newDirect
 import { ENGINE_PART_OFFSET, ax } from './engineModel';
 import { C_PITCH, C_ROLL, C_YAW, LATERAL_EXP_OPTIONS, LAYOUT_OPTIONS, lateralView, TailHomeCockpit, TailLab, YAW_MODE_OPTIONS, ctlScene, lateralLook, type CtlMode } from './tailLab';
 import { GEAR_SPOTS, GearLab, makeGearSteps, useGearDriver, type GearMode } from './gearLab';
-import { APU_SPOTS, ApuLab, ApuModel, makeApuSteps, useApuDriver, type ApuMode } from './apuLab';
-import { RADAR_SPOTS, RadarLab, RadarModel, makeRadarSteps, useRadarDriver, type RadarMode } from './radarLab';
+import { APU_SPOTS, ApuLab, makeApuSteps, useApuDriver, type ApuMode } from './apuLab';
+import { RADAR_SPOTS, RadarLab, makeRadarSteps, useRadarDriver, type RadarMode } from './radarLab';
 import { LIGHTS_SPOTS, LightsLab, LightsModel, LightsPanel, makeLightsSteps, useLightsDriver, type LightsMode } from './lightsLab';
 import { NightCtx } from './runway';
 import { FuselageLab, useFusDriver } from './fuselageLab';
@@ -22,7 +22,7 @@ import { FireSystem, WaterSystem, useStage } from './cabinSystems';
 import { RefuelLab, RefuelScene, useRefuelDriver } from './refuel';
 import { DoorsLab, DoorsScene, useDoorsDriver, type DoorMode } from './doors';
 import { ElecLab, ElecScene, useElecDriver, type ElecMode } from './electrics';
-import { cockpitModule } from './cockpitLab';
+import { CockpitLab, cockpitOnGround, makeCockpitModule, useCockpitDriver, type CkMode } from './cockpitLab';
 import { cycleModule } from './cycleLab';
 import { FUS_GROUPS, FUS_LIVE, FUS_PART_INFO, cargoDoorOpen, type FusView } from './airliner';
 
@@ -139,6 +139,10 @@ function PlaneScene({ params }: SceneProps) {
   // moduł radaru: przemiatanie anteny, lot i pogoda – wspólne dla modelu w nosie, miniatury burzy i ekranów
   const radarSim = useRadarDriver(radarMode, params, direct);
   const radarFlight = Boolean(radarMode && radarMode !== 'home');
+  // moduł kokpitu: kokpit jest częścią samolotu (kamera w nosie); scenariusz zakładki i niebo za oknami
+  const ckMode: CkMode | null = typeof params.ck === 'string' && params.ck ? (params.ck as CkMode) : null;
+  const ckSim = useCockpitDriver(ckMode, params);
+  const ckGround = ckMode ? cockpitOnGround(ckMode, typeof params.scn === 'string' ? params.scn : '') : false;
   /*
    * Złota zasada: samolot da się kliknąć (przejście do innego modułu), widać podpisy-odnośniki do innych modułów
    * i pełne, klikalne podpisy części modułu tylko w widoku ogólnym i na stronie głównej modułu (zakładka „0”).
@@ -149,7 +153,7 @@ function PlaneScene({ params }: SceneProps) {
   // moduł świateł: noc, stan przełączników i własne podwozie (chowanie w czasie „lotu w minutę”)
   const lightsSim = useLightsDriver(lightsMode, params, direct, gearDrv.live);
   const ls = lightsSim.current;
-  const phase: PlanePhase = elecMode ? (elecMode === 'dist' || elecMode === 'rat' ? 'flight' : 'ground') : doorsMode ? (doorsMode === 'press' ? 'flight' : 'ground') : refuel ? 'ground' : fusFlight ? 'flight' : lightsMode ? (ls.ground ? 'ground' : 'flight') : cs ? (cs.flight ? 'flight' : 'ground') : radarFlight ? 'flight' : gearMode === 'retract' ? 'flight' : gearMode ? 'ground' : lab === 'spoiler' && params.use === 'ground' ? 'ground' : lab || engineOn ? 'flight' : 'ground';
+  const phase: PlanePhase = ckMode ? (ckGround ? 'ground' : 'flight') : elecMode ? (elecMode === 'dist' || elecMode === 'rat' ? 'flight' : 'ground') : doorsMode ? (doorsMode === 'press' ? 'flight' : 'ground') : refuel ? 'ground' : fusFlight ? 'flight' : lightsMode ? (ls.ground ? 'ground' : 'flight') : cs ? (cs.flight ? 'flight' : 'ground') : radarFlight ? 'flight' : gearMode === 'retract' ? 'flight' : gearMode ? 'ground' : lab === 'spoiler' && params.use === 'ground' ? 'ground' : lab || engineOn ? 'flight' : 'ground';
   // strona główna usterzenia: lotki skrzydeł też biorą udział w sterowaniu – wyróżnione kolorem osi przechylania
   const tailHome = focus === 'tail' && !ctl;
   const hilite = cs ? cs.hilite : tailHome ? { aileron: C_ROLL, spoiler: C_ROLL } : null;
@@ -213,23 +217,26 @@ function PlaneScene({ params }: SceneProps) {
           inFlight={phase === 'flight'}
           surfaces={landTab ? gearDrv.surf : lab || ctl ? pose.surf : undefined}
           // na wycinkach skrzydła: bez owiewek klap i usterzenia (statecznik poziomy wpadałby w zakres wycinka)
-          layers={lightsMode ? { ground: false, env: false } : lab ? { ground: false, canoes: !isSliceMode(lab) || Boolean(params.wide), tail: !isSliceMode(lab) } : gearMode === 'retract' || landTab || radarFlight || fusFlight || (cs && cs.flight) || elecMode === 'dist' || elecMode === 'rat' ? { ground: false } : undefined}
+          // moduł kokpitu: za oknami niebo i ziemia ze scenariusza kokpitu (zamiast lotniska)
+          layers={ckMode ? { ground: false } : lightsMode ? { ground: false, env: false } : lab ? { ground: false, canoes: !isSliceMode(lab) || Boolean(params.wide), tail: !isSliceMode(lab) } : gearMode === 'retract' || landTab || radarFlight || fusFlight || (cs && cs.flight) || elecMode === 'dist' || elecMode === 'rat' ? { ground: false } : undefined}
           gear={gearMode ? gearDrv.drive : lightsMode ? ls.gear : undefined}
           extLights={lightsMode ? ls.ext : null}
           // reflektory lądowania tylko w czasie animacji lądowania (nie na postoju ustawianym suwakiem)
           landingLights={landTab && (gearMode0 === 'shock' ? params.land !== false : gearMode0 === 'brakes' ? params.run !== false : true)}
           enginePower={gearMode ? gearDrv.power : lightsMode ? { n1: ls.n1, rev: 0 } : refuel ? { n1: refuelEngine ? 21 : 0, rev: 0 } : elecMode ? elecSim.power : undefined}
           gearPick={gearHome ? { selected: gsel, onSelect: setGsel } : undefined}
+          // podzespoły wbudowane (kokpit, radar, APU) – w swoich modułach z ich symulacją, poza nimi w spoczynku
+          systems={{
+            apu: apuMode ? { sim: apuSim, mode: apuMode } : undefined,
+            radar: radarMode ? { sim: radarSim, mode: radarMode } : undefined,
+            cockpit: ckMode ? { sim: ckSim } : undefined,
+          }}
         />
-        {apuMode && <ApuModel sim={apuSim} mode={apuMode} />}
-        {/* przekrój kadłuba: w stożku ogonowym widać APU (bez przepływu – to pokazuje moduł APU) */}
-        {fusView && fusView !== 'struct' && <ApuModel sim={apuSim} mode="home" section />}
         {/* ciśnienie i klimatyzacja: urządzenia, kanały i strugi powietrza od silnika do zaworu wylotowego */}
         {fusView === 'press' && <AirSystem getStage={() => fusSim.current.stage} />}
         {/* woda i toalety, pożar w ładowni: rury, urządzenia i strugi etapów scenariusza */}
         {fusView === 'water' && <WaterSystem getStage={() => fusSim.current.stage} />}
         {fusView === 'fire' && <FireSystem getStage={() => fusSim.current.stage} getT={() => (params.run ? fusSim.current.t : -1)} />}
-        {radarMode && <RadarModel sim={radarSim} mode={radarMode} />}
         {refuel && <RefuelScene sim={refuelSim} />}
         {doorsMode && <DoorsScene sim={doorsSim} sel={dsel} onSelect={setDsel} />}
         {elecMode && <ElecScene sim={elecSim} sel={esel} onSelect={setEsel} />}
@@ -245,6 +252,7 @@ function PlaneScene({ params }: SceneProps) {
       {apuMode && <ApuLab mode={apuMode} sim={apuSim} />}
       {fusView && fusView !== 'home' && fusView !== 'struct' && <FuselageLab view={fusView} sim={fusSim} params={params} />}
       {radarMode && <RadarLab mode={radarMode} sim={radarSim} params={params} />}
+      {ckMode && <CockpitLab mode={ckMode} sim={ckSim} />}
       {refuel && <RefuelLab sim={refuelSim} />}
       {doorsMode && <DoorsLab sim={doorsSim} sel={dsel} />}
       {elecMode && <ElecLab sim={elecSim} sel={esel} />}
@@ -1056,6 +1064,9 @@ const apuModule: PartModule = {
     ...makeApuSteps(plane),
   ],
 };
+
+/** Kokpit – część samolotu: ta sama scena, kamera w nosie (zakładki i teksty w cockpitLab). */
+const cockpitModule: PartModule = makeCockpitModule(plane);
 
 /** Radar pogodowy – budowa w nosie, wiązka, kolory echa, pochylenie anteny, turbulencje, uskok wiatru i omijanie burzy. */
 const radarModule: PartModule = {

@@ -14,13 +14,20 @@
  * Model pokazuje się w całości; podzespół wybrany w danym kroku („focus”) przeobraża się: silnik zostaje
  * przecięty i rusza, skrzydło odsłania keson i porusza mechanizacją, kadłub odsłania kabinę i luki.
  */
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { Environment, Html, Lightformer, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
 import { useModuleHome, useSceneHidden, useTopicNav } from '../../lib/topicNav';
 import { EngineModel, type EngineModelProps } from './engineModel';
 import { AirportModel, STAND } from './runway';
+import type { SystemsDrive } from './planeSystems';
+
+/*
+ * Podzespoły wbudowane we wnętrze samolotu (kokpit, APU, radar) mają własne moduły z symulacją, które same importują
+ * ten plik – dlatego ich wspólny „monter” ładuje się leniwie (bez cyklu importów). Każdy A350 ma je w środku.
+ */
+const PlaneSystems = lazy(() => import('./planeSystems'));
 
 export type PlanePart = 'fuselage' | 'wing' | 'engine' | 'tail' | 'gear' | 'apu' | 'cockpit' | 'radar' | 'lights' | 'doors';
 /** Który moduł tematu otwiera kliknięcie podzespołu (null – moduł w przygotowaniu). */
@@ -763,10 +770,12 @@ function fusSec(x: number) {
 function fusSec900(x: number) {
   if (x < -24.5) {
     // nos dopasowany do pomiarów modelu referencyjnego A350-900: szpic owiewki radaru nisko (ok. 1,4 m pod osią),
-    // spód szybko dochodzi do pełnego przekroju, góra wznosi się łagodnie (długi skos szyb kokpitu), nos jest smukły
+    // spód szybko dochodzi do pełnego przekroju, góra wznosi się łagodnie (długi skos szyb kokpitu), nos jest smukły.
+    // Górny obrys poprawiony według rysunku z dokumentacji Airbusa (A350-900 Aircraft Characteristics, rys. 2-2-0
+    // i 4-4-0): nad szybami kokpitu grzbiet jest o 0,2–0,35 m niżej niż w modelu referencyjnym.
     const u = Math.max(0, (x + 33.4) / 8.9);
     const tip = -1.4;
-    const top = tip + (3.05 - tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.5), 0.85);
+    const top = tip + (3.05 - tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.45), 0.97);
     const bot = tip - (3.05 + tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.95), 0.53);
     const w = 2.98 * Math.pow(Math.max(0, 1 - (1 - u) ** 1.25), 0.53);
     return { yc: (top + bot) / 2, h: (top - bot) / 2, w };
@@ -813,8 +822,9 @@ const APU_CUT = (x: number, th: number) => x > APU_HATCH.x0 && x < APU_HATCH.x1 
 /**
  * Styk owiewki radaru (radomu) z kadłubem: przed nim jest sama owiewka, za nim przednia gródź ciśnieniowa. W module
  * radaru kadłub kończy się tutaj – owiewkę i radar rysuje moduł radaru (otwierana do góry na zawiasach).
+ * Według rysunku Airbusa (AC A350-900, rys. 4-4-0) styk leży ok. 1,4 m za czubkiem nosa – tuż przed szybami.
  */
-export const RADOME_X = -35.1;
+export const RADOME_X = -35.5;
 const RADOME_CUT = (x: number) => x < RADOME_X;
 /** Przekrój kadłuba w x (środek yc, półwysokość h, półszerokość w) – do rozmieszczenia wyposażenia w stożku ogonowym. */
 export const fuselageSection = (x: number) => fusSec(x);
@@ -938,8 +948,22 @@ const FUS_CUT = (x: number, th: number) => th > -0.35 + jag(x / 40 + 0.5, 5, 0.1
  * boczna (otwierana) i mała tylna. Obrysy zmierzone na modelu A350XWB-900 z repozytorium github.com/Sbyx13/A350XWB
  * (licencja MIT; autorzy: Sbyx, Christopher Andrews) – szczegóły w CREDITS.md.
  */
-const CK_PANES: [number, number][][] = [[[1.942,0.091],[2.05,0.085],[2.157,0.079],[2.264,0.086],[2.353,0.154],[2.402,0.302],[2.47,0.446],[2.537,0.589],[2.633,0.715],[2.696,0.833],[2.599,0.893],[2.514,0.947],[2.446,0.992],[2.352,0.977],[2.236,0.884],[2.134,0.762],[2.048,0.628],[1.965,0.492],[1.906,0.344],[1.884,0.188]],[[3.027,1.067],[3.124,1.162],[3.141,1.25],[3.135,1.323],[3.13,1.394],[3.125,1.466],[3.13,1.524],[3.136,1.58],[3.034,1.544],[2.916,1.479],[2.802,1.407],[2.694,1.331],[2.591,1.245],[2.525,1.158],[2.549,1.104],[2.604,1.051],[2.668,0.998],[2.732,0.945],[2.816,0.918],[2.919,0.985]],[[3.224,1.504],[3.227,1.549],[3.23,1.594],[3.251,1.644],[3.342,1.69],[3.449,1.725],[3.549,1.742],[3.642,1.75],[3.689,1.727],[3.695,1.684],[3.669,1.632],[3.637,1.57],[3.594,1.5],[3.528,1.431],[3.446,1.365],[3.355,1.303],[3.266,1.27],[3.236,1.323],[3.232,1.383],[3.227,1.443]]];
+const CK_PANES_REF: [number, number][][] = [[[1.942,0.091],[2.05,0.085],[2.157,0.079],[2.264,0.086],[2.353,0.154],[2.402,0.302],[2.47,0.446],[2.537,0.589],[2.633,0.715],[2.696,0.833],[2.599,0.893],[2.514,0.947],[2.446,0.992],[2.352,0.977],[2.236,0.884],[2.134,0.762],[2.048,0.628],[1.965,0.492],[1.906,0.344],[1.884,0.188]],[[3.027,1.067],[3.124,1.162],[3.141,1.25],[3.135,1.323],[3.13,1.394],[3.125,1.466],[3.13,1.524],[3.136,1.58],[3.034,1.544],[2.916,1.479],[2.802,1.407],[2.694,1.331],[2.591,1.245],[2.525,1.158],[2.549,1.104],[2.604,1.051],[2.668,0.998],[2.732,0.945],[2.816,0.918],[2.919,0.985]],[[3.224,1.504],[3.227,1.549],[3.23,1.594],[3.251,1.644],[3.342,1.69],[3.449,1.725],[3.549,1.742],[3.642,1.75],[3.689,1.727],[3.695,1.684],[3.669,1.632],[3.637,1.57],[3.594,1.5],[3.528,1.431],[3.446,1.365],[3.355,1.303],[3.266,1.27],[3.236,1.323],[3.232,1.383],[3.227,1.443]]];
 const CK_TIP = -33.4 - PF;
+/**
+ * Szyby przesunięte według dokumentacji Airbusa (AC A350-900, rys. 4-4-0 „Visibility from Cockpit”): z punktu oczu
+ * pilota (3,04 m za czubkiem nosa, 0,53 m od osi, 0,71 m nad osią kadłuba) widać ok. 20° w dół i 27° w górę, a okna
+ * boczne leżą ok. 0,33–1,12 m nad osią. W modelu referencyjnym szyby były wyżej i za krótkie ku przodowi – przednia
+ * jest wydłużona do przodu i obniżona (widoczność −17°…+27°), boczne przesunięte w tył i w dół (0,35–1,17 m).
+ */
+const CK_PANES: [number, number][][] = CK_PANES_REF.map((pane, i) =>
+  pane.map(([d, z]): [number, number] => (i === 0 ? [2.9 - (2.7 - d) * 1.75, z * 1.3] : [d + (i === 1 ? 0.3 : 0.35), z + 0.25])),
+);
+/**
+ * Punkt oczu kapitana (AC A350-900, rys. 4-4-0): 3,04 m za czubkiem nosa, 0,53 m w bok od osi; wysokość 0,71 m nad
+ * osią (6,27 m nad ziemią na rysunku, czyli ok. 1,17 m nad podłogą stanowiska). Pierwszy oficer – symetrycznie.
+ */
+export const COCKPIT_EYE = { x: CK_TIP + 3.04, y: 0.71, z: 0.53 };
 /** Przelicznik kąta θ na metry łuku (do odsuwania obrysów) – przybliżony promień kadłuba w rejonie kokpitu. */
 const CK_R = 2.6;
 /** Kąt θ (od grzbietu), pod którym górna połowa burty w x jest odsunięta od osi o z. */
@@ -995,6 +1019,14 @@ const CK_POLYS = CK_PANES.map((p) => ckPoly(p, 0));
 const COCKPIT = (x: number, th: number) => CK_POLYS.some((poly) => inPoly([x, Math.abs(th) * CK_R], poly));
 const DOORS = PAX_DOOR.xs;
 export const FLOOR = -1.15;
+/**
+ * Kokpit w nosie kadłuba (układ samolotu): podłoga stanowiska pilotów (podest ok. 0,7 m nad podłogą kabiny – pod nim
+ * jest przedział awioniki) i tylna ściana z drzwiami. Wnętrze rysuje model kokpitu (cockpitLab), wbudowany w samolot.
+ */
+export const COCKPIT_FLOOR = COCKPIT_EYE.y - 1.17;
+export const COCKPIT_REAR = -32.1;
+/** Wykładzina kokpitu: odsunięcie od poszycia do środka (do niej sięgają ścianki wnęk szyb). */
+const CK_LINING = 0.12;
 const WIN_Y = 0.15;
 
 /* ================= pamięć geometrii ================= */
@@ -1226,13 +1258,19 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     const glassG: THREE.BufferGeometry[] = [];
     const wallG: THREE.BufferGeometry[] = [];
     const frameG: THREE.BufferGeometry[] = [];
+    const trimG: THREE.BufferGeometry[] = [];
     for (const side of [1, -1])
       for (const pane of CK_PANES) {
         const at = (q: P2, inset: number) => fusPt(q[0], (side * q[1]) / CK_R, inset);
         const inner = densify(ckPoly(pane, -0.045));
         const outer = densify(ckPoly(pane, 0.045));
         frameG.push(strip(outer.map((q) => at(q, -0.004)), inner.map((q) => at(q, -0.004))));
-        wallG.push(strip(inner.map((q) => at(q, -0.002)), inner.map((q) => at(q, 0.04))));
+        // ścianka wnęki szyby: od poszycia do wykładziny kokpitu (z obu stron widać grubość burty)
+        wallG.push(strip(inner.map((q) => at(q, -0.002)), inner.map((q) => at(q, CK_LINING + 0.01))));
+        // od środka: obramowanie szyby na wykładzinie (zakrywa brzeg otworu w siatce wykładziny)
+        const trimOut = densify(ckPoly(pane, 0.11));
+        const trimIn = densify(ckPoly(pane, -0.045));
+        trimG.push(strip(trimOut.map((q) => at(q, CK_LINING - 0.004)), trimIn.map((q) => at(q, CK_LINING - 0.004))));
         const tris = THREE.ShapeUtils.triangulateShape(inner.map((q) => new THREE.Vector2(q[0], q[1])), []);
         const gl = new THREE.BufferGeometry();
         gl.setAttribute('position', new THREE.Float32BufferAttribute(inner.flatMap((q) => at(q, 0.04)), 3));
@@ -1243,14 +1281,15 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     const cockpit = merge(glassG);
     const ckWall = merge(wallG);
     const ckFrame = merge(frameG);
-    // ciemne wnętrze kabiny pilotów widoczne przez szyby
-    // od grodzi ciśnieniowej (za owiewką radaru) – szyby zaczynają się dopiero za nią, a w module radaru nos jest otwarty
-    const ckTub = grid(refine([RADOME_X + 0.05, CK_TIP + 4.6], 0.15), refine([-Math.PI, Math.PI], 0.12), (x, th) => fusPt(x, th, 0.14));
-    const ckBoxes = [
-      box([CK_TIP + 2.85, -0.05, 0], [0.7, 0.5, 2.4], [0, 0, -0.45]), // pulpit z ekranami
-      box([CK_TIP + 2.6, 0.27, 0], [0.4, 0.1, 2.0], [0, 0, -0.2]), // osłona przeciwodblaskowa
-      ...[-0.55, 0.55].flatMap((z) => [box([CK_TIP + 3.75, FLOOR + 0.55, z], [0.55, 0.12, 0.5]), box([CK_TIP + 4.05, FLOOR + 0.98, z], [0.1, 0.8, 0.5], [0, 0, -0.18])]),
-    ];
+    const ckTrim = merge(trimG);
+    // wykładzina kokpitu (wewnętrzna strona burty i sufit) od grodzi ciśnieniowej do tylnej ściany kokpitu, nad podłogą
+    // stanowiska pilotów; w miejscach szyb – otwory. Wyposażenie (pulpity, fotele, ekrany) to model kokpitu.
+    const ckLining = grid(
+      refine([RADOME_X + 0.05, COCKPIT_REAR], 0.04),
+      refine([-Math.PI, -1.0, 0, 1.0, Math.PI], 0.025),
+      (x, th) => fusPt(x, th, CK_LINING),
+      (x, th) => COCKPIT(x, th) || fusPt(x, th, CK_LINING)[1] < COCKPIT_FLOOR - 0.05,
+    );
     // owiewka centropłata pod kadłubem (miejsce na keson, podwozie i instalacje)
     // owiewka centropłata jako siatka (x, kąt): z otworami wnęk podwozia głównego, które zakrywają drzwi
     const fairA = [
@@ -1515,7 +1554,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     }
     // zawór wylotowy ciśnienia w kabinie: prostokątna klapka na spodzie tylnej części kadłuba (prawa strona)
     const outflow = [flat(15.2 + PA, -(Math.PI - 0.5), [0.55, 0.012, 0.4])];
-    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTub, ckBoxes, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
+    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTrim, ckLining, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
   }), []);
   // moduł kadłuba: poszycie całe – samolot przecina płaszczyzna symetrii (przycinanie w shaderze), nie wyrwa w burcie
   const shell = useShared(g.shell, apu ? g.apuCut : radar ? g.radarCut : open && view === 'cargo' ? g.cargoCut : doorsOpen ? g.doorCut : g.full);
@@ -1532,13 +1571,15 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
       <mesh geometry={shell}>
         <M k="paint" side={THREE.DoubleSide} />
       </mesh>
-      {/* szyby kokpitu: półprzezroczyste, w czarnej ramce; za nimi ciemna kabina pilotów */}
-      <mesh geometry={g.ckTub}>
-        <M k="#14181d" side={THREE.BackSide} />
+      {/* szyby kokpitu: półprzezroczyste, w czarnej ramce; za nimi wykładzina kokpitu (wyposażenie – model kokpitu) */}
+      <mesh geometry={g.ckLining}>
+        <M k="#b9bfc6" side={THREE.DoubleSide} />
       </mesh>
-      <Inst geo={unit} mats={g.ckBoxes} k="#2a3038" />
+      <mesh geometry={g.ckTrim}>
+        <M k="#8f979f" side={THREE.DoubleSide} />
+      </mesh>
       <mesh geometry={g.ckWall}>
-        <M k="#1a1f25" side={THREE.DoubleSide} />
+        <M k="#5b636c" side={THREE.DoubleSide} />
       </mesh>
       <mesh geometry={g.ckFrame}>
         <M k="#0b0e12" side={THREE.DoubleSide} />
@@ -1630,7 +1671,7 @@ function Inst({ geo, mats, k, side, emit, cap }: { geo: THREE.BufferGeometry; ma
  * Bryły z własnymi materiałami (opony, tarcze hamulców) nie są przycinane w shaderze. Przy przekroju kadłuba chowamy
  * każdą taką bryłę, której środek leży w zdjętej połowie samolotu (poza zakresem przycinania).
  */
-function ClipCull({ children }: { children: ReactNode }) {
+export function ClipCull({ children }: { children: ReactNode }) {
   const clip = useContext(ClipCtx);
   const ref = useRef<THREE.Group>(null);
   const v = useMemo(() => new THREE.Vector3(), []);
@@ -1682,7 +1723,7 @@ export type FusView = 'home' | 'struct' | 'press' | 'decomp' | 'water' | 'fire' 
  */
 /** cargoT – czas scenariusza załadunku (s; −1 – przed „Rozpocznij”: kontenery na wózkach, drzwi zamknięte). */
 /** fog – gęstość mgły w kabinie 0…1, masks – postęp wypadania masek tlenowych 0…1, maskAge – czas od wypadnięcia (s). */
-export const FUS_LIVE = { dp: 0, cargo: 99, outflow: 1, cargoT: 1e9, fog: 0, masks: 0, maskAge: 0 };
+export const FUS_LIVE = { dp: 0, cargo: 99, outflow: 1, cargoT: 1e9, fog: 0, masks: 0, maskAge: 0, cargoUnload: false };
 
 /** Ładownie pod podłogą: podłoga i zakres w x. */
 const CARGO_Y = -2.45;
@@ -2146,16 +2187,15 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
     for (const y of [-0.55, 0.2]) B('#7f9a63', [gx, y, 0], [0.05, 0.07, 2 * half(y, gx) + 0.2]);
   }
 
-  // ---------- ściana kokpitu z pancernymi drzwiami ----------
+  // ---------- schodki do kokpitu: ściana z pancernymi drzwiami należy do modelu kokpitu (wbudowanego w samolot) ----------
   {
-    const XW = -32.1;
-    const fl = Math.min(hw(FLOOR + 0.05, XW), hw(FLOOR + 2.1, XW)) - 0.05;
-    for (const sg of [1, -1]) B('#9aa1a9', [XW, FLOOR + 1.05, sg * (0.43 + fl) / 2], [0.08, 2.1, fl - 0.43]);
-    B('#9aa1a9', [XW, FLOOR + 2.02, 0], [0.08, 0.16, 0.86]); // nadproże
-    B('#6b7280', [XW + 0.02, FLOOR + 0.97, 0], [0.06, 1.94, 0.84]); // drzwi
-    B('#d1d5db', [XW + 0.06, FLOOR + 1.0, 0.3], [0.02, 0.03, 0.14]); // klamka
-    B('#1f2937', [XW + 0.06, FLOOR + 1.35, 0.55], [0.02, 0.16, 0.1]); // panel kodu
-    B('#22c55e', [XW + 0.07, FLOOR + 1.4, 0.55], [0.01, 0.02, 0.03], undefined, '#22c55e');
+    const n = 4;
+    const rise = COCKPIT_FLOOR - FLOOR;
+    for (let i = 0; i < n; i++) {
+      const top = FLOOR + (rise * (i + 1)) / n;
+      const x1 = COCKPIT_REAR + 0.04 + (n - i) * 0.26;
+      B('#8b929b', [(COCKPIT_REAR + x1) / 2, (FLOOR + top) / 2, 0], [x1 - COCKPIT_REAR, top - FLOOR, 0.9]);
+    }
   }
 
   return [...groups.values()];
@@ -2454,10 +2494,7 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
     const spars = [xF, xR].map((x) => box([x, -2.07, 0], [0.08, 0.98, cw - 0.06]));
     // strop wnęki podwozia głównego (hermetyczna płyta nad kołami) – samą wnękę zajmuje schowane podwozie
     const bay = [box([1.3, -1.355, 0], [5.2, 0.03, 4.6])];
-    // radar pogodowy (uproszczony): płyta anteny na jarzmie, silniki obrotu i nadajniki-odbiorniki na grodzi
-    const ry = fusSec(-35.6).yc;
-    const radar = [box([RADOME_X - 0.5, ry, 0], [0.06, 0.76, 0.76])];
-    const radarMech = [box([RADOME_X - 0.3, ry, 0], [0.36, 0.1, 0.1]), box([RADOME_X - 0.12, ry, 0], [0.2, 0.42, 0.34]), box([RADOME_X - 0.14, ry - 0.62, 0.3], [0.26, 0.28, 0.32]), box([RADOME_X - 0.14, ry - 0.62, -0.3], [0.26, 0.28, 0.32])];
+    // radar pogodowy w nosie to model radaru (wbudowany w samolot – planeSystems), nie uproszczona kopia
     // ---------- kabina ----------
     // klasa biznes 1-2-1: fotele-łóżka ustawione skośnie („jodełka”), każdy przodem do swojego przejścia,
     // w kabinie z osłoną prywatności; rozstaw rzędów ok. 2 m. Klasa ekonomiczna 3-3-3.
@@ -2593,15 +2630,15 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
       const can = new THREE.Object3D();
       checkInside({
         beams: { ...U, mats: beams }, floor: { ...U, mats: floor }, struts: { ...U, mats: struts }, keel: { ...U, mats: keel },
-        centre: { ...U, mats: centre }, spars: { ...U, mats: spars }, bay: { ...U, mats: bay }, radar: { ...U, mats: radar },
-        radarMech: { ...U, mats: radarMech }, seatJ: { ...U, mats: seatJ }, seatY: { ...U, mats: seatY }, heads: { ...U, mats: heads },
+        centre: { ...U, mats: centre }, spars: { ...U, mats: spars }, bay: { ...U, mats: bay },
+        seatJ: { ...U, mats: seatJ }, seatY: { ...U, mats: seatY }, heads: { ...U, mats: heads },
         legs: { ...U, mats: legs }, bins: { ...U, mats: bins }, cargoFloor: { ...U, mats: cargoFloor }, rollers: { ...U, mats: rollers },
         bulkBags: { ...U, mats: bulkBags }, jack: { ...U, mats: jack },
         ld3: { geo: ld3, mats: CARGO_SLOTS.map((sl) => { can.position.set(sl.x, CARGO_Y + 0.03, 0); can.scale.set(1, 1, sl.z < 0 ? -1 : 1); can.position.z = sl.z; can.updateMatrix(); return can.matrix.clone(); }) },
         ...Object.fromEntries(detail.map((g, i) => [`detail ${g.k}${g.e ? ' (świeci)' : ''} #${i}`, { geo: g.g === 'capsule' ? capsule : g.g === 'cylX' ? cylX : g.g === 'cylV' ? cylV : g.g === 'cone' ? cone : g.g === 'ringH' ? ringH : g.g === 'sphere' ? sphere : unit, mats: g.m }])),
       });
     }
-    return { unit, liner, linerDoors, ring, ringThick, frames, cutFrames, cargoSurround, doorFrames, doorSills, stringers, beams, floor, struts, keel, bulk, bulkM, disc, fwdPlate, fireWall, centre, spars, bay, radar, radarMech, seatJ, seatY, heads, legs, bins, detail, winSurround, winReveal, winPane, winShade, winHandle, grilles, winSurroundGeo, winRevealGeo, winPaneGeo, winShadeGeo, winHandleGeo, grilleGeo, capsule, cylX, cylV, cone, ringH, sphere, ld3, cargoFloor, rollers, bulkBags, jack };
+    return { unit, liner, linerDoors, ring, ringThick, frames, cutFrames, cargoSurround, doorFrames, doorSills, stringers, beams, floor, struts, keel, bulk, bulkM, disc, fwdPlate, fireWall, centre, spars, bay, seatJ, seatY, heads, legs, bins, detail, winSurround, winReveal, winPane, winShade, winHandle, grilles, winSurroundGeo, winRevealGeo, winPaneGeo, winShadeGeo, winHandleGeo, grilleGeo, capsule, cylX, cylV, cone, ringH, sphere, ld3, cargoFloor, rollers, bulkBags, jack };
   }), []);
   // kontenery: w zakładce ładowni wjeżdżają po kolei przez drzwi ładowni (prawa burta) i jadą po rolkach na miejsce
   const cans = useRef<THREE.InstancedMesh>(null);
@@ -2674,8 +2711,6 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
       {/* wyposażenie */}
       {furnished && (
         <>
-          <Inst geo={d.unit} mats={d.radar} k="#c9b98a" />
-          <Inst geo={d.unit} mats={d.radarMech} k="#3a3f45" />
           <Inst geo={d.unit} mats={d.seatJ} k="seatJ" />
           <Inst geo={d.unit} mats={d.seatY} k="seatY" />
           <Inst geo={d.unit} mats={d.heads} k="#e5e7eb" />
@@ -5017,6 +5052,11 @@ export interface AirlinerProps {
   moduleLabels?: boolean;
   /** Moduł świateł: stan przełączników (każda lampa osobno, prawdziwe źródła światła, logo na stateczniku). */
   extLights?: ExtLights | null;
+  /**
+   * Symulacje podzespołów wbudowanych (kokpit, APU, radar) z ich modułów. Bez nich podzespoły i tak są w samolocie –
+   * w stanie spoczynku i z poziomem szczegółów zależnym od odległości kamery.
+   */
+  systems?: SystemsDrive;
 }
 
 const sideV = new THREE.Vector3();
@@ -5071,7 +5111,7 @@ function AirlinerBody(props: AirlinerProps) {
   return <AirlinerBodyInner {...props} {...(home ? {} : { interactive: false, links: false, partLabels: false, moduleLabels: false, wingLabels: false, wingPick: undefined, gearPick: undefined, fusPick: undefined })} />;
 }
 
-function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flow = true, animate = true, layers = {}, clip = null, wingOpen, wingLabels, interactive = true, partLabels = true, wingPick, mech, linksFrom = null, links = true, inFlight = false, landingLights = false, surfaces, gear, gearPick, enginePower, hilite = null, morph = null, extLights = null, moduleLabels = true, fusView = 'home', fusPick, engineCut = false, engineFeed = false, doorsOpen = false }: AirlinerProps) {
+function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flow = true, animate = true, layers = {}, clip = null, wingOpen, wingLabels, interactive = true, partLabels = true, wingPick, mech, linksFrom = null, links = true, inFlight = false, landingLights = false, surfaces, gear, gearPick, enginePower, hilite = null, morph = null, extLights = null, moduleLabels = true, fusView = 'home', fusPick, engineCut = false, engineFeed = false, doorsOpen = false, systems }: AirlinerProps) {
   // dodatkowy wznios względem modelu: połówka skrzydła (z silnikiem) obraca się wokół osi kadłuba
   const wingTilt = morph ? morph.dihedral * (Math.PI / 180) - W_DIH : 0;
   const wingLift = morph ? morph.wingY : 0;
@@ -5205,6 +5245,12 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
       </Environment>}
       {show('ground') && <Ground />}
       {show('fuselage') && part('fuselage', <Fuselage open={focus === 'fuselage'} apu={focus === 'apu'} radar={focus === 'radar'} view={fusView} labels={moduleLabels} pick={fusPick} doorsOpen={doorsOpen} />)}
+      {/* wnętrze nosa i ogona: kokpit, radar, APU – te same modele co w ich modułach, z poziomami szczegółów */}
+      {show('fuselage') && (
+        <Suspense fallback={null}>
+          <PlaneSystems focus={focus} fusView={focus === 'fuselage' ? fusView : null} inFlight={inFlight} drive={systems} />
+        </Suspense>
+      )}
       {show('tail') && part('tail', <Tail animate={focus === 'tail' && animate} surfaces={surfaces} open={focus === 'tail'} fin={morph ? morph.fin : 1} />)}
       {/* światła logo: w górnej powierzchni statecznika poziomego przy kadłubie, świecą na statecznik pionowy */}
       {show('tail') &&
@@ -5630,20 +5676,36 @@ function trainLead(h: number, m: number, t: number): number | null {
   const e = Math.max(0, Math.min(1, (t - (canStart(j0 + n - 1) + 0.25 * CARGO_CT)) / 8));
   return s + 110 * e * e;
 }
-/** Tor kontenera: z wózka na tylną platformę podnośnika, w górę do progu, przez drzwi do ładowni, po rolkach na miejsce. */
+/**
+ * Tor kontenera: z wózka na tylną platformę podnośnika, w górę do progu, przez drzwi do ładowni, po rolkach na miejsce.
+ * Rozładunek (FUS_LIVE.cargoUnload): kontenery wyjeżdżają w odwrotnej kolejności (najpierw te przy drzwiach) tą samą
+ * drogą w drugą stronę i trafiają na kolejne wózki pustych pociągów, które podjeżdżają przodem i odjeżdżają pełne.
+ */
 export function canPose(sl: (typeof CARGO_SLOTS)[number], t: number): { p: V3; u: number; yaw: number; vis: boolean } {
-  const door = CARGO_DOORS[sl.hold];
-  const u = t < 0 ? -1 : (t - canStart(sl.j)) / CARGO_CT;
-  const lerp = (a: number, b: number, k: number) => a + (b - a) * Math.max(0, Math.min(1, k));
-  if (u < 0) {
-    // na swoim wózku w pociągu
-    const P = TRAIN_PATHS[sl.hold];
-    const s = trainLead(sl.hold, Math.floor(sl.j / TRAIN_N), t);
-    const q = s === null ? null : pathAt(P, s - (sl.j % TRAIN_N) * DOLLY_P);
-    if (!q) return { p: [0, -50, 0], u, yaw: 0, vis: false };
-    return { p: [q.x, DOLLY_Y, q.z], u, yaw: q.yaw - P.yaw0, vis: true };
+  if (FUS_LIVE.cargoUnload && t >= 0) {
+    const q = holdCount(sl.hold) - 1 - sl.j;
+    const u = (t - canStart(q)) / CARGO_CT;
+    if (u < 0) return { p: [sl.x, SILL_Y, sl.z], u, yaw: 0, vis: true };
+    if (u < 1) return { ...canPath(sl, 1 - u), u };
+    return onDolly(sl.hold, q, t, u);
   }
-  const at = (p: V3) => ({ p, u, yaw: 0, vis: true });
+  const u = t < 0 ? -1 : (t - canStart(sl.j)) / CARGO_CT;
+  if (u < 0) return onDolly(sl.hold, sl.j, t, u);
+  return { ...canPath(sl, u), u };
+}
+/** Kontener na wózku nr j (kolejność w ładowni) w swoim pociągu. */
+function onDolly(hold: number, j: number, t: number, u: number): { p: V3; u: number; yaw: number; vis: boolean } {
+  const P = TRAIN_PATHS[hold];
+  const s = trainLead(hold, Math.floor(j / TRAIN_N), t);
+  const q = s === null ? null : pathAt(P, s - (j % TRAIN_N) * DOLLY_P);
+  if (!q) return { p: [0, -50, 0], u, yaw: 0, vis: false };
+  return { p: [q.x, DOLLY_Y, q.z], u, yaw: q.yaw - P.yaw0, vis: true };
+}
+/** Droga kontenera między wózkiem (u = 0) a miejscem w ładowni (u = 1). */
+function canPath(sl: (typeof CARGO_SLOTS)[number], u: number): { p: V3; yaw: number; vis: boolean } {
+  const door = CARGO_DOORS[sl.hold];
+  const lerp = (a: number, b: number, k: number) => a + (b - a) * Math.max(0, Math.min(1, k));
+  const at = (p: V3) => ({ p, yaw: 0, vis: true });
   if (u >= 1) return at([sl.x, SILL_Y, sl.z]);
   if (u < 0.2) return at([door, DOLLY_Y, lerp(ZD, LZ, u / 0.2)]);
   if (u < 0.45) return at([door, lerp(DOLLY_Y, SILL_Y, sm01((u - 0.2) / 0.25)), LZ]);
@@ -5664,8 +5726,10 @@ function liftY(h: number, t: number) {
   const lo = DOLLY_Y;
   const hi = SILL_Y;
   for (let j = 0; j < holdCount(h); j++) {
-    const u = (t - canStart(j)) / CARGO_CT;
-    if (u < 0 || u >= 1) continue;
+    const u0 = (t - canStart(j)) / CARGO_CT;
+    if (u0 < 0 || u0 >= 1) continue;
+    // rozładunek: ten sam ruch platformy w odwrotnej kolejności (w górę pusta, w dół z kontenerem)
+    const u = FUS_LIVE.cargoUnload ? 1 - u0 : u0;
     const k = u < 0.2 ? 0 : u < 0.45 ? sm01((u - 0.2) / 0.25) : u < 0.62 ? 1 : u < 0.88 ? 1 - sm01((u - 0.62) / 0.26) : 0;
     return lo + (hi - lo) * k;
   }

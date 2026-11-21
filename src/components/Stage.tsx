@@ -395,7 +395,7 @@ function Stage3D({ step, params, active, spots, pauseSlot }: { step: Step; param
               <SceneSlot key={e.key} entry={e} hidden={hidden} warm={warm} slot={slot} />
             ))}
             {spots && active && <SpotMarkers nav={spots} />}
-            <OrbitControls makeDefault target={orbitTarget} enableDamping dampingFactor={0.08} minDistance={1.5} maxDistance={260} />
+            <OrbitControls makeDefault target={orbitTarget} enableDamping dampingFactor={0.08} minDistance={cur.cameraInside ? 0.3 : 1.5} maxDistance={260} />
           </PauseContext.Provider>
         </Canvas>
         <StatusBar paused={paused} onToggle={() => setPaused((p) => !p)} hint slot={active ? pauseSlot : null} />

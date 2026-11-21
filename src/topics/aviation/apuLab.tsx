@@ -7,7 +7,7 @@
  * Wartości są typowe, ale przybliżone (dokładne granice podaje dokumentacja samolotu). Czas symulacji płynie trzy razy
  * szybciej niż w samolocie – rozruch trwa ok. 50 s, a tu ok. 17 s.
  */
-import { useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -91,7 +91,8 @@ export type ApuSim = {
   crew: string;
 };
 
-const newSim = (): ApuSim => ({
+/** Stan początkowy APU (wyłączone) – także dla APU wbudowanego w samolot poza modułem APU. */
+export const newApuSim = (): ApuSim => ({
   master: false,
   startReq: false,
   bleedSw: false,
@@ -185,7 +186,7 @@ function crewScript(s: ApuSim, mode: ApuMode, fault: string) {
 
 /** APU zimne (wyłączone) albo pracujące, gotowe do pracy (AVAIL) – stan na początku zakładki. */
 function presetSim(s: ApuSim, running: boolean, bleed = false) {
-  Object.assign(s, newSim(), { elecLoad: s.elecLoad });
+  Object.assign(s, newApuSim(), { elecLoad: s.elecLoad });
   if (running) Object.assign(s, { master: true, flap: 1, n: 100, egt: 420, oilP: 55, ff: 140, fuelOn: true, availT: 5, avail: true, bleedSw: bleed, valve: bleed ? 1 : 0, sinceBleed: bleed ? 0 : 999 });
 }
 
@@ -325,7 +326,7 @@ function phaseOf(s: ApuSim): string {
  * potem co klatkę symulacja. Przyciski panelu górnego zmieniają stan bezpośrednio.
  */
 export function useApuDriver(mode: ApuMode | null, params: Params) {
-  const sim = useRef<ApuSim>(newSim());
+  const sim = useRef<ApuSim>(newApuSim());
   const prev = useRef('');
   useFrame((_, dtRaw) => {
     if (!mode) return;
@@ -483,9 +484,10 @@ function Puffs({ sim, kind }: { sim: MutableRefObject<ApuSim>; kind: 'fire' | 'a
  */
 /**
  * Model APU w stożku ogonowym. `section` – samo APU do przekroju w module kadłuba (bez wyściółki przedziału, grodzi,
- * klapy wlotu i smug przepływu – te rysuje kadłub albo moduł APU).
+ * klapy wlotu i smug przepływu – te rysuje kadłub albo moduł APU). `detail` – poziom szczegółów: bez niego (kamera
+ * daleko) zostają obudowy, prądnica, skrzynka napędów i kanały; wirniki, zawór, butla, pętla czujnika i dym – tylko z bliska.
  */
-export function ApuModel({ sim, mode, section = false }: { sim: MutableRefObject<ApuSim>; mode: ApuMode; section?: boolean }) {
+export function ApuModel({ sim, mode, section = false, detail = true }: { sim: MutableRefObject<ApuSim>; mode: ApuMode; section?: boolean; detail?: boolean }) {
   const g = useMemo(() => {
     // gródź ogniowa: płyta dopasowana do przekroju stożka
     const ring: V3[] = Array.from({ length: 49 }, (_, i) => fp(X.wall, -Math.PI + (i / 48) * Math.PI * 2, 0.03));
@@ -611,6 +613,19 @@ export function ApuModel({ sim, mode, section = false }: { sim: MutableRefObject
       <mesh geometry={g.silencer}>{M('#77706a', 0.5, 0.5)}</mesh>
       <mesh geometry={g.inlet}>{M('#c4cbd2', 0.4, 0.45)}</mesh>
       <mesh geometry={g.bleed}>{M('#c7ccd1', 0.7, 0.3)}</mesh>
+      {detail && <ApuDetail sim={sim} valveG={valveG} />}
+      {mode !== 'loads' && !section && <ApuFlowViz sim={sim} detailed={mode === 'flow'} />}
+    </group>
+  );
+}
+
+/** Drobne części APU (tylko z bliska): zawór upustowy, wał z wirnikami, butla gaśnicza, pętla czujnika pożaru, dym. */
+function ApuDetail({ sim, valveG }: { sim: MutableRefObject<ApuSim>; valveG: RefObject<THREE.Mesh> }) {
+  const M = (color: string, metal = 0.6, rough = 0.4) => <meshStandardMaterial color={color} metalness={metal} roughness={rough} side={THREE.DoubleSide} />;
+  const bottleLine = useMemo(() => tubeGeo([[32.35, 1.55, -0.1], [32.6, 1.6, 0], [X.wall + 0.15, 1.62, 0.05]], 0.025, 12), []);
+  const fireLoop = useMemo(() => tubeGeo([[X.wall + 0.1, AY + 0.48, -0.3], [33.8, AY + 0.52, -0.42], [34.6, AY + 0.45, -0.38], [34.9, AY - 0.35, -0.3], [33.9, AY - 0.42, -0.35], [X.wall + 0.1, AY - 0.4, -0.3]], 0.012, 60), []);
+  return (
+    <>
       {/* zawór upustowy (przepustnica) na przewodzie */}
       <group position={[33.18, AY + 0.6, 0]}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
@@ -637,13 +652,12 @@ export function ApuModel({ sim, mode, section = false }: { sim: MutableRefObject
         <sphereGeometry args={[0.15, 20, 14]} />
         {M('#c0392b', 0.3, 0.45)}
       </mesh>
-      <mesh geometry={useMemo(() => tubeGeo([[32.35, 1.55, -0.1], [32.6, 1.6, 0], [X.wall + 0.15, 1.62, 0.05]], 0.025, 12), [])}>{M('#b5382b', 0.3, 0.5)}</mesh>
+      <mesh geometry={bottleLine}>{M('#b5382b', 0.3, 0.5)}</mesh>
       {/* czujnik pożaru: pętla wokół przedziału */}
-      <mesh geometry={useMemo(() => tubeGeo([[X.wall + 0.1, AY + 0.48, -0.3], [33.8, AY + 0.52, -0.42], [34.6, AY + 0.45, -0.38], [34.9, AY - 0.35, -0.3], [33.9, AY - 0.42, -0.35], [X.wall + 0.1, AY - 0.4, -0.3]], 0.012, 60), [])}>{M('#e04b3a', 0.2, 0.5)}</mesh>
+      <mesh geometry={fireLoop}>{M('#e04b3a', 0.2, 0.5)}</mesh>
       <Puffs sim={sim} kind="fire" />
       <Puffs sim={sim} kind="agent" />
-      {mode !== 'loads' && !section && <ApuFlowViz sim={sim} detailed={mode === 'flow'} />}
-    </group>
+    </>
   );
 }
 

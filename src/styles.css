@@ -2728,3 +2728,18 @@ kbd {
   left: 18px;
   bottom: 64px;
 }
+
+/* dymki cyklu „Od lądowania do lądowania” – płynne pojawienie się przy nowym zdarzeniu */
+@keyframes cycleBubbleIn {
+  from {
+    opacity: 0;
+    margin-top: 8px;
+  }
+  to {
+    opacity: 1;
+    margin-top: 0;
+  }
+}
+[data-labels='off'] .cycle-bubble {
+  display: none;
+}
