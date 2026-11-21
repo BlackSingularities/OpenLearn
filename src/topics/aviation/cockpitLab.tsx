@@ -17,6 +17,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { PartModule, SceneProps, Step } from '../../lib/types';
 import { InfoPortal } from '../../lib/plot';
+import { speedInText, useSpeed } from '../../components/ui';
 import { useSceneHidden } from '../../lib/topicNav';
 import { AIRBUS, CockpitDock, Ecam, EngStartPanel, FlapLever, GearLever, Nd, PanelBox, Pfd, Pushbutton, Sidestick, SpeedBrakeLever, ThrustLevers, cockpitFont, type EcamPage } from '../../components/cockpit';
 
@@ -1787,7 +1788,6 @@ function useTicker(hz = 8) {
 }
 
 const fi = (v: number) => Math.round(v).toLocaleString('pl-PL');
-const kmh = (kt: number) => fi(kt * 1.852);
 const meters = (ft: number) => fi(ft * 0.3048);
 
 /** Przyciski panelu górnego używane w scenariuszu – w doku (tylko wskaźniki, przestawia je załoga). */
@@ -1826,6 +1826,8 @@ function FireDock({ st }: { st: CkState }) {
 
 function CockpitOverlay({ sim, sel, setSel }: { sim: MutableRefObject<Sim>; sel: string | null; setSel: (s: string | null) => void }) {
   useTicker();
+  // prędkości w ramce i w opisie czynności załogi – w jednostce z ustawień (ekrany kokpitu zostają w węzłach)
+  const sp = useSpeed();
   const s = sim.current;
   const st = s.st;
   const mode = s.mode;
@@ -1917,7 +1919,7 @@ function CockpitOverlay({ sim, sel, setSel }: { sim: MutableRefObject<Sim>; sel:
         {scenario && (
           <>
             {running ? (
-              st.crew && <div style={{ fontSize: 13, color: AIRBUS.cyan }}>{st.crew}</div>
+              st.crew && <div style={{ fontSize: 13, color: AIRBUS.cyan }}>{speedInText(st.crew, sp.u)}</div>
             ) : (
               <div style={{ fontSize: 12, color: '#facc15' }}>{mode === 'pfd' || mode === 'ecam' ? 'Wybierz scenariusz i naciśnij „Rozpocznij”.' : 'Naciśnij „Rozpocznij”.'}</div>
             )}
@@ -1934,7 +1936,7 @@ function CockpitOverlay({ sim, sel, setSel }: { sim: MutableRefObject<Sim>; sel:
               <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '2px 14px', fontSize: 13 }}>
                 <span>prędkość</span>
                 <b>
-                  {fi(st.ias)} kt <span style={{ opacity: 0.6, fontWeight: 400 }}>({kmh(st.ias)} km/h)</span>
+                  {sp.fmt(st.ias * 0.5144)} <span style={{ opacity: 0.6, fontWeight: 400 }}>(na PFD: {fi(st.ias)} kt)</span>
                 </b>
                 <span>wysokość</span>
                 <b>

@@ -20,6 +20,7 @@ import { useFrame } from '@react-three/fiber';
 import type { PartModule, SceneProps, Step } from '../../lib/types';
 import { InfoPortal } from '../../lib/plot';
 import { AIRBUS, CockpitDock, Ecam, Nd, Pfd } from '../../components/cockpit';
+import { Spd, speedInText, useSpeed } from '../../components/ui';
 import {
   Airliner,
   CARGO_DOORS,
@@ -46,7 +47,7 @@ import {
   placeBetween,
   type Mech,
 } from './airliner';
-import { AirportModel, EXIT } from './runway';
+import { A1_U, AirportModel, EXIT, GATE, TWY_V } from './runway';
 import { StageCamera } from './airSystem';
 import { GpuCart, EXT_SOCKET } from './electrics';
 import { FuelTruck, REFUEL_LAY } from './refuel';
@@ -71,12 +72,8 @@ const lerp3 = (a: V3, b: V3, k: number): V3 => [lerp(a[0], b[0], k), lerp(a[1], 
 
 /* ======================= trasy po lotnisku ======================= */
 
-/** Stanowisko przy terminalu: położenie samolotu (u, v) – nos w stronę terminalu (−v). */
-const GATE = { u: 1560, v: -272 };
+/** Stanowisko A1 przy terminalu (wspólny model lotniska): nos w stronę terminalu (−v). */
 const GATE_PSI = -Math.PI / 2;
-/** Środek drogi kołowania równoległej do pasa (v) i łącznika do progu (u). */
-const TWY_V = -110;
-const A1_U = 40;
 
 type Sample = { u: number; v: number; psi: number; s: number; k: number };
 type Route = { S: Sample[]; L: number };
@@ -1178,67 +1175,6 @@ function MovingWorld({ live, children }: { live: Live; children: ReactNode }) {
   );
 }
 
-/** Pas biały / żółty na płycie (układ lotniska). */
-function Strip({ u0, u1, v0, v1, c, y = 0.004 }: { u0: number; u1: number; v0: number; v1: number; c: string; y?: number }) {
-  return (
-    <mesh position={[-(u0 + u1) / 2, G + y, (v0 + v1) / 2]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-      <planeGeometry args={[Math.max(0.2, Math.abs(u1 - u0)), Math.max(0.2, Math.abs(v1 - v0))]} />
-      <meshStandardMaterial color={c} roughness={0.8} emissive={c} emissiveIntensity={c === '#d9a520' ? 0.2 : 0} />
-    </mesh>
-  );
-}
-
-/**
- * Część lotniska potrzebna w cyklu, której wspólny model nie ma: droga kołowania równoległa do pasa z łącznikiem do
- * progu i punktem oczekiwania, płyta z kolejnym stanowiskiem przy terminalu (linia wjazdu, linia zatrzymania, tablica
- * dokowania) i przedłużenie budynku terminalu.
- */
-function GateArea() {
-  const Y = '#d9a520';
-  const w = 23;
-  return (
-    <group>
-      {/* droga równoległa i łącznik A1 */}
-      <Strip u0={A1_U - w / 2} u1={EXIT.u + EXIT.R + w / 2} v0={TWY_V - w / 2} v1={TWY_V + w / 2} c="#33373c" y={-0.006} />
-      <Strip u0={A1_U - w / 2} u1={A1_U + w / 2} v0={TWY_V} v1={-23} c="#33373c" y={-0.006} />
-      <Strip u0={A1_U} u1={EXIT.u + EXIT.R} v0={TWY_V - 0.15} v1={TWY_V + 0.15} c={Y} />
-      <Strip u0={A1_U - 0.15} u1={A1_U + 0.15} v0={TWY_V} v1={-1} c={Y} />
-      {/* punkt oczekiwania przed pasem: dwie linie ciągłe i dwie przerywane */}
-      {[0, 0.9].map((d) => (
-        <Strip key={d} u0={A1_U - w / 2} u1={A1_U + w / 2} v0={-78 - d} v1={-78.3 - d} c={Y} />
-      ))}
-      {Array.from({ length: 7 }, (_, i) => (
-        <group key={i}>
-          <Strip u0={A1_U - w / 2 + i * 3.4} u1={A1_U - w / 2 + i * 3.4 + 2} v0={-79.9} v1={-80.2} c={Y} />
-          <Strip u0={A1_U - w / 2 + i * 3.4} u1={A1_U - w / 2 + i * 3.4 + 2} v0={-80.8} v1={-81.1} c={Y} />
-        </group>
-      ))}
-      {/* płyta przy nowym stanowisku */}
-      <Strip u0={GATE.u - 120} u1={EXIT.u - 2} v0={-321} v1={TWY_V - w / 2} c="#3a3e44" y={-0.009} />
-      {/* linia wjazdu i linia zatrzymania przedniego koła */}
-      <Strip u0={GATE.u - 0.15} u1={GATE.u + 0.15} v0={GATE.v + NOSE_X - 1} v1={TWY_V} c={Y} />
-      <Strip u0={GATE.u - 4} u1={GATE.u + 4} v0={GATE.v + NOSE_X - 0.3} v1={GATE.v + NOSE_X + 0.3} c={Y} />
-      {/* czerwona linia ograniczenia sprzętu i pola postoju sprzętu */}
-      {[
-        [GATE.u - 38, GATE.u - 37.6, -318, -230],
-        [GATE.u + 37.6, GATE.u + 38, -318, -230],
-      ].map(([a, b, c, d], i) => (
-        <Strip key={i} u0={a} u1={b} v0={c} v1={d} c="#c8352b" />
-      ))}
-      {/* przedłużenie terminalu nad nowym stanowiskiem */}
-      <mesh position={[-(GATE.u - 0), -G * 0 + G + 7, -328]} raycast={() => null}>
-        <boxGeometry args={[240, 14, 16]} />
-        <meshStandardMaterial color="#8a929b" roughness={0.85} />
-      </mesh>
-      {/* przeszklenie terminalu */}
-      <mesh position={[-GATE.u, G + 7.5, -319.9]} raycast={() => null}>
-        <planeGeometry args={[236, 6]} />
-        <meshStandardMaterial color="#5e7a92" roughness={0.2} metalness={0.4} />
-      </mesh>
-    </group>
-  );
-}
-
 /* ---------- tablica dokowania (VDGS) ---------- */
 function DockingBoard({ live }: { live: Live }) {
   const tex = useMemo(() => {
@@ -1738,6 +1674,10 @@ function Clouds({ live }: { live: Live }) {
 
 /** Niebo wokół sceny (gradient) – na płycie i w locie. */
 function Sky() {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(({ camera }) => {
+    if (ref.current) ref.current.position.copy(camera.position);
+  });
   const geo = useMemo(() => {
     const g = new THREE.SphereGeometry(440, 40, 20);
     const pos = g.getAttribute('position');
@@ -1756,8 +1696,8 @@ function Sky() {
     return g;
   }, []);
   return (
-    <mesh geometry={geo} raycast={() => null}>
-      <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} depthWrite={false} toneMapped={false} />
+    <mesh ref={ref} geometry={geo} raycast={() => null} renderOrder={-1}>
+      <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} depthWrite={false} depthTest={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -1833,7 +1773,6 @@ function CycleScene({ params }: SceneProps) {
         <group position={[0, G - 0.03, 0]}>
           <AirportModel />
         </group>
-        <GateArea />
         <DockingBoard live={live} />
         <GateFrame>
           {[0, 1].map((i) => (
@@ -1966,6 +1905,8 @@ function CycleEcam({ st }: { st: CycSt }) {
 (CycleEcam as unknown as { cockpitSlot: string }).cockpitSlot = 'ecam';
 
 function CycleOverlay({ st, seg, segIdx, t }: { st: CycSt; seg: Seg | null; segIdx: number; t: number }) {
+  // prędkości w opisach i w ramce – w jednostce z ustawień
+  const sp = useSpeed();
   const flying = st.flight || st.altFt > 1;
   const pfd = <Pfd pitch={st.pitch} bank={st.bank} ias={st.ias} alt={st.altFt} vs={st.vs} heading={((st.psi / DEG) % 360 + 360 + 90) % 360} ra={st.altFt < 2500 ? st.altFt : undefined} fma={flying ? ['SPEED', st.vs > 300 ? 'CLB' : st.vs < -300 ? 'DES' : 'ALT CRZ', 'NAV', '', 'AP1\n1FD2\nA/THR'] : ['', '', '', '', '1FD2']} />;
   const events = seg ? seg.events : null;
@@ -1991,10 +1932,10 @@ function CycleOverlay({ st, seg, segIdx, t }: { st: CycSt; seg: Seg | null; segI
           list.forEach(([tt], i) => {
             if (t >= tt) k = i;
           });
-          const next = events && k + 1 < list.length ? list[k + 1][1] : null;
+          const next = events && k + 1 < list.length ? speedInText(list[k + 1][1], sp.u) : null;
           return (
             <>
-              <div style={{ fontSize: 13, color: AIRBUS.cyan }}>{list[k]?.[1]}</div>
+              <div style={{ fontSize: 13, color: AIRBUS.cyan }}>{speedInText(list[k]?.[1] ?? '', sp.u)}</div>
               {next && <div style={{ fontSize: 12, opacity: 0.5 }}>Dalej: {next}</div>}
               {events && (
                 <div style={{ display: 'flex', gap: 3 }} aria-label={`krok ${k + 1} z ${list.length}`}>
@@ -2014,7 +1955,7 @@ function CycleOverlay({ st, seg, segIdx, t }: { st: CycSt; seg: Seg | null; segI
           {st.ias > 1 && (
             <>
               <span>prędkość</span>
-              <b>{f0(st.ias * 1.852)} km/h</b>
+              <b>{sp.fmt(st.ias * 0.5144)}</b>
             </>
           )}
           {flying && (
@@ -2141,10 +2082,10 @@ const BODIES: Record<string, ReactNode> = {
   takeoff: (
     <>
       <P>
-        Samolot stoi na osi pasa. Kapitan przesuwa dźwignie ciągu, silniki wchodzą na moc startową i samolot przyspiesza – ok. 2 m/s², czyli od zera do ok. 280 km/h w niecałe 40 s.
+        Samolot stoi na osi pasa. Kapitan przesuwa dźwignie ciągu, silniki wchodzą na moc startową i samolot przyspiesza – ok. 2 m/s², czyli od zera do ok. <Spd kmh={280} /> w niecałe 40 s.
       </P>
       <P>
-        Przy prędkości <b>VR</b> (ok. 280 km/h) pilot ciągnie drążek i nos się unosi. Chwilę później koła odrywają się od pasa. Gdy wskaźniki potwierdzą wznoszenie, drugi pilot chowa <b>podwozie</b>.
+        Przy prędkości <b>VR</b> (ok. <Spd kmh={280} />) pilot ciągnie drążek i nos się unosi. Chwilę później koła odrywają się od pasa. Gdy wskaźniki potwierdzą wznoszenie, drugi pilot chowa <b>podwozie</b>.
       </P>
     </>
   ),
@@ -2166,9 +2107,9 @@ const BODIES: Record<string, ReactNode> = {
   ),
   roll: (
     <>
-      <P>Samolot hamuje na pasie odwracaczami ciągu i hamulcami kół. Przy ok. 130 km/h pilot chowa odwracacze – przy małej prędkości mogłyby wyrzucać kamienie i spaliny do wlotów silników.</P>
+      <P>Samolot hamuje na pasie odwracaczami ciągu i hamulcami kół. Przy ok. <Spd kmh={130} /> pilot chowa odwracacze – przy małej prędkości mogłyby wyrzucać kamienie i spaliny do wlotów silników.</P>
       <P>
-        Zjazd szybki pozwala opuścić pas przy prędkości ok. 30 km/h, bez zatrzymywania się – kolejny samolot może lądować wcześniej. Gdy samolot jest za linią pasa, gasną stroboskopy i reflektory, a klapy się chowają. Tu cykl się zamyka: w zakładce „Wjazd na stanowisko” zaczyna się od nowa.
+        Zjazd szybki pozwala opuścić pas przy prędkości ok. <Spd kmh={30} />, bez zatrzymywania się – kolejny samolot może lądować wcześniej. Gdy samolot jest za linią pasa, gasną stroboskopy i reflektory, a klapy się chowają. Tu cykl się zamyka: w zakładce „Wjazd na stanowisko” zaczyna się od nowa.
       </P>
     </>
   ),

@@ -352,6 +352,25 @@ export function useSpeedFmt() {
   };
 }
 
+/** Liczba prędkości do tekstu: km/h bez zmian, węzły zaokrąglone do 5 (powyżej 50), m/s do całości. */
+function speedText(kmh: number, u: SpeedUnit) {
+  const v = kmh * SPEED_PER_KMH[u];
+  const r = u === 'kt' && v > 50 ? Math.round(v / 5) * 5 : Math.round(v);
+  return `${r.toLocaleString('pl-PL')} ${SPEED_LABEL[u]}`;
+}
+/**
+ * Tekst opisu z prędkościami zapisanymi w km/h („ok. 30 km/h”, „185 km/h”) przeliczony na wybraną jednostkę –
+ * opisy piszemy w km/h, a czytelnik widzi je w swojej jednostce.
+ */
+export function speedInText(text: string, u: SpeedUnit) {
+  if (u === 'kmh') return text;
+  return text.replace(/(\d[\d\s ]*)\s?km\/h/g, (_, n: string) => speedText(Number(n.replace(/[\s ]/g, '')), u));
+}
+/** Prędkość w opisie (podana w km/h) w jednostce z ustawień. */
+export function Spd({ kmh }: { kmh: number }) {
+  return <>{speedText(kmh, useSpeedUnit())}</>;
+}
+
 /** Prędkość w wybranej jednostce: sama liczba (val), etykieta jednostki (unit) i gotowy tekst (fmt). */
 export function useSpeed() {
   const u = useSpeedUnit();
