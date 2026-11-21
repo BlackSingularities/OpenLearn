@@ -1267,6 +1267,139 @@ function OitSvg() {
   );
 }
 
+/**
+ * VD (Vertical Display) – dolna część ekranu pod ND w A350: profil pionowy lotu wzdłuż trasy w zasięgu mapy.
+ * Z lewej skala wysokości, symbol samolotu na obecnej wysokości, zielona ścieżka (według prędkości pionowej), niebieska
+ * linia wysokości wybranej na FCU, brązowy teren pod trasą (przy ziemi), na dole skala odległości w milach morskich.
+ */
+function VdSvg({ st }: { st: CkState }) {
+  const W = 520;
+  const H = 230;
+  const X0 = 74;
+  const X1 = W - 14;
+  const Y0 = 18;
+  const Y1 = H - 34;
+  const range = st.ndRange;
+  // okno wysokości: przy ziemi 0…6000 ft, wyżej – wokół obecnej wysokości
+  const low = st.alt < 4000;
+  const span = low ? 6000 : 12000;
+  const a0 = low ? 0 : Math.max(0, Math.round((st.alt - 8000) / 1000) * 1000);
+  const ay = (alt: number) => Y1 - ((alt - a0) / span) * (Y1 - Y0);
+  const dx = (nm: number) => X0 + (nm / range) * (X1 - X0);
+  const gs = Math.max(120, st.ground ? st.ias : st.tas - 20);
+  // ścieżka: wysokość po przeleceniu d mil przy obecnej prędkości pionowej, ograniczona wysokością wybraną
+  const sel = st.fcu.alt;
+  const path = Array.from({ length: 21 }, (_, i) => {
+    const d = (range * i) / 20;
+    let alt = st.alt + st.vs * ((d / gs) * 60);
+    if (st.vs > 0) alt = Math.min(alt, Math.max(st.alt, sel));
+    if (st.vs < 0) alt = Math.max(alt, Math.min(st.alt, sel), 0);
+    return `${i ? 'L' : 'M'}${dx(d).toFixed(1)} ${ay(alt).toFixed(1)}`;
+  }).join(' ');
+  // teren: pagórki widoczne tylko w oknie przy ziemi
+  const terrain = Array.from({ length: 27 }, (_, i) => {
+    const d = (range * i) / 26;
+    const h = 250 + 600 * (0.5 + 0.5 * Math.sin(i * 1.3 + 0.7)) * (0.6 + 0.4 * Math.sin(i * 0.37));
+    return `L${dx(d).toFixed(1)} ${Math.min(Y1, ay(h)).toFixed(1)}`;
+  }).join(' ');
+  const ticks = [0, 0.25, 0.5, 0.75, 1];
+  const F = cockpitFont;
+  const power = st.power > 0.6;
+  if (!power) return null;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+      <rect x={0} y={0} width={W} height={H} fill="#05070a" />
+      {/* skala wysokości */}
+      <line x1={X0} x2={X0} y1={Y0} y2={Y1} stroke="#f2f4f6" strokeWidth={2} />
+      {[0, 0.25, 0.5, 0.75, 1].map((k) => {
+        const alt = a0 + span * k;
+        return (
+          <g key={k}>
+            <line x1={X0 - 8} x2={X0} y1={ay(alt)} y2={ay(alt)} stroke="#f2f4f6" strokeWidth={2} />
+            <text x={X0 - 12} y={ay(alt) + 5} fill="#f2f4f6" fontSize={14} textAnchor="end" fontFamily={F}>
+              {alt >= 10000 ? `FL${Math.round(alt / 100)}` : Math.round(alt)}
+            </text>
+          </g>
+        );
+      })}
+      {/* teren pod trasą */}
+      {low && <path d={`M${X0} ${Y1} ${terrain} L${X1} ${Y1} Z`} fill="#6b3d17" stroke="#a45b22" strokeWidth={1.5} />}
+      {/* wysokość wybrana na FCU */}
+      {sel >= a0 && sel <= a0 + span && <line x1={X0} x2={X1} y1={ay(sel)} y2={ay(sel)} stroke={AIRBUS.cyan} strokeWidth={2} strokeDasharray="10 7" />}
+      {/* ścieżka lotu i punkt trasy */}
+      <path d={path} fill="none" stroke={AIRBUS.green} strokeWidth={3} />
+      <g transform={`translate(${dx(range * 0.62)} ${ay(Math.max(a0, Math.min(a0 + span, st.alt)))})`}>
+        <path d="M0 -9 L3 -3 L9 -3 L4 1 L6 8 L0 4 L-6 8 L-4 1 L-9 -3 L-3 -3 Z" fill="none" stroke={AIRBUS.magenta} strokeWidth={1.6} />
+        <text x={0} y={-14} fill={AIRBUS.magenta} fontSize={13} textAnchor="middle" fontFamily={F}>
+          {st.target}
+        </text>
+      </g>
+      {/* samolot */}
+      <path d={`M${X0 + 2} ${ay(Math.max(a0, Math.min(a0 + span, st.alt)))} l18 0 l-6 -7 M${X0 + 20} ${ay(Math.max(a0, Math.min(a0 + span, st.alt)))} l-6 7`} stroke={AIRBUS.yellow} strokeWidth={3.5} fill="none" />
+      {/* skala odległości */}
+      <line x1={X0} x2={X1} y1={Y1} y2={Y1} stroke="#f2f4f6" strokeWidth={2} />
+      {ticks.map((k) => (
+        <g key={k}>
+          <line x1={dx(range * k)} x2={dx(range * k)} y1={Y1} y2={Y1 + 7} stroke="#f2f4f6" strokeWidth={2} />
+          {k > 0 && (
+            <text x={dx(range * k)} y={Y1 + 24} fill={AIRBUS.cyan} fontSize={14} textAnchor={k === 1 ? 'end' : 'middle'} fontFamily={F}>
+              {Math.round(range * k)}
+            </text>
+          )}
+        </g>
+      ))}
+      <text x={8} y={H - 10} fill="#f2f4f6" fontSize={13} fontFamily={F}>
+        VD
+      </text>
+    </svg>
+  );
+}
+
+/**
+ * Skrzynka łączności z kontrolą ruchu (ATC MAILBOX) – dolna część ekranu pod PFD w A350. Wiadomości tekstowe
+ * (datalink CPDLC) od kontrolera i odpowiedzi pilota przyciskami, zamiast rozmowy przez radio.
+ */
+function MailboxSvg({ st }: { st: CkState }) {
+  const W = 520;
+  const H = 230;
+  const F = cockpitFont;
+  if (st.power <= 0.6) return null;
+  const msg = st.ground ? 'CLEARED TO LFBO VIA ROUTE · SQUAWK 4421' : st.alt > 20000 ? `CLIMB TO AND MAINTAIN FL${Math.round(st.fcu.alt / 100)}` : 'CONTACT WARSZAWA 128.775';
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
+      <rect x={0} y={0} width={W} height={H} fill="#05070a" />
+      <rect x={0} y={0} width={W} height={30} fill="#1d2530" />
+      <text x={12} y={21} fill="#f2f4f6" fontSize={15} fontWeight={700} fontFamily={F}>
+        ATC MAILBOX
+      </text>
+      <text x={W - 12} y={21} fill={AIRBUS.green} fontSize={14} textAnchor="end" fontFamily={F}>
+        ATC: EPWW
+      </text>
+      <text x={14} y={60} fill={AIRBUS.cyan} fontSize={13} fontFamily={F}>
+        1235Z FROM EPWW
+      </text>
+      <rect x={10} y={68} width={W - 20} height={62} rx={4} fill="#0d141c" stroke="#3a4a5c" />
+      <text x={20} y={95} fill="#f2f4f6" fontSize={15} fontFamily={F}>
+        {msg}
+      </text>
+      <text x={20} y={119} fill={AIRBUS.green} fontSize={13} fontFamily={F}>
+        OPEN
+      </text>
+      {['WILCO', 'UNABLE', 'STBY', 'MSG LIST'].map((k, i) => (
+        <g key={k}>
+          <rect x={12 + i * 126} y={150} width={116} height={34} rx={4} fill="#27303b" stroke="#4a5a6c" />
+          <text x={70 + i * 126} y={172} fill={i === 0 ? AIRBUS.green : '#e6edf5'} fontSize={14} textAnchor="middle" fontFamily={F}>
+            {k}
+          </text>
+        </g>
+      ))}
+      <text x={14} y={H - 14} fill="#8796a6" fontSize={12} fontFamily={F}>
+        CPDLC · 2 MSG
+      </text>
+    </svg>
+  );
+}
+
 /** MFD – połowa dolnego ekranu: strona komputera zarządzania lotem (plan lotu, zielone i niebieskie pola). */
 function MfdSvg({ st }: { st: CkState }) {
   const rows: [string, string, string][] = [
@@ -1761,6 +1894,8 @@ function CockpitDetailed({ sim }: { sim: MutableRefObject<Sim> }) {
     isis: useCanvasTex(200, 200),
     oit: useCanvasTex(760, 480),
     mfd: useCanvasTex(360, 480),
+    vd: useCanvasTex(520, 230),
+    mbx: useCanvasTex(520, 230),
   };
   const pfdEl = () => {
     const s = S();
@@ -1791,13 +1926,15 @@ function CockpitDetailed({ sim }: { sim: MutableRefObject<Sim> }) {
       <SvgPainter render={() => <PedestalSvg st={S()} />} targets={[{ tex: tex.ped, bg: PANEL }]} keyOf={() => pedKey(S())} />
       <SvgPainter render={() => (S().power > 0 ? <IsisSvg st={S()} /> : null)} targets={[{ tex: tex.isis }]} keyOf={() => { const s = S(); return `${Math.round(s.pitch * 2)}|${Math.round(s.bank)}|${Math.round(s.ias)}|${Math.round(s.alt / 100)}|${s.power > 0}`; }} />
       <SvgPainter render={() => (S().power > 0.6 ? <OitSvg /> : null)} targets={[{ tex: tex.oit }]} keyOf={() => String(S().power > 0.6)} />
+      <SvgPainter render={() => <VdSvg st={S()} />} targets={[{ tex: tex.vd }]} keyOf={() => { const s = S(); return `${Math.round(s.alt / 50)}|${Math.round(s.vs / 100)}|${s.ndRange}|${s.fcu.alt}|${s.target}|${s.power > 0.6}|${Math.round(s.tas / 10)}`; }} />
+      <SvgPainter render={() => <MailboxSvg st={S()} />} targets={[{ tex: tex.mbx }]} keyOf={() => { const s = S(); return `${s.ground}|${s.alt > 20000}|${s.fcu.alt}|${s.power > 0.6}`; }} />
       <SvgPainter render={() => (S().power > 0.6 ? <MfdSvg st={S()} /> : null)} targets={[{ tex: tex.mfd }]} keyOf={() => `${S().power > 0.6}|${S().alt > 18000}`} />
       <CockpitEquipment sim={sim} tex={tex} />
     </>
   );
 }
 
-type CkTex = Record<'pfd' | 'nd' | 'ewd' | 'sd' | 'oh' | 'fcu' | 'efis' | 'ped' | 'isis' | 'oit' | 'mfd', CanvasTex>;
+type CkTex = Record<'pfd' | 'nd' | 'ewd' | 'sd' | 'oh' | 'fcu' | 'efis' | 'ped' | 'isis' | 'oit' | 'mfd' | 'vd' | 'mbx', CanvasTex>;
 
 /**
  * Bryły wyposażenia kokpitu (układ modelu, metry, skala 1:1). Początek układu: podłoga stanowiska pod punktem oczu,
@@ -1847,8 +1984,11 @@ function CockpitEquipment({ sim, tex }: { sim: MutableRefObject<Sim>; tex?: CkTe
       <group position={[0, 0.68, -0.665]} rotation={[-0.15, 0, 0]}>
         {/* kapitan: PFD i ND na jednym ekranie */}
         <DisplayUnit p={[-0.4, 0, 0]} w={0.36} h={0.25}>
-          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[-0.088, 0.01, 0]} on={on(0)} glow={hl('pfd')} bare />
-          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[0.088, 0.01, 0]} on={on(0.6)} glow={hl('nd')} bare />
+          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[-0.088, 0.045, 0]} on={on(0)} glow={hl('pfd')} bare />
+          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[0.088, 0.045, 0]} on={on(0.6)} glow={hl('nd')} bare />
+          {/* dolne sekcje: pod PFD skrzynka łączności z ATC, pod ND profil pionowy (VD) */}
+          <Screen w={0.17} h={0.075} tex={tex?.mbx} p={[-0.088, -0.083, 0]} on={on(0.6)} glow={hl('mbx')} bare />
+          <Screen w={0.17} h={0.075} tex={tex?.vd} p={[0.088, -0.083, 0]} on={on(0.6)} glow={hl('vd')} bare />
         </DisplayUnit>
         {/* środek: EWD – silniki, ostrzeżenia, MEMO */}
         <DisplayUnit p={[0, 0, 0]} w={0.36} h={0.25}>
@@ -1856,8 +1996,10 @@ function CockpitEquipment({ sim, tex }: { sim: MutableRefObject<Sim>; tex?: CkTe
         </DisplayUnit>
         {/* pierwszy oficer: ND i PFD */}
         <DisplayUnit p={[0.4, 0, 0]} w={0.36} h={0.25}>
-          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[-0.088, 0.01, 0]} on={on(0.6)} glow={hl('nd')} bare />
-          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[0.088, 0.01, 0]} on={on(0.6)} glow={hl('pfd')} bare />
+          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[-0.088, 0.045, 0]} on={on(0.6)} glow={hl('nd')} bare />
+          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[0.088, 0.045, 0]} on={on(0.6)} glow={hl('pfd')} bare />
+          <Screen w={0.17} h={0.075} tex={tex?.vd} p={[-0.088, -0.083, 0]} on={on(0.6)} glow={hl('vd')} bare />
+          <Screen w={0.17} h={0.075} tex={tex?.mbx} p={[0.088, -0.083, 0]} on={on(0.6)} glow={hl('mbx')} bare />
         </DisplayUnit>
         {/* skrajne OIT, odchylone w stronę pilota */}
         {[-1, 1].map((k) => (
@@ -2078,6 +2220,8 @@ type Part = { name: string; desc: string; pos: V3; color: string };
 const PARTS: Record<string, Part> = {
   pfd: { name: 'PFD – główny ekran lotu', color: '#7cc7ff', pos: [-0.49, 0.8, -0.66], desc: 'Najważniejszy ekran pilota: sztuczny horyzont (położenie samolotu względem ziemi), prędkość, wysokość, prędkość wznoszenia i kurs. U góry – pasek trybów autopilota. Każdy pilot ma swój PFD tuż przed sobą.' },
   nd: { name: 'ND – ekran nawigacyjny', color: '#7cc7ff', pos: [-0.31, 0.8, -0.66], desc: 'Mapa widziana z góry: zaplanowana trasa, punkty nawigacyjne, wiatr, a na życzenie obraz radaru pogodowego i inne samoloty w pobliżu. Na ziemi pokazuje plan lotniska.' },
+  vd: { name: 'VD – profil pionowy', color: '#7cc7ff', pos: [-0.31, 0.55, -0.66], desc: 'Dolna część ekranu pod ND: trasa widziana z boku. Symbol samolotu, zielona linia – którędy samolot poleci w górę albo w dół, niebieska przerywana – wysokość wybrana na panelu autopilota, a przy ziemi brązowy teren pod trasą. Od razu widać, czy samolot zdąży zejść albo czy nie zbliży się do gór.' },
+  mbx: { name: 'ATC MAILBOX – wiadomości z kontroli', color: '#7cc7ff', pos: [-0.49, 0.55, -0.66], desc: 'Dolna część ekranu pod PFD: skrzynka wiadomości tekstowych z kontrolą ruchu lotniczego (CPDLC). Kontroler przysyła polecenie, np. zmianę wysokości, a pilot odpowiada przyciskiem WILCO (wykonam) albo UNABLE (nie mogę) – bez rozmowy przez radio, która nad oceanem bywa trudna.' },
   ewd: { name: 'ECAM górny – silniki i alarmy', color: '#7cc7ff', pos: [0, 0.81, -0.66], desc: 'Ekran silników: ciąg, temperatura spalin, paliwo. Pod spodem pojawiają się ostrzeżenia razem z listą czynności do wykonania – wykonane znikają.' },
   sd: { name: 'ECAM dolny – systemy', color: '#7cc7ff', pos: [-0.09, 0.52, -0.6], desc: 'Schematy systemów samolotu: elektryka, paliwo, hydraulika, drzwi, klimatyzacja, koła. Komputer sam pokazuje stronę, która w danej chwili jest najważniejsza.' },
   isis: { name: 'przyrządy zapasowe (ISIS)', color: '#9fb3c8', pos: [-0.245, 0.55, -0.64], desc: 'Mały, niezależny ekran z horyzontem, prędkością i wysokością. Działa nawet wtedy, gdy zgasną wszystkie duże ekrany.' },
@@ -2124,6 +2268,8 @@ function Tag({ pos, color, children, onClick, active = false }: { pos: V3; color
 const SCREEN_TOUR: { id: string; name: string; text: string }[] = [
   { id: 'pfd', name: 'PFD – główny ekran lotu', text: 'Lewa połowa ekranu przed kapitanem (u pierwszego oficera – prawa). Pokazuje wszystko, czego trzeba, by sterować samolotem: położenie względem horyzontu, prędkość, wysokość i kurs.' },
   { id: 'nd', name: 'ND – ekran nawigacyjny', text: 'Na tym samym ekranie, obok PFD – mapa: trasa, punkty nawigacyjne, wiatr, radar pogodowy. Każdy pilot może ustawić na swoim inny zasięg.' },
+  { id: 'vd', name: 'VD – profil pionowy', text: 'Pod ND, na tym samym ekranie: trasa widziana z boku. Zielona linia pokazuje, jak samolot będzie się wznosił albo zniżał, niebieska przerywana – wysokość wybraną na panelu autopilota.' },
+  { id: 'mbx', name: 'ATC MAILBOX', text: 'Pod PFD: wiadomości tekstowe z kontrolą ruchu lotniczego. Kontroler przysyła polecenie, a pilot odpowiada przyciskiem – bez rozmowy przez radio.' },
   { id: 'ewd', name: 'ECAM górny', text: 'Środkowy ekran w górnym rzędzie: praca silników i ostrzeżenia z listą czynności. Obaj piloci widzą go tak samo.' },
   { id: 'sd', name: 'ECAM dolny', text: 'Dolny ekran, na pochyłym czole pulpitu: z lewej schematy systemów (teraz strona przelotu), z prawej strona komputera nawigacyjnego, obsługiwana klawiaturą z kulką.' },
   { id: 'oit', name: 'OIT', text: 'Na skrajach, odchylone w stronę pilotów: ekrany z dokumentacją, mapami lotnisk i listami kontrolnymi. Nie są potrzebne do samego pilotowania.' },
@@ -2438,6 +2584,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
             { value: 'auto', label: 'po kolei (co 5 s)' },
             { value: 'pfd', label: 'PFD – główny ekran lotu' },
             { value: 'nd', label: 'ND – ekran nawigacyjny' },
+            { value: 'vd', label: 'VD – profil pionowy (pod ND)' },
+            { value: 'mbx', label: 'ATC MAILBOX (pod PFD)' },
             { value: 'ewd', label: 'ECAM górny' },
             { value: 'sd', label: 'ECAM dolny' },
             { value: 'oit', label: 'OIT – dokumentacja' },
@@ -2448,7 +2596,7 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
       body: (
         <>
           <p>
-            Dawniej kokpit był pełen okrągłych zegarów – w starszych samolotach kilkadziesiąt. Dziś wszystko jest na kilku dużych ekranach. W A350 jest ich sześć, wszystkie jednakowe i poziome. W górnym rzędzie: na skrajach ekrany <b>OIT</b> z dokumentacją, przed każdym pilotem ekran z <b>PFD</b> i <b>ND</b> obok siebie, a pośrodku górny ekran <b>ECAM</b>. Szósty ekran leży niżej, na pochyłym czole pulpitu: dolny ECAM i strona komputera nawigacyjnego.
+            Dawniej kokpit był pełen okrągłych zegarów – w starszych samolotach kilkadziesiąt. Dziś wszystko jest na kilku dużych ekranach. W A350 jest ich sześć, wszystkie jednakowe i poziome. W górnym rzędzie: na skrajach ekrany <b>OIT</b> z dokumentacją, przed każdym pilotem ekran z <b>PFD</b> i <b>ND</b> obok siebie, a pośrodku górny ekran <b>ECAM</b>. Pod ND jest pasek <b>VD</b> – trasa widziana z boku, a pod PFD skrzynka wiadomości z kontrolą ruchu (<b>ATC MAILBOX</b>). Szósty ekran leży niżej, na pochyłym czole pulpitu: dolny ECAM i strona komputera nawigacyjnego.
           </p>
           <p>
             Układ jest symetryczny – każdy pilot ma przed sobą to samo i może sam prowadzić samolot. Ekrany na środku są wspólne. Gdy jeden ekran się zepsuje, jego obraz można przenieść na sąsiedni.
