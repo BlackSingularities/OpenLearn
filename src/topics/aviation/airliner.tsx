@@ -1283,7 +1283,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
         // od środka: obramowanie szyby na wykładzinie (zakrywa brzeg otworu w siatce wykładziny)
         const trimOut = densify(ckPoly(pane, 0.11));
         const trimIn = densify(ckPoly(pane, -0.045));
-        trimG.push(strip(trimOut.map((q) => at(q, CK_LINING - 0.004)), trimIn.map((q) => at(q, CK_LINING - 0.004))));
+        trimG.push(strip(trimOut.map((q) => at(q, CK_LINING + 0.006)), trimIn.map((q) => at(q, CK_LINING + 0.006))));
         const tris = THREE.ShapeUtils.triangulateShape(inner.map((q) => new THREE.Vector2(q[0], q[1])), []);
         const gl = new THREE.BufferGeometry();
         gl.setAttribute('position', new THREE.Float32BufferAttribute(inner.flatMap((q) => at(q, 0.04)), 3));
@@ -1339,8 +1339,13 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     const ckLining = grid(
       refine([RADOME_X + 0.05, COCKPIT_REAR], 0.04),
       refine([-Math.PI, -1.0, 0, 1.0, Math.PI], 0.025),
-      (x, th) => fusPt(x, th, CK_LINING),
-      (x, th) => COCKPIT(x, th) || fusPt(x, th, CK_LINING)[1] < COCKPIT_FLOOR - 0.05,
+      // pod podłogą stanowiska wierzchołki są dociągnięte do jej poziomu – brzeg wykładziny biegnie równo, bez schodków
+      // (kadłub zwęża się ku nosowi, więc wycinanie komórek pod podłogą dawało ząbki)
+      (x, th) => {
+        const p = fusPt(x, th, CK_LINING);
+        return p[1] < COCKPIT_FLOOR - 0.05 ? ([p[0], COCKPIT_FLOOR - 0.05, p[2]] as V3) : p;
+      },
+      (x, th) => COCKPIT(x, th) || Math.cos(th) < -0.97,
     );
     // owiewka centropłata pod kadłubem (miejsce na keson, podwozie i instalacje)
     // owiewka centropłata jako siatka (x, kąt): z otworami wnęk podwozia głównego, które zakrywają drzwi

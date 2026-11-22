@@ -50,7 +50,15 @@ function load(): Promise<FgCockpitData> {
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(new Int8Array(n8), 3, true));
-      g.setIndex(new THREE.BufferAttribute(new Uint32Array(buf.slice(p.idx, p.idx + p.count * 4)), 1));
+      let idx = new Uint32Array(buf.slice(p.idx, p.idx + p.count * 4));
+      // błąd modelu: schodek pionowych białych płytek (x ≈ −0,36 m) sterczący z panelu górnego przez dach – wycięty
+      if (p.name.startsWith('static')) {
+        const bad = (v: number) => pos[v * 3] > -0.38 && pos[v * 3] < -0.348 && pos[v * 3 + 1] > 1.4 && c8[v * 3] > 225 && c8[v * 3 + 1] > 225 && c8[v * 3 + 2] > 225;
+        const keep: number[] = [];
+        for (let t = 0; t < idx.length; t += 3) if (!(bad(idx[t]) && bad(idx[t + 1]) && bad(idx[t + 2]))) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+        if (keep.length < idx.length) idx = Uint32Array.from(keep);
+      }
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
       // części ruchome: wierzchołki względem osi obrotu (grupa stoi w osi)
       if (p.pivot) g.translate(-p.pivot[0], -p.pivot[1], -p.pivot[2]);
       g.computeBoundingSphere();
