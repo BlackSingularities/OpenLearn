@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan' | 'wiatrak';
+  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel';
 }
 
 export const catalog: CatalogModel[] = [
@@ -41,5 +41,13 @@ export const catalog: CatalogModel[] = [
     topic: 'elektrownia-wiatrowa',
     color: '#0d9488',
     cover: 'wiatrak',
+  },
+  {
+    id: 'elektrownia-weglowa',
+    title: 'Elektrownia węglowa',
+    summary: 'Blok 900 MW w 3D: skład węgla i młyny, kocioł z wirującym płomieniem, turbina i generator, chłodnia kominowa, oczyszczanie spalin, CO₂ i droga prądu do sieci.',
+    topic: 'elektrownia-weglowa',
+    color: '#b45309',
+    cover: 'wegiel',
   },
 ];

@@ -63,6 +63,23 @@ function WindSketch() {
   );
 }
 
+/** Okładka elektrowni węglowej: chłodnia kominowa z pióropuszem, komin i kotłownia. */
+function CoalSketch() {
+  return (
+    <svg className="row-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
+      <g className="cover-motif">
+        <path d="M150 150 C 160 120, 160 100, 156 70 C 154 58, 156 50, 160 44 H 212 C 216 50, 218 58, 216 70 C 212 100, 212 120, 222 150" className="cv-ink" />
+        <path d="M168 38 C 160 26, 172 14, 186 18 C 194 8, 212 12, 212 24 C 224 24, 226 38, 214 40" className="cv-ink" stroke="var(--accent)" />
+        <path d="M244 150 L247 54 H255 L258 150" className="cv-ink" />
+        <path d="M247 62 H255 M247 70 H255" className="cv-ink" stroke="var(--accent)" />
+        <path d="M84 150 V84 H130 V150 M96 84 V72 H118 V84" className="cv-ink" />
+        <path d="M40 150 V118 H84" className="cv-thin" />
+        <path d="M24 150 H296" className="cv-dash" />
+      </g>
+    </svg>
+  );
+}
+
 function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
   const topic = topics.find((t) => t.id === m.topic);
   const modules = topic?.modules ?? [];
@@ -75,7 +92,7 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
     >
       <Link to={`/temat/${m.topic}/1`} className="tile" style={{ '--accent': m.color } as CSSProperties}>
         <span className="tile-cover">
-          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : <VolcanoSketch />}
+          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : <VolcanoSketch />}
           <span className="tile-go" aria-hidden>
             <Icon name="arrow-up-right" size={18} />
           </span>
