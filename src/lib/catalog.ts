@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel';
+  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom';
 }
 
 export const catalog: CatalogModel[] = [
@@ -49,5 +49,13 @@ export const catalog: CatalogModel[] = [
     topic: 'elektrownia-weglowa',
     color: '#b45309',
     cover: 'wegiel',
+  },
+  {
+    id: 'elektrownia-jadrowa',
+    title: 'Elektrownia jądrowa',
+    summary: 'Blok z reaktorem AP1000 nad Bałtykiem w 3D: reaktor w przekroju i reakcja łańcuchowa, wytwornice pary, bariery i bierne chłodzenie, turbina chłodzona wodą morską, basen wypalonego paliwa i sieć.',
+    topic: 'elektrownia-jadrowa',
+    color: '#0284c7',
+    cover: 'atom',
   },
 ];

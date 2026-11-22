@@ -3,6 +3,7 @@ import { airplane } from './aviation/airplane';
 import { volcano } from './earth/volcano';
 import { windFarm } from './energy/wind';
 import { coalPlant } from './energy/coal';
+import { nuclearPlant } from './energy/nuclear';
 
 /**
  * Rejestr gotowych modeli. Aby dodać nowy model:
@@ -10,7 +11,7 @@ import { coalPlant } from './energy/coal';
  * 2. dopisz go do tej tablicy,
  * 3. w katalogu (src/lib/catalog.ts) uzupełnij pole `topic` wpisu tego modelu.
  */
-export const topics: Topic[] = [airplane, volcano, windFarm, coalPlant];
+export const topics: Topic[] = [airplane, volcano, windFarm, coalPlant, nuclearPlant];
 
 /**
  * Dawne osobne tematy lotnicze są teraz zakładkami modułów samolotu – stare adresy przekierowują
