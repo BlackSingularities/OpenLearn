@@ -1,5 +1,6 @@
 import type { Topic } from '../lib/types';
 import { airplane } from './aviation/airplane';
+import { volcano } from './earth/volcano';
 
 /**
  * Rejestr gotowych modeli. Aby dodać nowy model:
@@ -7,7 +8,7 @@ import { airplane } from './aviation/airplane';
  * 2. dopisz go do tej tablicy,
  * 3. w katalogu (src/lib/catalog.ts) uzupełnij pole `topic` wpisu tego modelu.
  */
-export const topics: Topic[] = [airplane];
+export const topics: Topic[] = [airplane, volcano];
 
 /**
  * Dawne osobne tematy lotnicze są teraz zakładkami modułów samolotu – stare adresy przekierowują

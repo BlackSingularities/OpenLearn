@@ -91,7 +91,14 @@ export const catalog: CatalogModel[] = [
   { id: 'kregoslup', title: 'Kręgosłup i stawy', category: 'czlowiek', summary: 'Kręgi, dyski i mięśnie – jak się schylamy i dźwigamy.', keywords: 'szkielet kości staw' },
 
   // ziemia i przyroda
-  { id: 'wulkan', title: 'Wulkan', category: 'przyroda', summary: 'Komora magmowa, krater i erupcja – co dzieje się pod górą.', keywords: 'magma lawa erupcja' },
+  {
+    id: 'wulkan',
+    title: 'Wulkan',
+    category: 'przyroda',
+    summary: 'Wulkan w przekroju 3D: komora magmowa i erupcja, dziesięć rodzajów wulkanów, osiem rodzajów erupcji, lawa, popiół, bomby i chmury żaru, płyty tektoniczne i obserwacja wulkanów.',
+    keywords: 'magma lawa erupcja krater komin stratowulkan tarczowy kaldera superwulkan maar gejzer popiół pumeks obsydian bazalt bomba lapille lahar przepływ piroklastyczny tektonika subdukcja hawaje islandia etna wezuwiusz pompeje vei geotermia',
+    topic: 'wulkan',
+  },
   { id: 'burza', title: 'Burza', category: 'przyroda', summary: 'Chmura burzowa od środka: prądy wznoszące, grad i piorun.', keywords: 'piorun chmura grad' },
   { id: 'ziemia', title: 'Wnętrze Ziemi', category: 'przyroda', summary: 'Skorupa, płaszcz i jądro; płyty tektoniczne i trzęsienia ziemi.', keywords: 'tektonika trzęsienie płaszcz jądro' },
   { id: 'drzewo', title: 'Drzewo', category: 'przyroda', summary: 'Korzenie, pień i liście – jak woda wędruje 50 m w górę i jak działa fotosynteza.', keywords: 'fotosynteza liść roślina' },
