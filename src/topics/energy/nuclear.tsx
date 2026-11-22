@@ -10,6 +10,7 @@ import { FUEL_LAB, LAB } from './nuclearFx';
 
 const nuc = (s: Omit<Step, 'kind' | 'scene' | 'stageKey' | 'frame'>): Step => ({ kind: '3d', scene: NuclearScene, stageKey: 'nuclear', frame: FRAME, ...s });
 const RUN: Control = { type: 'button', key: 'run', label: 'Rozpocznij', labelOn: 'Zatrzymaj i wróć do początku', default: false };
+const MOD: Control = { type: 'select', key: 'mod', label: 'Woda w rdzeniu', default: 'woda', options: [{ value: 'woda', label: 'jest – spowalnia neutrony' }, { value: 'brak', label: 'odparowała' }] };
 const RODS = (def: number): Control => ({ type: 'slider', key: 'rods', label: 'Wsunięcie prętów sterujących', min: 0, max: 100, step: 5, default: def, unit: '%' });
 const tx = (id: string) => TURB.find((t) => t.id === id)!.x;
 
@@ -176,7 +177,7 @@ const reactorModule: PartModule = {
       body: (
         <>
           <p>
-            Patrzysz na przecięty <b>zbiornik reaktora</b>. Szare słupki w środku to <b>kasety paliwowe</b>, a ciemne – <b>pręty sterujące</b>, wsunięte od góry tylko trochę. Rdzeń jest zanurzony w wodzie, która płynie przez niego z dołu do góry i zabiera ciepło.
+            Patrzysz na przecięty <b>zbiornik reaktora</b>. Szare słupki w środku to <b>kasety paliwowe</b> – widać w nich pionowe pręty z paliwem i poziome kratki. Ciemne pasy u góry niektórych kaset to wsunięte trochę <b>pręty sterujące</b>. Kropki pokazują wodę: wpływa szczeliną przy ścianie zbiornika w dół, a przez rdzeń płynie w górę i się nagrzewa (z niebieskiej robi się czerwona). Rdzeń jest zanurzony w wodzie, która płynie przez niego z dołu do góry i zabiera ciepło.
           </p>
           <p>Kliknij podpis części. Numery na modelu prowadzą do zakładek: reakcja łańcuchowa, paliwo i pręty sterujące.</p>
         </>
@@ -188,7 +189,7 @@ const reactorModule: PartModule = {
       camera: LAB_CAM,
       target: LAB,
       preset: { mode: 're-fission' },
-      controls: [RODS(45)],
+      controls: [RODS(45), MOD],
       body: (
         <>
           <p>
@@ -196,6 +197,9 @@ const reactorModule: PartModule = {
           </p>
           <p>
             Nowe neutrony są prędkie (pomarańczowe). Dopiero gdy zwolnią w wodzie, mogą rozszczepić kolejne jądro – tak powstaje <b>reakcja łańcuchowa</b>. Ciemne <b>pręty</b> pochłaniają neutrony. Przesuń suwak: przy wysuniętych prętach reakcja przyspiesza, przy wsuniętych gaśnie. W reaktorze trzyma się ją dokładnie pośrodku: każde rozszczepienie wywołuje średnio jedno następne.
+          </p>
+          <p>
+            Przełącz „Woda w rdzeniu” na „odparowała”. Bez wody neutrony zostają prędkie i prawie nie rozszczepiają uranu – reakcja gaśnie sama. Dlatego w reaktorze wodnym przegrzanie, które zamienia wodę w parę, hamuje reakcję, a nie ją napędza. W reaktorze w Czarnobylu, chłodzonym wodą, ale spowalnianym grafitem, było odwrotnie – i to była jedna z przyczyn katastrofy w 1986 r.
           </p>
         </>
       ),
@@ -318,7 +322,7 @@ const loopModule: PartModule = {
 const safetyModule: PartModule = {
   id: 'bezpieczenstwo',
   title: 'Bezpieczeństwo',
-  summary: 'Bariery między paliwem a otoczeniem, wyłączenie awaryjne i ciepło powyłączeniowe, bierne chłodzenie bez prądu',
+  summary: 'Bariery i zapasy wody na awarię, wyłączenie awaryjne i ciepło powyłączeniowe, bierne chłodzenie bez prądu, promieniowanie',
   steps: [
     nuc({
       title: 'Bariery',
@@ -330,7 +334,10 @@ const safetyModule: PartModule = {
           <p>
             Paliwo jest zamknięte w kilku <b>barierach</b>, jedna w drugiej – jak w matrioszce. Każda z nich osobno zatrzymuje substancje radioaktywne. Żeby wydostały się na zewnątrz, musiałyby zawieść wszystkie naraz.
           </p>
-          <p>Kliknij podpisy barier. Numery prowadzą do zakładek: wyłączenie awaryjne i bierne chłodzenie.</p>
+          <p>
+            W obudowie są też zapasy wody na awarię: pierścieniowy <b>zbiornik wody przeładunkowej</b>, dwa <b>zbiorniki uzupełniania rdzenia</b> i dwa <b>akumulatory</b>. Wszystkie stoją tak, że woda spływa z nich do reaktora sama – siłą ciężkości albo pod ciśnieniem azotu, bez pomp i bez prądu.
+          </p>
+          <p>Kliknij podpisy. Numery prowadzą do zakładek: wyłączenie awaryjne, bierne chłodzenie i promieniowanie.</p>
         </>
       ),
     }),
@@ -366,6 +373,23 @@ const safetyModule: PartModule = {
           </p>
           <p>
             Ogrzane powietrze w szczelinie między stalą a betonem unosi się i wylatuje kominem (pomarańczowe kropki), a od dołu napływa nowe. Nie trzeba pomp, prądu ani ludzi – takie <b>bierne chłodzenie</b> działa co najmniej 3 doby, a po dolaniu wody dłużej.
+          </p>
+        </>
+      ),
+    }),
+    nuc({
+      title: 'Promieniowanie',
+      spot: [-60, 4, 120],
+      camera: [-140, 40, 300],
+      target: [-30, 20, 40],
+      preset: { mode: 'bz-dose' },
+      body: (
+        <>
+          <p>
+            Promieniowanie jest wszędzie: płynie z kosmosu, z gleby i skał, z radonu w piwnicach, a nawet z naszego ciała i jedzenia (banany mają trochę radioaktywnego potasu). Mierzy się je w milisiwertach (mSv). Wykres ma skalę logarytmiczną – każda kreska dalej to dziesięć razy więcej.
+          </p>
+          <p>
+            Ktoś mieszkający tuż przy ogrodzeniu działającej elektrowni jądrowej dostaje z niej w ciągu roku dawkę setki razy mniejszą niż z naturalnego tła – mniej więcej tyle, co przy jednym prześwietleniu zęba. Groźne są awarie, w których substancje radioaktywne wydostałyby się z obudowy. Przed tym chronią bariery i układy bezpieczeństwa z poprzednich zakładek.
           </p>
         </>
       ),
@@ -489,14 +513,14 @@ const fuelModule: PartModule = {
     nuc({
       title: 'Wymiana paliwa',
       spot: [12, 34, -4],
-      camera: [70, 46, 76],
-      target: [22, 14, -4],
+      camera: [34, 72, 84],
+      target: [20, 6, -4],
       preset: { mode: 'pa-refuel' },
       controls: [RUN],
       body: (
         <>
           <p>
-            Co ok. 18 miesięcy reaktor zatrzymuje się na kilka tygodni. Naciśnij „Rozpocznij”. Pokrywę zbiornika zdejmuje się suwnicą, a kanał nad reaktorem zalewa wodą – woda osłania ludzi przed promieniowaniem. <b>Maszyna przeładunkowa</b> wyjmuje kasety jedna po drugiej.
+            Co ok. 18 miesięcy reaktor zatrzymuje się na kilka tygodni. Naciśnij „Rozpocznij”. Pokrywę zbiornika suwnica odstawia na pomost, a kanał nad reaktorem zalewa się wodą – woda osłania ludzi przed promieniowaniem, a nad paliwem świeci niebiesko. <b>Maszyna przeładunkowa</b> wyjmuje kasety jedna po drugiej.
           </p>
           <p>
             Kaseta przejeżdża pod wodą tunelem do <b>basenu</b> w budynku obok. Wymienia się ok. jednej trzeciej kaset. Pozostałe przestawia się w rdzeniu, żeby wypalały się równo, a na wolne miejsca wstawia się nowe. W tym czasie robi się też przeglądy i naprawy.

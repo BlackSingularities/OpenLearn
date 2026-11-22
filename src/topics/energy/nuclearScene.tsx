@@ -21,6 +21,7 @@ import {
   CO2_LIFE,
   CORE,
   CV,
+  DECK_Y,
   DIESEL,
   INTAKE,
   OUTFALL,
@@ -46,8 +47,8 @@ import {
   sm,
   type V3,
 } from './nuclearGeo';
-import { AuxBuilding, CaskPad, Coast, Pines, PrimaryLoop, ReactorBuilding, Site } from './nuclearPlant';
-import { ChainReaction, FuelExhibit, PassiveCooling, PoolGlow, RefuelAssembly, SgBoil, type ChainStats } from './nuclearFx';
+import { ACC, AuxBuilding, CMT, CaskPad, Coast, CoreFlow, IRWST, Msr, Pines, PrimaryLoop, ReactorBuilding, Site } from './nuclearPlant';
+import { ChainReaction, Cherenkov, FuelExhibit, PassiveCooling, PoolGlow, RefuelAssembly, SgBoil, type ChainStats } from './nuclearFx';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
 const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
@@ -86,6 +87,7 @@ const CFG: Record<string, Partial<Cfg>> = {
   'bz-home': { cut: true },
   'bz-scram': { cut: true, flows: ['hot', 'cold'] },
   'bz-passive': { cut: true },
+  'bz-dose': {},
   'tu-home': { thCut: true },
   'tu-cycle': { thCut: true, cut: true, turbOpen: true, flows: ['steam', 'feed', 'sea', 'hot', 'cold'] },
   'tu-sea': { flows: ['sea'] },
@@ -138,12 +140,15 @@ function homeParts(mode: string): Record<string, PartInfo> | null {
         rcs: { name: '3. obieg pierwotny', desc: 'Stalowy zbiornik reaktora i rury o grubych ścianach. Gdyby nieszczelna była koszulka, radioaktywne substancje zostałyby w wodzie obiegu.', pos: [RPV.r + 0.4, 17, 1] },
         cv: { name: '4. stalowa obudowa bezpieczeństwa', desc: 'Szczelna stalowa „puszka” o średnicy prawie 40 m ze ścianami grubości 4,4 cm. Wytrzymuje ciśnienie pary, gdyby pękła rura obiegu pierwotnego.', pos: [-CV.r + 1, 40, 1] },
         shield: { name: '5. budynek osłonowy', desc: 'Żelbetowa ściana grubości ok. 90 cm. Chroni przed promieniowaniem i przed uderzeniami z zewnątrz – nawet przed rozbiciem się samolotu.', pos: [-SHIELD.r + 0.5, 52, 1] },
+        irwst: { name: 'zbiornik wody przeładunkowej', desc: 'Pierścieniowy zbiornik ok. 2000 m³ wody wewnątrz obudowy, wyżej niż reaktor. Gdy obieg pierwotny straci wodę, otwierają się zawory i woda spływa do reaktora siłą ciężkości – bez pomp.', pos: [IRWST.r0 * Math.sin(Math.PI * 1.1), IRWST.y1 + 1, IRWST.r0 * Math.cos(Math.PI * 1.1)] },
+        cmt: { name: 'zbiorniki uzupełniania rdzenia', desc: 'Dwa zbiorniki z zimną wodą z dodatkiem boru, ustawione nad reaktorem. Połączone są z obiegiem tak, że gdy w obiegu ubywa wody, sama z nich spływa do reaktora i zarazem gasi reakcję łańcuchową.', pos: [CMT[0][0], CMT[0][1] + 5.5, CMT[0][2]] },
+        acc: { name: 'akumulatory hydrauliczne', desc: 'Kule z wodą, nad którą jest sprężony azot. Gdy ciśnienie w obiegu mocno spadnie, azot w kilkadziesiąt sekund wypycha wodę do reaktora.', pos: [ACC[1][0], ACC[1][1] + 3.2, ACC[1][2]] },
         tank: { name: 'zbiornik biernego chłodzenia', desc: 'Na dachu jest ok. 3000 m³ wody. W razie awarii spływa sama, siłą ciężkości, po stalowej obudowie i ją chłodzi – bez pomp, prądu i ludzi, przez co najmniej 3 doby.', pos: [0, SHIELD.tankY1 + 1, 2] },
       };
     case 'tu-home':
       return {
         hp: { name: 'część wysokoprężna (WP)', desc: 'Para z wytwornic (ok. 273 °C, 5,8 MPa) jest dużo chłodniejsza niż w elektrowni węglowej. Po przejściu przez część WP jest już trochę mokra – zawiera kropelki wody.', pos: [tx('hp'), AX + 4.5, 3] },
-        msr: { name: 'osuszacz i przegrzewacz pary', desc: 'Przed częściami NP para przechodzi przez wielkie zbiorniki (tu w przelotni nad turbiną), które oddzielają z niej krople i lekko ją dogrzewają. Krople wody pędzące razem z parą niszczyłyby łopatki.', pos: [-78, AX + 11, 3] },
+        msr: { name: 'osuszacze i przegrzewacze pary', desc: 'Przed częściami NP para przechodzi przez dwa długie zbiorniki po bokach turbiny, które oddzielają z niej krople i lekko ją dogrzewają. Krople wody pędzące razem z parą niszczyłyby łopatki.', pos: [-92, AX + 4.6, 12.5] },
         lp: { name: 'części niskoprężne (NP)', desc: 'Trzy dwuprzepływowe części NP z najdłuższymi łopatkami (ok. 1,4 m). Para jest tu tak rzadka, że zajmuje ogromną objętość.', pos: [tx('lp1'), AX + 7, 3] },
         gen: { name: 'generator', desc: 'Obraca się 1500 razy na minutę – o połowę wolniej niż w elektrowni węglowej. Ma cztery bieguny zamiast dwóch, więc i tak wytwarza prąd o częstotliwości 50 Hz. Wolniejsze obroty pozwalają na dłuższe łopatki w turbinie.', pos: [tx('gen'), AX + 4.4, 3] },
         cond: { name: 'skraplacze', desc: 'Para oddaje ciepło wodzie morskiej płynącej w dziesiątkach tysięcy rurek z tytanu (słona woda zniszczyłaby zwykłą stal) i zamienia się z powrotem w wodę.', pos: [-94, 10, 7] },
@@ -336,6 +341,34 @@ function BaseChart({ h }: { h: number }) {
   );
 }
 
+/** Dawki promieniowania (mSv) – skala logarytmiczna. */
+const DOSES: [string, number, string][] = [
+  ['zjedzenie banana', 0.0001, '#fde047'],
+  ['rok obok elektrowni jądrowej', 0.005, '#38bdf8'],
+  ['prześwietlenie płuc', 0.02, '#a5b4fc'],
+  ['lot Warszawa – Nowy Jork i z powrotem', 0.08, '#c4b5fd'],
+  ['rok tła naturalnego w Polsce', 2.8, '#86efac'],
+  ['tomografia brzucha', 8, '#fca5a5'],
+  ['roczny limit dla pracowników', 20, '#fb923c'],
+];
+function DoseBars() {
+  const W = 300;
+  const rowH = 22;
+  const lx = (v: number) => ((Math.log10(v) + 4) / 5.5) * 140;
+  return (
+    <svg width={W} height={DOSES.length * rowH + 8} style={{ display: 'block' }}>
+      {DOSES.map(([name, v, col], i) => (
+        <g key={name} transform={`translate(0 ${i * rowH + 4})`}>
+          <rect x={0} y={3} width={Math.max(3, lx(v))} height={14} fill={col} opacity={0.85} />
+          <text x={Math.max(3, lx(v)) + 6} y={14} fill="#e2e8f0" fontSize={10.5}>
+            {name} – {v.toLocaleString('pl-PL', { maximumFractionDigits: 4 })} mSv
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 /* ================= scenariusze ================= */
 
 const SCRAM: [number, string][] = [
@@ -369,6 +402,7 @@ export function NuclearScene({ params }: SceneProps) {
   const cfg = cfgOf(mode);
   const run = Boolean(params.run);
   const rodsP = num(params.rods, mode === 're-fission' ? 45 : 15) / 100;
+  const moderated = str(params.mod, 'woda') === 'woda';
   const home = useModuleHome();
   const nav = useTopicNav();
   const paused = useContext(PauseContext);
@@ -456,7 +490,7 @@ export function NuclearScene({ params }: SceneProps) {
   );
   let info: ReactNode = null;
   if (mode === 're-fission') {
-    const state = live.n === 0 ? 'czekamy na neutron ze źródła' : rodsP > 0.62 ? 'reakcja wygasa – pręty pochłaniają za dużo neutronów' : rodsP < 0.28 ? 'reakcja przyspiesza – każde rozszczepienie wywołuje więcej niż jedno następne' : 'reakcja stabilna – każde rozszczepienie wywołuje średnio jedno następne';
+    const state = !moderated ? 'bez wody neutrony nie zwalniają – prawie nie rozszczepiają uranu i reakcja gaśnie' : live.n === 0 ? 'czekamy na neutron ze źródła' : rodsP > 0.62 ? 'reakcja wygasa – pręty pochłaniają za dużo neutronów' : rodsP < 0.28 ? 'reakcja przyspiesza – każde rozszczepienie wywołuje więcej niż jedno następne' : 'reakcja stabilna – każde rozszczepienie wywołuje średnio jedno następne';
     info = (
       <>
         <div style={{ fontWeight: 700, color: PART_C }}>Reakcja łańcuchowa</div>
@@ -564,6 +598,13 @@ export function NuclearScene({ params }: SceneProps) {
         <BaseChart h={live.h} />
       </>
     );
+  } else if (mode === 'bz-dose') {
+    info = (
+      <>
+        <div style={{ fontWeight: 700, color: PART_C }}>Dawki promieniowania (skala logarytmiczna)</div>
+        <DoseBars />
+      </>
+    );
   } else if (mode === 'gr-poland') {
     info = (
       <>
@@ -597,16 +638,36 @@ export function NuclearScene({ params }: SceneProps) {
 
       <Coast />
       <Pines />
-      <ReactorBuilding cut={cfg.cut} />
+      <ReactorBuilding cut={cfg.cut} ghost={mode === 'bz-passive' || mode === 'tour-bz'} />
       {showInside && <PrimaryLoop cut={cfg.cut} headOff={mode === 'pa-refuel'} rods={() => st.current.rods} glow={() => st.current.P} />}
       <AuxBuilding cut={cfg.auxCut} />
       {cfg.auxCut && <PoolGlow />}
       <TurbineHall cut={cfg.thCut} />
       <TurbineSet open={cfg.turbOpen} spin={() => st.current.angle} />
+      <Msr />
+      {['re-home', 're-rods', 'ob-loop', 'bz-scram'].includes(mode) && <CoreFlow rate={kRate} />}
+      {mode === 'pa-refuel' && (
+        <>
+          {/* zdjęta pokrywa zbiornika odstawiona na pomost i poświata nad paliwem w zalanym kanale */}
+          <group position={[9, DECK_Y + 0.2, -9]}>
+            <mesh position={[0, 0.3, 0]}>
+              <sphereGeometry args={[RPV.r, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+              <meshStandardMaterial color="#6d7782" metalness={0.6} roughness={0.35} />
+            </mesh>
+            {[-1, -0.4, 0.3, 1].map((x) => (
+              <mesh key={x} position={[x, 3.2, x * 0.4]}>
+                <cylinderGeometry args={[0.12, 0.12, 4.4, 8]} />
+                <meshStandardMaterial color="#2b2f35" />
+              </mesh>
+            ))}
+          </group>
+          <Cherenkov at={[0, CORE.y1 + 0.4, -0.9]} size={[3.4, 1.8]} power={() => 1} />
+        </>
+      )}
       <Grid />
       <CaskPad />
       <Site />
-      {cfg.lab && <ChainReaction rods={() => rodsP} stats={chain} />}
+      {cfg.lab && <ChainReaction rods={() => rodsP} stats={chain} moderated={moderated} />}
       {cfg.fuelLab && <FuelExhibit />}
       {cfg.boil && (
         <>

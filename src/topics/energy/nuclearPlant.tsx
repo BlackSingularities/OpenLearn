@@ -7,7 +7,8 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { Beam, Box, CylY, M, Pipe } from './coalPlant';
+import { Beam, Box, CylX, CylY, M, Pipe } from './coalPlant';
+import { dotTex } from './coalFx';
 import {
   ASSEMBLIES,
   AUX,
@@ -36,6 +37,7 @@ import {
   rng,
   type V3,
 } from './nuclearGeo';
+import { AX } from './coalGeo';
 
 /* ================= materiały ================= */
 
@@ -46,6 +48,7 @@ function makeMats() {
     concrete: std('#d4d1c9', { roughness: 0.9, side: THREE.DoubleSide }),
     concreteIn: std('#a9a59c', { roughness: 0.95, side: THREE.DoubleSide }),
     steelShell: std('#8f9aa5', { metalness: 0.55, roughness: 0.4, side: THREE.DoubleSide }),
+    steelGhost: std('#8f9aa5', { metalness: 0.4, roughness: 0.4, side: THREE.DoubleSide, transparent: true, opacity: 0.35, depthWrite: false }),
     vessel: std('#6d7782', { metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide }),
     vesselIn: std('#c9cdd2', { metalness: 0.7, roughness: 0.3, side: THREE.DoubleSide }),
     sg: std('#d9dce0', { metalness: 0.4, roughness: 0.45, side: THREE.DoubleSide }),
@@ -100,8 +103,9 @@ function Dome({ r, y0, h, m, cut }: { r: number; y0: number; h: number; m: THREE
  * chłodzenia obudowy i komin wylotu powietrza. W środku – stalowa obudowa bezpieczeństwa. `cut` – połowa od strony
  * kamery (+z) zdjęta.
  */
-export function ReactorBuilding({ cut }: { cut: boolean }) {
+export function ReactorBuilding({ cut, ghost = false }: { cut: boolean; ghost?: boolean }) {
   const n = NMAT();
+  const steel = ghost ? n.steelGhost : n.steelShell;
   const roof = useMemo(() => {
     const pts = [new THREE.Vector2(SHIELD.r, SHIELD.h), new THREE.Vector2(SHIELD.tankR + 1, SHIELD.tankY0), new THREE.Vector2(0.01, SHIELD.tankY0 + 0.5)];
     return new THREE.LatheGeometry(pts.reverse(), 64, cut ? Math.PI / 2 : 0, cut ? Math.PI : Math.PI * 2);
@@ -124,8 +128,8 @@ export function ReactorBuilding({ cut }: { cut: boolean }) {
         </mesh>
       )}
       {/* stalowa obudowa bezpieczeństwa */}
-      <Shell r={CV.r} y0={0} y1={CV.h} m={n.steelShell} cut={cut} />
-      <Dome r={CV.r} y0={CV.h} h={CV.domeH} m={n.steelShell} cut={cut} />
+      <Shell r={CV.r} y0={0} y1={CV.h} m={steel} cut={cut} />
+      <Dome r={CV.r} y0={CV.h} h={CV.domeH} m={steel} cut={cut} />
       {/* fundament */}
       <mesh position={[0, -1, 0]} material={n.concreteIn}>
         <cylinderGeometry args={[SHIELD.r + 1, SHIELD.r + 1, 2, 64]} />
@@ -134,41 +138,129 @@ export function ReactorBuilding({ cut }: { cut: boolean }) {
   );
 }
 
-/** Rdzeń: kasety paliwowe, pręty sterujące wsuwane od góry (`rods()` – wsunięcie 0…1). */
+/** Tekstura boku kasety: pionowe pręty paliwowe i ciemne szczeliny między nimi, poziome kratki dystansowe. */
+let FUEL_TEX: THREE.Texture | null = null;
+function fuelTex() {
+  if (FUEL_TEX) return FUEL_TEX;
+  const c = document.createElement('canvas');
+  c.width = 68;
+  c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#2b3138';
+  g.fillRect(0, 0, 68, 128);
+  for (let i = 0; i < 17; i++) {
+    const gr = g.createLinearGradient(i * 4, 0, i * 4 + 4, 0);
+    gr.addColorStop(0, '#6f7a85');
+    gr.addColorStop(0.5, '#d5dbe1');
+    gr.addColorStop(1, '#6f7a85');
+    g.fillStyle = gr;
+    g.fillRect(i * 4 + 0.4, 0, 3.2, 128);
+  }
+  g.fillStyle = '#c3c9cf';
+  for (const y of [6, 34, 62, 90, 118]) g.fillRect(0, y, 68, 3);
+  FUEL_TEX = new THREE.CanvasTexture(c);
+  FUEL_TEX.colorSpace = THREE.SRGBColorSpace;
+  return FUEL_TEX;
+}
+
+/**
+ * Rdzeń: kasety paliwowe (pręty w kratkach dystansowych, głowice u góry i u dołu), wiązki prętów sterujących
+ * wsuwane od góry (`rods()` – wsunięcie 0…1; wsunięta część kasety ciemnieje).
+ */
 export function Core({ rods, cut, glow }: { rods: () => number; cut: boolean; glow: () => number }) {
   const n = NMAT();
   const H = CORE.y1 - CORE.y0;
-  const { fuel, rodMesh, rodIdx } = useMemo(() => {
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ map: fuelTex(), metalness: 0.5, roughness: 0.4, emissive: '#2a7fff', emissiveIntensity: 0.05 }), []);
+  const { fuel, nozzles, rodMesh, rodIdx } = useMemo(() => {
     const list = ASSEMBLIES.map((p, k) => ({ p, k })).filter(({ p }) => !cut || p[1] <= 0.12);
-    const fuel = new THREE.InstancedMesh(new THREE.BoxGeometry(CORE.pitch * 0.74, H, CORE.pitch * 0.74), n.fuel, list.length);
+    const w = CORE.pitch * 0.86;
+    const fuel = new THREE.InstancedMesh(new THREE.BoxGeometry(w, H, w), mat, list.length);
+    const nozzles = new THREE.InstancedMesh(new THREE.BoxGeometry(w * 1.02, 0.2, w * 1.02), n.vessel, list.length * 2);
     const o = new THREE.Object3D();
     list.forEach(({ p }, i) => {
       o.position.set(p[0], CORE.y0 + H / 2, p[1]);
       o.updateMatrix();
       fuel.setMatrixAt(i, o.matrix);
+      for (const [j, y] of [
+        [0, CORE.y0 - 0.1],
+        [1, CORE.y1 + 0.1],
+      ]) {
+        o.position.set(p[0], y, p[1]);
+        o.updateMatrix();
+        nozzles.setMatrixAt(i * 2 + j, o.matrix);
+      }
     });
     fuel.instanceMatrix.needsUpdate = true;
+    nozzles.instanceMatrix.needsUpdate = true;
     const rodIdx = list.filter(({ k }) => hasRod(k)).map(({ p }) => p);
-    const rodMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(CORE.pitch * 0.5, H, CORE.pitch * 0.5), n.rod, rodIdx.length);
-    return { fuel, rodMesh, rodIdx };
-  }, [n, cut, H]);
+    // wiązka prętów sterujących: trochę szersza od kasety – część wsunięta jest widoczna jako ciemny pas
+    const rodMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(w * 1.04, H, w * 1.04), n.rod, rodIdx.length);
+    return { fuel, nozzles, rodMesh, rodIdx };
+  }, [n, cut, H, mat]);
   const o = useMemo(() => new THREE.Object3D(), []);
   useFrame(() => {
     const k = rods();
-    // pręt sterujący: wsunięty k – dolny koniec na wysokości y1 − k·H; wyciągnięty wystaje nad rdzeń
     rodIdx.forEach((p, i) => {
-      o.position.set(p[0], CORE.y1 - k * H + H / 2 + 0.05, p[1]);
+      // widoczna tylko część wsunięta (od góry rdzenia w dół); pręty nad rdzeniem są w rurach prowadzących
+      const len = Math.max(0.001, k * H);
+      o.position.set(p[0], CORE.y1 - len / 2, p[1]);
+      o.scale.set(1, len / H, 1);
       o.updateMatrix();
       rodMesh.setMatrixAt(i, o.matrix);
     });
     rodMesh.instanceMatrix.needsUpdate = true;
-    n.fuel.emissiveIntensity = 0.02 + 0.14 * glow();
+    mat.emissiveIntensity = 0.02 + 0.22 * glow();
   });
   return (
     <group>
       <primitive object={fuel} />
+      <primitive object={nozzles} />
       <primitive object={rodMesh} />
     </group>
+  );
+}
+
+/** Woda krążąca w zbiorniku: w dół szczeliną przy ścianie, w górę przez rdzeń (kropki). */
+export function CoreFlow({ rate }: { rate: () => number }) {
+  const N = 600;
+  const d = useMemo(() => {
+    const r = rng(19);
+    return Array.from({ length: N }, () => ({ a: Math.PI + r() * Math.PI, rr: Math.sqrt(r()), s: r(), down: r() < 0.4 }));
+  }, []);
+  const geo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(N * 3), 3));
+    return g;
+  }, []);
+  useFrame((_, dt0) => {
+    const dt = Math.min(dt0, 0.05);
+    const k = rate();
+    const p = geo.getAttribute('position') as THREE.BufferAttribute;
+    const c = geo.getAttribute('color') as THREE.BufferAttribute;
+    d.forEach((q, i) => {
+      q.s = (q.s + dt * 0.25 * (0.2 + k)) % 1;
+      if (q.down) {
+        // szczelina opadowa między koszem rdzenia a ścianą zbiornika
+        const rr = CORE.r + 0.3 + q.rr * 0.25;
+        const y = RPV.nozY - 1 - q.s * (RPV.nozY - 1 - RPV.y0 + 0.5);
+        p.setXYZ(i, Math.cos(q.a) * rr, y, Math.sin(q.a) * rr);
+        c.setXYZ(i, 0.35, 0.65, 1);
+      } else {
+        const rr = q.rr * (CORE.r - 0.1);
+        const y = CORE.y0 - 0.4 + q.s * (RPV.nozY - CORE.y0 + 0.4);
+        p.setXYZ(i, Math.cos(q.a) * rr, y, Math.sin(q.a) * rr);
+        const u = Math.min(1, Math.max(0, (y - CORE.y0) / (CORE.y1 - CORE.y0)));
+        c.setXYZ(i, 0.35 + 0.65 * u, 0.65 - 0.35 * u, 1 - 0.8 * u);
+      }
+    });
+    p.needsUpdate = true;
+    c.needsUpdate = true;
+  });
+  return (
+    <points geometry={geo}>
+      <pointsMaterial map={dotTex()} vertexColors size={0.09} sizeAttenuation transparent depthWrite={false} />
+    </points>
   );
 }
 
@@ -308,6 +400,86 @@ export function Pressurizer({ cut }: { cut: boolean }) {
   );
 }
 
+/** Pierścieniowy wycinek zbiornika (przekrój prostokątny obrócony wokół osi y). */
+function RingTank({ r0, r1, y0, y1, a0, a1, m }: { r0: number; r1: number; y0: number; y1: number; a0: number; a1: number; m: THREE.Material }) {
+  const geo = useMemo(() => {
+    const pts = [new THREE.Vector2(r0, y0), new THREE.Vector2(r1, y0), new THREE.Vector2(r1, y1), new THREE.Vector2(r0, y1), new THREE.Vector2(r0, y0)];
+    return new THREE.LatheGeometry(pts, 48, a0, a1 - a0);
+  }, [r0, r1, y0, y1, a0, a1]);
+  return <mesh geometry={geo} material={m} />;
+}
+
+/**
+ * Bierne układy bezpieczeństwa AP1000 w obudowie: zbiornik wody przeładunkowej (pierścień przy ścianie obudowy,
+ * zalewa rdzeń grawitacyjnie), dwa zbiorniki uzupełniania rdzenia (nad pętlą) i dwa akumulatory hydrauliczne
+ * (kule z wodą pod ciśnieniem azotu).
+ */
+export const IRWST = { r0: 13, r1: CV.r - 0.4, y0: 20, y1: 28, a0: Math.PI * 0.64, a1: Math.PI * 1.36 };
+export const CMT: V3[] = [
+  [-6, 38, -12],
+  [6, 38, -12],
+];
+export const ACC: V3[] = [
+  [-6.5, 6, -12],
+  [6.5, 6, -12],
+];
+export function SafetyTanks() {
+  const n = NMAT();
+  const m = M();
+  return (
+    <group>
+      <RingTank {...IRWST} m={n.water} />
+      <RingTank r0={IRWST.r0 - 0.25} r1={IRWST.r0} y0={IRWST.y0} y1={IRWST.y1 + 0.4} a0={IRWST.a0} a1={IRWST.a1} m={m.steel} />
+      <RingTank r0={IRWST.r0} r1={IRWST.r1} y0={IRWST.y0 - 0.4} y1={IRWST.y0} a0={IRWST.a0} a1={IRWST.a1} m={m.steel} />
+      {CMT.map((p, i) => (
+        <group key={i} position={p}>
+          <CylY p={[0, -3, 0]} r={1.7} h={6} m={n.tank} seg={24} />
+          <mesh position={[0, 3, 0]} material={n.tank}>
+            <sphereGeometry args={[1.7, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          </mesh>
+          <mesh position={[0, -3, 0]} rotation={[Math.PI, 0, 0]} material={n.tank}>
+            <sphereGeometry args={[1.7, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          </mesh>
+        </group>
+      ))}
+      {ACC.map((p, i) => (
+        <mesh key={i} position={p} material={n.tank}>
+          <sphereGeometry args={[2.3, 28, 18]} />
+        </mesh>
+      ))}
+      {/* rury z akumulatorów i zbiorników do zbiornika reaktora */}
+      {[1, -1].map((sg) => (
+        <group key={sg}>
+          <Pipe pts={[[sg * 6.5, 6, -9.8], [sg * 3, 10, -4], [sg * 1.6, RPV.y0 + 4, -1.6]]} r={0.16} m={n.cold} />
+          <Pipe pts={[[sg * 6, 32.3, -12], [sg * 4, 22, -6], [sg * 2.2, RPV.nozY - 1, -1.2]]} r={0.16} m={n.cold} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Osuszacze-przegrzewacze pary (MSR) przy turbinie: długie poziome zbiorniki po obu stronach części NP. */
+export function Msr() {
+  const m = M();
+  return (
+    <group>
+      {[-12.5, 12.5].map((z) => (
+        <group key={z}>
+          <CylX x0={-108} x1={-76} r={2.2} y={AX + 1.2} z={z} m={m.steel} seg={28} />
+          {[-108, -76].map((x) => (
+            <mesh key={x} position={[x, AX + 1.2, z]} rotation={[0, 0, Math.PI / 2]} material={m.steel}>
+              <sphereGeometry args={[2.2, 20, 12]} />
+            </mesh>
+          ))}
+          {[-104, -92, -80].map((x) => (
+            <Box key={x} p={[x, AX - 1.6, z]} s={[1, 3.2, 2.4]} m={m.steelDark} />
+          ))}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /** Wnętrze obudowy: zbiornik, rdzeń, wytwornice, pompy, stabilizator, rurociągi, pomost i suwnica. */
 export function PrimaryLoop({ cut, rods, glow, headOff = false }: { cut: boolean; rods: () => number; glow: () => number; headOff?: boolean }) {
   const n = NMAT();
@@ -320,6 +492,7 @@ export function PrimaryLoop({ cut, rods, glow, headOff = false }: { cut: boolean
       <SteamGen sg={1} cut={cut} />
       <Pumps />
       <Pressurizer cut={cut} />
+      <SafetyTanks />
       {/* gałęzie gorące (czerwone) i zimne (niebieskie) */}
       {[1, -1].map((sg) => (
         <group key={sg}>
@@ -464,6 +637,24 @@ export function Site() {
           <CylY p={[0, 4, 0]} r={4.5} h={1} m={m.steelDark} />
         </group>
       ))}
+      {/* budynek przyłączy (wejście do części jądrowej, nastawnia awaryjna) i budynek odpadów promieniotwórczych */}
+      <Box p={[-5, 11, 38]} s={[30, 22, 20]} m={m.clad} />
+      <Box p={[-5, 16, 48.2]} s={[26, 5, 0.3]} m={m.glass} />
+      <Box p={[40, 6.5, 37]} s={[28, 13, 14]} m={n.concrete} />
+      {/* boje oznaczające głowice ujęcia i zrzutu */}
+      {[INTAKE, OUTFALL].map((p, i) =>
+        [-12, 12].map((dx) => (
+          <group key={`${i}${dx}`} position={[p[0] + dx, 0, p[2]]}>
+            <mesh position={[0, 0.3, 0]} material={n.yellow}>
+              <sphereGeometry args={[1.4, 16, 10]} />
+            </mesh>
+            <CylY p={[0, 1.4, 0]} r={0.12} h={3} m={m.steelDark} />
+            <mesh position={[0, 4.6, 0]} material={n.yellow}>
+              <coneGeometry args={[0.6, 1, 4]} />
+            </mesh>
+          </group>
+        )),
+      )}
       {/* ogrodzenie terenu */}
       {[
         [-320, -140, 220, -140],

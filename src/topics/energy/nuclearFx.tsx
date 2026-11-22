@@ -54,7 +54,7 @@ export interface ChainStats {
  * Neutron prędki (pomarańczowy) zwalnia w wodzie (staje się niebieski) i dopiero wolny rozszczepia jądro uranu-235:
  * jądro rozpada się na dwa odłamki (ich ruch to ciepło) i wyrzuca 2–3 nowe neutrony. Pręty pochłaniają neutrony.
  */
-export function ChainReaction({ rods, stats }: { rods: () => number; stats: React.MutableRefObject<ChainStats> }) {
+export function ChainReaction({ rods, stats, moderated = true }: { rods: () => number; stats: React.MutableRefObject<ChainStats>; moderated?: boolean }) {
   const st = useMemo(() => {
     const nuclei: Nucleus[] = [];
     for (let i = 0; i < COLS; i++) for (let j = 0; j < ROWS; j++) nuclei.push({ x: (i + 0.5) * SP - W / 2 + (j % 2) * 1.2, y: (j + 0.5) * SP - HH / 2, alive: true, t: 0 });
@@ -99,7 +99,8 @@ export function ChainReaction({ rods, stats }: { rods: () => number; stats: Reac
       const q = S.neutrons[i];
       q.age += dt;
       const sp = Math.hypot(q.vx, q.vy);
-      const target = 6;
+      // w wodzie neutrony szybko zwalniają; bez wody zostają prędkie
+      const target = moderated ? 6 : 21;
       const ns = target + (sp - target) * Math.exp(-dt * 2.2);
       q.vx *= ns / sp;
       q.vy *= ns / sp;
@@ -201,7 +202,7 @@ export function ChainReaction({ rods, stats }: { rods: () => number; stats: Reac
       {/* tło: woda (moderator) w ramce */}
       <mesh position={[0, 0, -1.2]}>
         <planeGeometry args={[W + 8, HH + 8]} />
-        <meshStandardMaterial color="#1c4f80" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} />
+        <meshStandardMaterial color={moderated ? '#1c4f80' : '#3a3f47'} transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
       <mesh position={[0, 0, -1.3]}>
         <boxGeometry args={[W + 9, HH + 9, 0.3]} />
@@ -223,8 +224,8 @@ export function ChainReaction({ rods, stats }: { rods: () => number; stats: Reac
       <Lbl pos={[0, HH / 2 + 7, 0]} sub color="#cbd5e1">
         pręty sterujące
       </Lbl>
-      <Lbl pos={[W / 2 - 4, HH / 2 + 7, 0]} sub color="#5ab0ff">
-        woda spowalnia neutrony
+      <Lbl pos={[W / 2 - 4, HH / 2 + 7, 0]} sub color={moderated ? '#5ab0ff' : '#94a3b8'}>
+        {moderated ? 'woda spowalnia neutrony' : 'brak wody – neutrony zostają prędkie'}
       </Lbl>
       <Lbl pos={[0, -HH / 2 - 6, 0]} sub color="#cbd5e1">
         powiększenie: w rzeczywistości jądro ma ok. 0,000 000 000 000 01 m
@@ -449,7 +450,7 @@ export function PassiveCooling({ on }: { on: () => number }) {
 
 /** Kaseta wędrująca z rdzenia do basenu (`u()` – postęp 0…1 po drodze P_REFUEL). */
 export function RefuelAssembly({ u }: { u: () => number }) {
-  const ref = useRef<THREE.Mesh>(null);
+  const ref = useRef<THREE.Group>(null);
   const { cum, total } = useMemo(() => {
     const cum = [0];
     for (let i = 1; i < P_REFUEL.length; i++) {
@@ -468,10 +469,21 @@ export function RefuelAssembly({ u }: { u: () => number }) {
     const b = P_REFUEL[j];
     ref.current?.position.set(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k);
   });
+  // kaseta ma tylko ok. 20 cm szerokości – poświata wokół niej (świecenie Czerenkowa w wodzie) pozwala ją śledzić
   return (
-    <mesh ref={ref}>
-      <boxGeometry args={[0.21, 4.3, 0.21]} />
-      <meshStandardMaterial color="#b9c2cc" metalness={0.6} roughness={0.35} emissive="#2a7fff" emissiveIntensity={0.5} />
-    </mesh>
+    <group ref={ref}>
+      <mesh>
+        <boxGeometry args={[0.21, 4.3, 0.21]} />
+        <meshStandardMaterial color="#b9c2cc" metalness={0.6} roughness={0.35} emissive="#2a7fff" emissiveIntensity={0.8} />
+      </mesh>
+      <mesh scale={[1.4, 3.2, 1.4]}>
+        <sphereGeometry args={[1, 20, 14]} />
+        <meshBasicMaterial color="#3fa0ff" transparent opacity={0.35} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <pointLight color="#4aa8ff" intensity={40} distance={14} decay={1.5} />
+      <Lbl pos={[0, 4.5, 0]} sub color="#7cc7ff">
+        kaseta paliwowa
+      </Lbl>
+    </group>
   );
 }
