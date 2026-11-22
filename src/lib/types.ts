@@ -85,7 +85,7 @@ export interface PartModule {
 }
 
 /** Dziedzina modelu. */
-export type Subject = 'lotnictwo' | 'przyroda';
+export type Subject = 'lotnictwo' | 'przyroda' | 'energetyka';
 
 export interface Topic {
   id: string;

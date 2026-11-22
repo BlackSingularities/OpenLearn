@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan';
+  cover: 'samolot' | 'wulkan' | 'wiatrak';
 }
 
 export const catalog: CatalogModel[] = [
@@ -33,5 +33,13 @@ export const catalog: CatalogModel[] = [
     topic: 'wulkan',
     color: '#e0662b',
     cover: 'wulkan',
+  },
+  {
+    id: 'elektrownia-wiatrowa',
+    title: 'Elektrownia wiatrowa',
+    summary: 'Turbina 4,5 MW w 3D: wiatr i jego energia, łopaty jak skrzydła, wnętrze gondoli z przekładnią i generatorem, sterowanie, wieża i fundamenty, droga prądu do sieci, farmy na lądzie i na morzu.',
+    topic: 'elektrownia-wiatrowa',
+    color: '#0d9488',
+    cover: 'wiatrak',
   },
 ];
