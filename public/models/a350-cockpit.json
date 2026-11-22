@@ -1,22 +1,12 @@
 {
  "parts": [
   {
-   "name": "static",
-   "verts": 131504,
-   "pos": 0,
-   "col": 789024,
-   "nrm": 1183536,
-   "idx": 1578048,
-   "count": 351291,
-   "pivot": null
-  },
-  {
    "name": "gear",
    "verts": 403,
-   "pos": 2983212,
-   "col": 2985632,
-   "nrm": 2986844,
-   "idx": 2988056,
+   "pos": 0,
+   "col": 2420,
+   "nrm": 3632,
+   "idx": 4844,
    "count": 1080,
    "pivot": [
     0.2076,
@@ -27,30 +17,30 @@
   {
    "name": "pedL",
    "verts": 628,
-   "pos": 2992376,
-   "col": 2996144,
-   "nrm": 2998028,
-   "idx": 2999912,
+   "pos": 9164,
+   "col": 12932,
+   "nrm": 14816,
+   "idx": 16700,
    "count": 1536,
    "pivot": null
   },
   {
    "name": "pedR",
    "verts": 628,
-   "pos": 3006056,
-   "col": 3009824,
-   "nrm": 3011708,
-   "idx": 3013592,
+   "pos": 22844,
+   "col": 26612,
+   "nrm": 28496,
+   "idx": 30380,
    "count": 1536,
    "pivot": null
   },
   {
    "name": "stickL",
    "verts": 3929,
-   "pos": 3019736,
-   "col": 3043312,
-   "nrm": 3055100,
-   "idx": 3066888,
+   "pos": 36524,
+   "col": 60100,
+   "nrm": 71888,
+   "idx": 83676,
    "count": 15315,
    "pivot": [
     -0.8939,
@@ -61,10 +51,10 @@
   {
    "name": "stickR",
    "verts": 3977,
-   "pos": 3128148,
-   "col": 3152012,
-   "nrm": 3163944,
-   "idx": 3175876,
+   "pos": 144936,
+   "col": 168800,
+   "nrm": 180732,
+   "idx": 192664,
    "count": 15315,
    "pivot": [
     0.8939,
@@ -75,10 +65,10 @@
   {
    "name": "flap",
    "verts": 647,
-   "pos": 3237136,
-   "col": 3241020,
-   "nrm": 3242964,
-   "idx": 3244908,
+   "pos": 253924,
+   "col": 257808,
+   "nrm": 259752,
+   "idx": 261696,
    "count": 2592,
    "pivot": [
     0.115,
@@ -89,10 +79,10 @@
   {
    "name": "thrL",
    "verts": 1095,
-   "pos": 3255276,
-   "col": 3261848,
-   "nrm": 3265136,
-   "idx": 3268424,
+   "pos": 272064,
+   "col": 278636,
+   "nrm": 281924,
+   "idx": 285212,
    "count": 3144,
    "pivot": [
     -0.0297,
@@ -103,10 +93,10 @@
   {
    "name": "thrR",
    "verts": 1094,
-   "pos": 3281000,
-   "col": 3287564,
-   "nrm": 3290848,
-   "idx": 3294132,
+   "pos": 297788,
+   "col": 304352,
+   "nrm": 307636,
+   "idx": 310920,
    "count": 3144,
    "pivot": [
     0.0287,
@@ -117,16 +107,206 @@
   {
    "name": "spd",
    "verts": 580,
-   "pos": 3306708,
-   "col": 3310188,
-   "nrm": 3311928,
-   "idx": 3313668,
+   "pos": 323496,
+   "col": 326976,
+   "nrm": 328716,
+   "idx": 330456,
    "count": 2484,
    "pivot": [
     -0.096,
     0.37,
     -0.05
    ]
+  },
+  {
+   "name": "static-10",
+   "verts": 4,
+   "pos": 340392,
+   "col": 340416,
+   "nrm": 340428,
+   "idx": 340440,
+   "count": 6,
+   "pivot": null
+  },
+  {
+   "name": "static-9",
+   "verts": 534,
+   "pos": 340464,
+   "col": 343668,
+   "nrm": 345272,
+   "idx": 346876,
+   "count": 1374,
+   "pivot": null
+  },
+  {
+   "name": "static-8",
+   "verts": 994,
+   "pos": 352372,
+   "col": 358336,
+   "nrm": 361320,
+   "idx": 364304,
+   "count": 2250,
+   "pivot": null
+  },
+  {
+   "name": "static-7",
+   "verts": 2161,
+   "pos": 373304,
+   "col": 386272,
+   "nrm": 392756,
+   "idx": 399240,
+   "count": 5190,
+   "pivot": null
+  },
+  {
+   "name": "static-6",
+   "verts": 3031,
+   "pos": 420000,
+   "col": 438188,
+   "nrm": 447284,
+   "idx": 456380,
+   "count": 8514,
+   "pivot": null
+  },
+  {
+   "name": "static-5",
+   "verts": 2806,
+   "pos": 490436,
+   "col": 507272,
+   "nrm": 515692,
+   "idx": 524112,
+   "count": 7557,
+   "pivot": null
+  },
+  {
+   "name": "static-4",
+   "verts": 4127,
+   "pos": 554340,
+   "col": 579104,
+   "nrm": 591488,
+   "idx": 603872,
+   "count": 11127,
+   "pivot": null
+  },
+  {
+   "name": "static-3",
+   "verts": 6596,
+   "pos": 648380,
+   "col": 687956,
+   "nrm": 707744,
+   "idx": 727532,
+   "count": 18030,
+   "pivot": null
+  },
+  {
+   "name": "static-2",
+   "verts": 14464,
+   "pos": 799652,
+   "col": 886436,
+   "nrm": 929828,
+   "idx": 973220,
+   "count": 35649,
+   "pivot": null
+  },
+  {
+   "name": "static-1",
+   "verts": 28026,
+   "pos": 1115816,
+   "col": 1283972,
+   "nrm": 1368052,
+   "idx": 1452132,
+   "count": 73197,
+   "pivot": null
+  },
+  {
+   "name": "static+0",
+   "verts": 37401,
+   "pos": 1744920,
+   "col": 1969328,
+   "nrm": 2081532,
+   "idx": 2193736,
+   "count": 99321,
+   "pivot": null
+  },
+  {
+   "name": "static+1",
+   "verts": 15179,
+   "pos": 2591020,
+   "col": 2682096,
+   "nrm": 2727636,
+   "idx": 2773176,
+   "count": 38523,
+   "pivot": null
+  },
+  {
+   "name": "static+2",
+   "verts": 6159,
+   "pos": 2927268,
+   "col": 2964224,
+   "nrm": 2982704,
+   "idx": 3001184,
+   "count": 16194,
+   "pivot": null
+  },
+  {
+   "name": "static+3",
+   "verts": 4225,
+   "pos": 3065960,
+   "col": 3091312,
+   "nrm": 3103988,
+   "idx": 3116664,
+   "count": 11028,
+   "pivot": null
+  },
+  {
+   "name": "static+4",
+   "verts": 4030,
+   "pos": 3160776,
+   "col": 3184956,
+   "nrm": 3197048,
+   "idx": 3209140,
+   "count": 9492,
+   "pivot": null
+  },
+  {
+   "name": "static+5",
+   "verts": 2705,
+   "pos": 3247108,
+   "col": 3263340,
+   "nrm": 3271456,
+   "idx": 3279572,
+   "count": 7758,
+   "pivot": null
+  },
+  {
+   "name": "static+6",
+   "verts": 1961,
+   "pos": 3310604,
+   "col": 3322372,
+   "nrm": 3328256,
+   "idx": 3334140,
+   "count": 4695,
+   "pivot": null
+  },
+  {
+   "name": "static+7",
+   "verts": 631,
+   "pos": 3352920,
+   "col": 3356708,
+   "nrm": 3358604,
+   "idx": 3360500,
+   "count": 1347,
+   "pivot": null
+  },
+  {
+   "name": "static+8",
+   "verts": 23,
+   "pos": 3365888,
+   "col": 3366028,
+   "nrm": 3366100,
+   "idx": 3366172,
+   "count": 39,
+   "pivot": null
   }
  ],
  "scale": 7.93481246375927e-05,

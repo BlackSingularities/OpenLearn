@@ -139,7 +139,12 @@ export function FgCockpit({ data, drive, children }: { data: FgCockpitData; driv
   }, [drive]);
   return (
     <group>
-      <mesh geometry={data.geo.static} material={MAT} />
+      {/* część nieruchoma w pasach co 0,2 m w poprzek kokpitu – w przekroju samolotu znikają pasy po zdjętej połowie */}
+      {Object.keys(data.geo)
+        .filter((k) => k.startsWith('static'))
+        .map((k) => (
+          <mesh key={k} geometry={data.geo[k]} material={MAT} />
+        ))}
       <Moving data={data} name="thrL" rot={thr(0)} />
       <Moving data={data} name="thrR" rot={thr(1)} />
       <Moving data={data} name="flap" rot={() => [drive.flap() * 0.11, 0, 0]} />
