@@ -8,6 +8,25 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BOIL, BURNER_Y, CT, ESP, FGD, FGD_H, FGD_R, STACK, STACK_H, ctR, rng, type V3 } from './coalGeo';
 
+/* ================= kropki ================= */
+
+let DOT_TEX: THREE.Texture | null = null;
+/** Okrągła kropka z miękkim brzegiem (punkty bez niej są kwadratowe). */
+export function dotTex() {
+  if (DOT_TEX) return DOT_TEX;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.6, 'rgba(255,255,255,0.9)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 32, 32);
+  DOT_TEX = new THREE.CanvasTexture(c);
+  return DOT_TEX;
+}
+
 /* ================= płomień ================= */
 
 const FIRE_VS = /* glsl */ `
@@ -66,7 +85,38 @@ export function Fireball({ power, cut }: { power: () => number; cut: boolean }) 
   });
   const yc = (BURNER_Y[0] + BURNER_Y[BURNER_Y.length - 1]) / 2 + 6;
   const a = BOIL.half - 1.5;
+  // strugi z palników: z naroża stycznie do okręgu w środku komory (stąd wir)
+  const jets = useMemo(() => {
+    const list: { p: V3; q: THREE.Quaternion }[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
+    for (const y of BURNER_Y)
+      for (const [x, z] of [
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+        [1, -1],
+      ]) {
+        if (cut && z > 0) continue;
+        const c = new THREE.Vector2(-x, -z).normalize().rotateAround(new THREE.Vector2(), 0.32);
+        const d = new THREE.Vector3(c.x, 0, c.y);
+        const L = 7;
+        const p0 = new THREE.Vector3(x * (BOIL.half - 0.6), y, z * (BOIL.half - 0.6));
+        // stożek: wierzchołek przy palniku, podstawa dalej w komorze
+        list.push({ p: p0.clone().addScaledVector(d, L / 2).toArray() as V3, q: new THREE.Quaternion().setFromUnitVectors(up, d.clone().negate()) });
+      }
+    return list;
+  }, [cut]);
+  const jetMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ffb347', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }), []);
+  useFrame(({ clock }) => {
+    jetMat.opacity = 0.55 * power() * (0.8 + 0.2 * Math.sin(clock.elapsedTime * 13));
+  });
   return (
+    <>
+    {jets.map((j, i) => (
+      <mesh key={i} position={j.p} quaternion={j.q} material={jetMat}>
+        <coneGeometry args={[1.6, 7, 12, 1, true]} />
+      </mesh>
+    ))}
     <group position={[0, yc, 0]}>
       {[1, 0.78, 0.55].map((s, i) => (
         <mesh key={i} material={mat} scale={[a * s, 1, a * s]}>
@@ -75,6 +125,7 @@ export function Fireball({ power, cut }: { power: () => number; cut: boolean }) 
       ))}
       <pointLight ref={light} color="#ff8a3a" distance={70} decay={1.4} />
     </group>
+    </>
   );
 }
 
@@ -271,10 +322,10 @@ export function TowerFlow({ rate }: { rate: () => number }) {
   return (
     <group position={[CT.x, 0, CT.z]}>
       <points geometry={geo}>
-        <pointsMaterial color="#9fd3f2" size={0.6} sizeAttenuation transparent opacity={0.85} depthWrite={false} />
+        <pointsMaterial map={dotTex()} color="#9fd3f2" size={0.32} sizeAttenuation transparent opacity={0.9} depthWrite={false} />
       </points>
       <points geometry={ageo}>
-        <pointsMaterial color="#ffb66b" size={1.1} sizeAttenuation transparent opacity={0.75} depthWrite={false} />
+        <pointsMaterial map={dotTex()} color="#ffb66b" size={0.7} sizeAttenuation transparent opacity={0.8} depthWrite={false} />
       </points>
     </group>
   );
@@ -318,7 +369,7 @@ export function EspDust({ rate }: { rate: () => number }) {
   });
   return (
     <points geometry={geo}>
-      <pointsMaterial color="#5a5248" size={0.55} sizeAttenuation />
+      <pointsMaterial map={dotTex()} color="#4a433b" size={0.3} sizeAttenuation transparent depthWrite={false} />
     </points>
   );
 }
@@ -364,7 +415,7 @@ export function FgdSpray({ rate }: { rate: () => number }) {
   });
   return (
     <points geometry={geo}>
-      <pointsMaterial vertexColors size={0.6} sizeAttenuation />
+      <pointsMaterial map={dotTex()} vertexColors size={0.32} sizeAttenuation transparent depthWrite={false} />
     </points>
   );
 }

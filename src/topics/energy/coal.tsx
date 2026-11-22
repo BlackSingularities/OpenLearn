@@ -30,10 +30,10 @@ const BOIL_CAM: V3 = [46, 74, 150];
 const BOIL_TGT: V3 = [0, 58, 0];
 const HALL_CAM: V3 = [-60, 62, 118];
 const HALL_TGT: V3 = [-95, 14, 0];
-const CT_CAM: V3 = [160, 170, 170];
-const CT_TGT: V3 = [-90, 80, -200];
-const FLUE_CAM: V3 = [190, 140, 230];
-const FLUE_TGT: V3 = [110, 45, 0];
+const CT_CAM: V3 = [-380, 130, 70];
+const CT_TGT: V3 = [-100, 80, -200];
+const FLUE_CAM: V3 = [330, 160, 300];
+const FLUE_TGT: V3 = [112, 55, 0];
 const GRID_CAM: V3 = [-80, 160, 330];
 const GRID_TGT: V3 = [-260, 20, 0];
 
@@ -197,8 +197,8 @@ const fuelModule: PartModule = {
     coal({
       title: 'Młyny i pył węglowy',
       spot: [MILLS[2], 30, MILL_Z],
-      camera: [30, 34, 40],
-      target: [-2, 18, -32],
+      camera: [26, 36, -100],
+      target: [-2, 24, -37],
       preset: { mode: 'fu-mill' },
       body: (
         <>
@@ -353,13 +353,13 @@ const turbineModule: PartModule = {
     coal({
       title: 'Generator',
       spot: [tx('gen'), AX + 4, 2],
-      camera: [-100, 32, 52],
-      target: [-125, AX, 0],
+      camera: [-108, 30, 36],
+      target: [-124, AX - 1, 0],
       preset: { mode: 'tu-gen' },
       body: (
         <>
           <p>
-            W <b>generatorze</b> wirnik to potężny elektromagnes, a nieruchomy stojan to miedziane uzwojenia. Gdy magnes się obraca, pole magnetyczne przecina uzwojenia i płynie w nich prąd – zasada jest ta sama co w dynamie rowerowym.
+            Zdjęliśmy górną połowę <b>generatora</b>. Wirnik w środku to potężny elektromagnes (czerwony i niebieski pas to jego bieguny N i S), a wokół leży nieruchomy stojan z pakietu blach z miedzianymi prętami uzwojeń. Gdy magnes się obraca, pole magnetyczne przecina uzwojenia i płynie w nich prąd – zasada jest ta sama co w dynamie rowerowym.
           </p>
           <p>
             Stojan ma trzy oddzielne uzwojenia, przesunięte względem siebie, więc powstają trzy prądy przemienne – <b>prąd trójfazowy</b>. Wirnik obraca się 50 razy na sekundę, więc prąd zmienia kierunek 50 razy na sekundę: to <b>50 Hz</b>, jak w każdym gniazdku w Polsce.
@@ -522,8 +522,8 @@ const flueModule: PartModule = {
     coal({
       title: 'Dwutlenek węgla',
       spot: [STACK[0], STACK_H + 10, 0],
-      camera: [STACK[0] + 260, STACK_H + 30, 300],
-      target: [STACK[0], STACK_H + 20, 0],
+      camera: [STACK[0] + 360, STACK_H + 40, 420],
+      target: [STACK[0], STACK_H + 40, 0],
       preset: { mode: 'fg-co2' },
       controls: [POWER()],
       body: (

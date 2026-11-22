@@ -297,3 +297,32 @@ export const COAL_SHARE: [number, number][] = [
   [2023, 61],
   [2024, 57],
 ];
+
+/** Powietrze do spalania: wentylator przy ziemi → podgrzewacz powietrza → skrzynie powietrza przy palnikach. */
+export const P_AIR: V3[] = [
+  [62, 2, 26],
+  [52, 4, 18],
+  [AH[0] + 2, AH[1] - 10, 7],
+  [AH[0] + 2, AH[1] + 5, 7],
+  [30, 30, -4],
+  [BOIL.half + 1.6, 30, -4],
+];
+/** Pył węglowy: z odsiewacza młyna przez pyłoprzewód do palnika na ścianie kotła. */
+export const pfPath = (x: number): V3[] => [
+  [x, 12.5, MILL_Z],
+  [x, 16, MILL_Z + 6],
+  [x * 0.5, 22 + ((x + 22) / 45) * 15, -BOIL.half - 1.4],
+];
+/** Popiół lotny: z lejów elektrofiltru rurociągiem do silosów. */
+export const P_ASH: V3[] = [
+  [ESP.x0 + 18, 1.5, -11],
+  [ESP.x0 + 18, 1.5, -30],
+  [109, 1.5, -40],
+  [109, 26, -48],
+];
+/** Gips: z dołu absorbera taśmą do magazynu. */
+export const P_GYPS: V3[] = [
+  [FGD[0] + 8, 2, 9],
+  [FGD[0] + 10, 2, 28],
+  [FGD[0] + 14, 8, 40],
+];

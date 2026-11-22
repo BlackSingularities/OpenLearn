@@ -142,6 +142,10 @@ function makeMats() {
     tree: std('#3d5a30', { roughness: 1, flatShading: true }),
     trunk: std('#5b4330', { roughness: 1 }),
     cable: std('#1d2126', { roughness: 0.8 }),
+    copper: std('#c8773a', { metalness: 0.7, roughness: 0.35 }),
+    lamination: std('#3a3f46', { metalness: 0.5, roughness: 0.5, side: THREE.DoubleSide }),
+    window: std('#9cc4de', { roughness: 0.15, metalness: 0.3, emissive: '#2a4152', emissiveIntensity: 0.4 }),
+    lamp: new THREE.MeshStandardMaterial({ color: '#ff3020', emissive: '#ff2010', emissiveIntensity: 2, toneMapped: false }),
   };
 }
 export const M = () => (MATS ??= makeMats());
@@ -263,6 +267,17 @@ export function BoilerHouse({ cut }: { cut: boolean }) {
       <Wall p={[(x0 + x1) / 2, h - 4, z0 - 0.1]} s={[w, 6, 0.5]} m={m.cladBlue} />
       {!cut && <Wall p={[(x0 + x1) / 2, h - 4, z1 + 0.1]} s={[w, 6, 0.5]} m={m.cladBlue} />}
       <Box p={[(x0 + x1) / 2, h + 0.4, cut ? z0 / 2 : 0]} s={[w + 1, 0.8, cut ? -z0 + 1 : d + 1]} m={m.roof} />
+      {/* pasy okien na ścianach bocznych */}
+      {[24, 50, 76, 98].map((y) =>
+        [x0 - 0.25, x1 + 0.25].map((x) => <Box key={`${x}${y}`} p={[x, y, cut ? z0 / 2 : 0]} s={[0.12, 2.6, cut ? -z0 - 6 : d - 6]} m={m.window} />),
+      )}
+      {/* klatka schodowa z windą przy ścianie bocznej, wyższa od dachu */}
+      <Wall p={[x1 + 5, (h + 8) / 2, z0 + 8]} s={[10, h + 8, 10]} m={m.cladBlue} />
+      <Box p={[x1 + 10.1, (h + 8) / 2, z0 + 8]} s={[0.12, h + 2, 1.6]} m={m.window} />
+      {/* wentylatory dachowe */}
+      {[-18, -6, 6, 18].map((x) => (
+        <CylY key={x} p={[x, h + 0.8, cut ? z0 / 2 : 0]} r={1.6} h={2.2} m={m.steel} />
+      ))}
       {/* fundament */}
       <Box p={[(x0 + x1) / 2, 0.3, 0]} s={[w + 2, 0.6, d + 2]} m={m.concrete} />
     </group>
@@ -426,7 +441,7 @@ const mix = (a: number, b: number, k: number) => a + (b - a) * k;
  * Turbozespół: obudowy części turbiny, generator i wzbudnica na wspólnej osi. `open` – zdjęte górne połówki
  * obudów, widać wirniki z wieńcami łopatek. `spin()` – kąt obrotu wału (rad).
  */
-export function TurbineSet({ open, spin }: { open: boolean; spin: () => number }) {
+export function TurbineSet({ open, spin, genOpen = false }: { open: boolean; spin: () => number; genOpen?: boolean }) {
   const m = M();
   const rotors = useRef<THREE.Group>(null);
   const blades = useMemo(() => {
@@ -471,6 +486,7 @@ export function TurbineSet({ open, spin }: { open: boolean; spin: () => number }
       <group position={[0, AX, 0]}>
         {TURB.map((t) => {
           const isGen = t.id === 'gen' || t.id === 'exc';
+          if (t.id === 'gen' && genOpen) return <GeneratorCut key={t.id} x={t.x} len={t.len} r={t.r} />;
           return (
             <group key={t.id}>
               {open && !isGen ? (
@@ -493,6 +509,7 @@ export function TurbineSet({ open, spin }: { open: boolean; spin: () => number }
         <group ref={rotors}>
           <CylX x0={-60} x1={-139} r={0.55} m={m.shaft} />
           {open && <primitive object={blades} />}
+          {genOpen && <GenRotor x={TURB.find((t) => t.id === 'gen')!.x} len={TURB.find((t) => t.id === 'gen')!.len} />}
           {/* bęben wirnika części NP (gruby wał z tarczami) */}
           {open &&
             TURB.filter((t) => t.id.startsWith('lp')).map((t) => <CylX key={t.id} x0={t.x - t.len / 2 + 1} x1={t.x + t.len / 2 - 1} r={1.0} m={m.shaft} />)}
@@ -517,6 +534,73 @@ export function TurbineSet({ open, spin }: { open: boolean; spin: () => number }
   );
 }
 
+/**
+ * Generator w przekroju (zdjęta górna połowa obudowy): stojan z pakietu blach z miedzianymi prętami uzwojeń
+ * w żłobkach i ich wygiętymi końcami (czołami), a w środku wirnik – elektromagnes (rysowany osobno, obraca się).
+ */
+function GeneratorCut({ x, len, r }: { x: number; len: number; r: number }) {
+  const m = M();
+  const half = useMemo(() => {
+    const g = new THREE.CylinderGeometry(1, 1, 1, 48, 1, true, 0, Math.PI);
+    g.rotateZ(-Math.PI / 2);
+    return g;
+  }, []);
+  const bars = useMemo(() => {
+    const n = 36;
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 0.22, 0.22), m.copper, n);
+    const o = new THREE.Object3D();
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      // tylko dolna połowa (górna obudowa i stojan zdjęte)
+      const a = Math.PI * (i + 0.5) / n;
+      o.position.set(x, -Math.sin(a) * r * 0.6, Math.cos(a) * r * 0.6);
+      o.rotation.set(-a, 0, 0);
+      o.scale.set(len - 3.2, 1, 1);
+      o.updateMatrix();
+      im.setMatrixAt(k++, o.matrix);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    return im;
+  }, [m, x, len, r]);
+  const endW = useMemo(() => {
+    const g = new THREE.TorusGeometry(r * 0.62, 0.32, 10, 40, Math.PI);
+    g.rotateY(Math.PI / 2);
+    g.rotateX(Math.PI);
+    return g;
+  }, [r]);
+  return (
+    <group>
+      <mesh geometry={half} position={[x, 0, 0]} scale={[len, r, r]} material={m.gen} />
+      <mesh geometry={half} position={[x, 0, 0]} scale={[len - 2.4, r * 0.88, r * 0.88]} material={m.lamination} />
+      <mesh geometry={half} position={[x, 0, 0]} scale={[len - 2.4, r * 0.52, r * 0.52]} material={m.lamination} />
+      <primitive object={bars} />
+      {[-1, 1].map((sg) => (
+        <mesh key={sg} geometry={endW} position={[x + sg * (len / 2 - 1.5), 0, 0]} material={m.copper} />
+      ))}
+      {[-1, 1].map((sg) => (
+        <Box key={`f${sg}`} p={[x, 0, sg * (r + 0.25)]} s={[len, 0.35, 0.6]} m={m.gen} />
+      ))}
+    </group>
+  );
+}
+
+/** Wirnik generatora: walec z miedzianymi zwojami w żłobkach – dwa bieguny elektromagnesu (N i S). */
+function GenRotor({ x, len }: { x: number; len: number }) {
+  const m = M();
+  return (
+    <group>
+      <CylX x0={x - len / 2 + 1.6} x1={x + len / 2 - 1.6} r={1.15} m={m.shaft} seg={40} />
+      {[0, 1, 2, 3, 4, 5].map((i) => {
+        const a = (i / 6) * Math.PI * 2;
+        return <Box key={i} p={[x, Math.cos(a) * 1.13, Math.sin(a) * 1.13]} s={[len - 3.6, 0.16, 0.5]} r={[a, 0, 0]} m={m.copper} />;
+      })}
+      {/* bieguny: czerwony N, niebieski S */}
+      <Box p={[x, 1.2, 0]} s={[len - 3.8, 0.06, 0.9]} m={m.red} />
+      <Box p={[x, -1.2, 0]} s={[len - 3.8, 0.06, 0.9]} m={m.feedPipe} />
+    </group>
+  );
+}
+
 /** Maszynownia: hala nad turbozespołem z suwnicą. `cut` – bez dachu i ściany od strony kamery. */
 export function TurbineHall({ cut }: { cut: boolean }) {
   const m = M();
@@ -535,8 +619,12 @@ export function TurbineHall({ cut }: { cut: boolean }) {
       {!cut && <Wall p={[(x0 + x1) / 2, h / 2, z1]} s={[x1 - x0, h, 0.4]} m={m.clad} />}
       <Wall p={[x0, h / 2, 0]} s={[0.4, h, z1 - z0]} m={m.clad} />
       {!cut && <Box p={[(x0 + x1) / 2, h + 1, 0]} s={[x1 - x0 + 1, 2, z1 - z0 + 1]} m={m.roof} />}
-      {/* rząd okien pod dachem */}
-      <Box p={[(x0 + x1) / 2, h - 3, z0 - 0.25]} s={[x1 - x0 - 4, 3, 0.1]} m={m.glass} />
+      {/* rzędy okien */}
+      <Box p={[(x0 + x1) / 2, h - 3, z0 - 0.25]} s={[x1 - x0 - 4, 3, 0.1]} m={m.window} />
+      <Box p={[(x0 + x1) / 2, 14, z0 - 0.25]} s={[x1 - x0 - 4, 2.4, 0.1]} m={m.window} />
+      {!cut && <Box p={[(x0 + x1) / 2, h - 3, z1 + 0.25]} s={[x1 - x0 - 4, 3, 0.1]} m={m.window} />}
+      {!cut && <Box p={[(x0 + x1) / 2, 14, z1 + 0.25]} s={[x1 - x0 - 4, 2.4, 0.1]} m={m.window} />}
+      <Box p={[x0 - 0.25, h / 2, 0]} s={[0.1, h - 10, 8]} m={m.window} />
       {/* suwnica: most z wciągarką */}
       <Box p={[-100, h - 7, 0]} s={[3, 2, z1 - z0 - 2]} m={m.yellow} />
       <Box p={[-100, h - 8.4, 4]} s={[3.4, 1.6, 3]} m={m.orange} />
@@ -1134,4 +1222,34 @@ export function Trees() {
 /** Grupa z przesunięciem – pomocnicze. */
 export function At({ p, children }: { p: V3; children: ReactNode }) {
   return <group position={p}>{children}</group>;
+}
+
+/** Światła przeszkodowe (czerwone, migające) na kominie, kotłowni i chłodni. */
+export function AviationLights() {
+  const m = M();
+  const pts = useMemo<V3[]>(() => {
+    const list: V3[] = [];
+    for (const a of [0, 1, 2, 3]) {
+      const ang = (a / 4) * Math.PI * 2 + 0.4;
+      list.push([STACK[0] + Math.cos(ang) * 6, STACK_H + 0.6, STACK[2] + Math.sin(ang) * 6]);
+      list.push([STACK[0] + Math.cos(ang) * 7.6, STACK_H * 0.66 + 0.5, STACK[2] + Math.sin(ang) * 7.6]);
+      list.push([CT.x + Math.cos(ang) * (CT.rTop + 0.4), CT.h + 0.6, CT.z + Math.sin(ang) * (CT.rTop + 0.4)]);
+    }
+    for (const x of [BH.x0, BH.x1]) for (const z of [BH.z0, BH.z1]) list.push([x, BH.h + 1.4, z]);
+    return list;
+  }, []);
+  const mat = m.lamp;
+  useFrame(({ clock }) => {
+    // miganie ok. 40 razy na minutę
+    mat.emissiveIntensity = Math.sin(clock.elapsedTime * 4.2) > 0.2 ? 3 : 0.3;
+  });
+  return (
+    <>
+      {pts.map((p, i) => (
+        <mesh key={i} position={p} material={mat}>
+          <sphereGeometry args={[0.7, 10, 8]} />
+        </mesh>
+      ))}
+    </>
+  );
 }

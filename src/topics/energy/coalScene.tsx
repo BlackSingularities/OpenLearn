@@ -42,6 +42,10 @@ import {
   P_REHEAT_COLD,
   P_REHEAT_HOT,
   P_STEAM,
+  P_AIR,
+  P_ASH,
+  P_GYPS,
+  pfPath,
   RAIL_Z,
   SCR,
   STACK,
@@ -60,7 +64,7 @@ import {
   solarAt,
   type V3,
 } from './coalGeo';
-import { Aux, Boiler, BoilerHouse, Bunkers, CoalYard, CoolingTower, FlueGasLine, Grid, Ground, SteamPipes, Stack, Train, Trees, TurbineHall, TurbineSet } from './coalPlant';
+import { Aux, AviationLights, Boiler, BoilerHouse, Bunkers, CoalYard, CoolingTower, FlueGasLine, Grid, Ground, SteamPipes, Stack, Train, Trees, TurbineHall, TurbineSet } from './coalPlant';
 import { EspDust, FgdSpray, Fireball, Plumes, TowerFlow } from './coalFx';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
@@ -68,9 +72,10 @@ const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
 
 /* ================= ustawienia trybów ================= */
 
-type FlowKey = 'coal' | 'steam' | 'feed' | 'cool' | 'flue' | 'power';
+type FlowKey = 'coal' | 'steam' | 'feed' | 'cool' | 'flue' | 'power' | 'air' | 'pf' | 'ash' | 'gyps';
 interface Cfg {
   bhCut: boolean;
+  genOpen: boolean;
   thCut: boolean;
   turbOpen: boolean;
   ctCut: boolean;
@@ -80,32 +85,32 @@ interface Cfg {
   plume: boolean;
   weather: Weather;
 }
-const BASE: Cfg = { bhCut: false, thCut: false, turbOpen: false, ctCut: false, espCut: false, fgdCut: false, flows: [], plume: true, weather: 'day' };
+const BASE: Cfg = { genOpen: false, bhCut: false, thCut: false, turbOpen: false, ctCut: false, espCut: false, fgdCut: false, flows: [], plume: true, weather: 'day' };
 const CFG: Record<string, Partial<Cfg>> = {
   home: {},
   'tour-fu': { flows: ['coal'] },
   'tour-bo': { bhCut: true },
   'tour-tu': { thCut: true, turbOpen: true, flows: ['steam'] },
   'tour-co': { flows: ['cool'] },
-  'tour-fg': { flows: ['flue'] },
+  'tour-fg': { flows: ['flue', 'ash', 'gyps'] },
   'tour-gr': { flows: ['power'] },
   'fu-home': { flows: ['coal'] },
   'fu-rail': { flows: ['coal'] },
-  'fu-mill': { bhCut: true, flows: ['coal'] },
+  'fu-mill': { bhCut: true, flows: ['coal', 'pf'] },
   'fu-energy': { flows: ['coal'] },
   'bo-home': { bhCut: true },
-  'bo-flame': { bhCut: true },
+  'bo-flame': { bhCut: true, flows: ['air', 'pf'] },
   'bo-water': { bhCut: true, flows: ['feed', 'steam'] },
   'bo-start': { bhCut: true, thCut: true, flows: ['feed', 'steam', 'cool'] },
   'tu-home': { thCut: true },
   'tu-blades': { thCut: true, turbOpen: true, flows: ['steam'] },
-  'tu-gen': { thCut: true, flows: ['power'] },
+  'tu-gen': { thCut: true, genOpen: true },
   'tu-sync': { thCut: true, turbOpen: true, flows: ['steam'] },
   'co-home': { flows: ['cool'] },
   'co-tower': { ctCut: true, flows: ['cool'] },
   'co-cycle': { thCut: true, bhCut: true, flows: ['steam', 'feed', 'cool'] },
   'co-sankey': {},
-  'fg-home': { flows: ['flue'] },
+  'fg-home': { flows: ['flue', 'ash', 'gyps'] },
   'fg-esp': { espCut: true },
   'fg-fgd': { fgdCut: true },
   'fg-co2': {},
@@ -122,6 +127,10 @@ const FLOW_STYLE: Record<FlowKey, { color: string; size: number; speed: number }
   cool: { color: '#7fd0ff', size: 1.4, speed: 18 },
   flue: { color: '#8a8580', size: 2.2, speed: 24 },
   power: { color: '#ffd34d', size: 1.8, speed: 60 },
+  air: { color: '#ffc58a', size: 0.9, speed: 16 },
+  pf: { color: '#2a2a2e', size: 0.4, speed: 14 },
+  ash: { color: '#b8b2a8', size: 0.6, speed: 8 },
+  gyps: { color: '#f4f2ea', size: 0.6, speed: 6 },
 };
 
 /* ================= części do kliknięcia ================= */
@@ -679,7 +688,7 @@ export function CoalScene({ params }: SceneProps) {
           ['CO₂ na godzinę', `${fmt(L.co2)} t`],
           ['CO₂ na rok', `ok. ${fmt((UNIT.P * UNIT.co2 * 6500) / 1e6, 1)} mln t`],
           ['na 1 kWh prądu', `ok. ${fmt(UNIT.co2 * 1000)} g`],
-          ['objętość w godzinę', `ok. ${fmt(L.co2 / 1.98 / 1000)} tys. m³`],
+          ['objętość w godzinę', `ok. ${fmt(L.co2 / 1.98)} tys. m³ – kula o średnicy ok. ${fmt(2 * Math.cbrt((3 * L.co2 * 1000) / 1.98 / (4 * Math.PI)))} m`],
         ])}
       </>
     );
@@ -735,7 +744,7 @@ export function CoalScene({ params }: SceneProps) {
       <Bunkers cut={cfg.bhCut} />
       {fireOn && <Fireball power={() => st.current.fire} cut={cfg.bhCut} />}
       <TurbineHall cut={cfg.thCut} />
-      <TurbineSet open={cfg.turbOpen} spin={() => st.current.angle} />
+      <TurbineSet open={cfg.turbOpen} genOpen={cfg.genOpen} spin={() => st.current.angle} />
       <SteamPipes />
       <CoolingTower cut={cfg.ctCut} />
       <FlueGasLine cutEsp={cfg.espCut} cutFgd={cfg.fgdCut} />
@@ -744,6 +753,7 @@ export function CoalScene({ params }: SceneProps) {
       <Train x={() => (mode === 'fu-rail' ? st.current.train : 60)} />
       <Grid />
       <Aux />
+      <AviationLights />
       {cfg.plume && <Plumes rate={() => clamp(st.current.k, 0, 1)} />}
       {mode === 'co-tower' && <TowerFlow rate={kRate} />}
       {mode === 'fg-esp' && <EspDust rate={kRate} />}
@@ -769,6 +779,16 @@ export function CoalScene({ params }: SceneProps) {
       )}
       {flows.includes('flue') && <EnergyFlow path={P_FLUE} count={220} speed={24} size={2.0} color="#8a8580" rate={kRate} />}
       {flows.includes('power') && <EnergyFlow path={P_POWER} count={110} speed={70} size={2.2} color="#ffd34d" rate={kRate} />}
+      {flows.includes('air') && <EnergyFlow path={P_AIR} count={70} speed={FLOW_STYLE.air.speed} size={FLOW_STYLE.air.size} color={FLOW_STYLE.air.color} rate={kRate} />}
+      {flows.includes('pf') &&
+        MILLS.slice(0, 5).map((x) => <EnergyFlow key={x} path={pfPath(x)} count={26} speed={FLOW_STYLE.pf.speed} size={FLOW_STYLE.pf.size} color={FLOW_STYLE.pf.color} rate={kRate} />)}
+      {flows.includes('ash') && <EnergyFlow path={P_ASH} count={40} speed={FLOW_STYLE.ash.speed} size={FLOW_STYLE.ash.size} color={FLOW_STYLE.ash.color} rate={kRate} />}
+      {flows.includes('gyps') && <EnergyFlow path={P_GYPS} count={24} speed={FLOW_STYLE.gyps.speed} size={FLOW_STYLE.gyps.size} color={FLOW_STYLE.gyps.color} rate={kRate} />}
+      {mode === 'fg-co2' && (
+        <Lbl pos={[STACK[0], STACK_H + 110, 0]} sub color="#cbd5e1">
+          CO₂ z jednej godziny pracy
+        </Lbl>
+      )}
 
       {/* stałe podpisy w zakładkach z przekrojem */}
       {mode === 'fu-mill' && <MillLabels />}
@@ -802,21 +822,22 @@ export function CoalScene({ params }: SceneProps) {
 /** Podpisy młyna i zasobnika (nieklikalne). */
 function MillLabels() {
   const x = MILLS[2];
+  const z = MILL_Z - 5;
   return (
     <>
-      <Lbl pos={[x, 54, MILL_Z + 5]} sub>
+      <Lbl pos={[x, 54, z]} sub>
         zasobnik węgla
       </Lbl>
-      <Lbl pos={[x, 31, MILL_Z + 3]} sub>
+      <Lbl pos={[x, 31, z]} sub>
         podajnik
       </Lbl>
-      <Lbl pos={[x, 5, MILL_Z + 5]} sub>
+      <Lbl pos={[x, 4, z]} sub>
         młyn
       </Lbl>
-      <Lbl pos={[x, 12.5, MILL_Z + 4]} sub>
+      <Lbl pos={[x, 12.5, z]} sub>
         odsiewacz
       </Lbl>
-      <Lbl pos={[x * 0.5, 22, -BOIL.half + 2]} sub>
+      <Lbl pos={[x + 4, 18, MILL_Z + 3]} sub>
         pyłoprzewody do palników
       </Lbl>
     </>
@@ -883,7 +904,7 @@ function Co2Cloud({ rate }: { rate: () => number }) {
   return (
     <mesh ref={ref}>
       <sphereGeometry args={[1, 40, 24]} />
-      <meshStandardMaterial color="#9aa3ad" transparent opacity={0.28} depthWrite={false} roughness={0.4} />
+      <meshStandardMaterial color="#6b7480" transparent opacity={0.38} depthWrite={false} roughness={0.4} side={THREE.DoubleSide} />
     </mesh>
   );
 }
