@@ -270,7 +270,7 @@ export function plumbingOf(t: VType): Plumbing {
         conduit: { x: 0, w: 0, y0: -14, y1: -14 },
         dikes: [],
         sills: [],
-        vents: [[0, top(0, 0), 0]],
+        vents: HOT_SPRINGS.map(([x, z]) => [x, top(x, z), z] as [number, number, number]),
       };
     case 'fissure':
       return {
@@ -316,16 +316,16 @@ const C = {
   soil: hex('#7d6b58'),
   rock: hex('#8a8580'),
   snow: hex('#f2f5f8'),
-  crater: hex('#5b3a30'),
+  crater: hex('#70493b'),
   sulfur: hex('#d9c443'),
-  basalt: hex('#353437'),
-  basaltOld: hex('#5e5049'),
-  scoria: hex('#3e2a26'),
+  basalt: hex('#4a4543'),
+  basaltOld: hex('#7a6b60'),
+  scoria: hex('#5e3d33'),
   dacite: hex('#8e8580'),
   ice: hex('#e9f3f9'),
   iceBlue: hex('#b9d8ec'),
-  sea: hex('#3a4a58'),
-  sand: hex('#2f2b2b'),
+  sea: hex('#4a5a68'),
+  sand: hex('#4a4440'),
   moss: hex('#6f7d52'),
   spatter: hex('#6a2e22'),
   water: hex('#3d7fbf'),
@@ -357,13 +357,19 @@ export function surfColor(t: VType, x: number, z: number, y: number, slope: numb
       break;
     }
     case 'shield': {
-      c = mixC(C.basaltOld, C.basalt, sm(-0.2, 0.3, n));
-      c = mixC(c, lawn, sm(3, 1, y) * 0.8);
+      const th = Math.atan2(z, x);
+      const streak = Math.sin(th * 9 + 2.5 * fbm(x * 0.03, z * 0.03)) * 0.5 + 0.5;
+      c = mixC(C.basaltOld, C.basalt, sm(0.55, 0.85, streak + 0.25 * n));
+      c = mixC(c, mixC(lawn, C.forest, 0.4), sm(4.5, 1.5, y) * 0.75);
       if (r < 7.3) c = mixC(C.basalt, C.crater, sm(0.6, 0.9, n2) * 0.5);
       break;
     }
     case 'cinder': {
       c = mixC(lawn, C.sand, sm(20, 13, r));
+      // pole lawy aa wylanej u podnóża (w stronę −z)
+      const ang = Math.atan2(z, x);
+      const lobe = sm(0.55, 0.2, Math.abs(ang + 0.85) + 0.15 * fbm(x * 0.08, z * 0.08)) * sm(42, 30, r + 4 * n);
+      c = mixC(c, hex('#4a3c36'), lobe * sm(10, 12, r));
       c = mixC(c, C.scoria, sm(12.5, 10, r));
       if (r < 3.4) c = mixC(C.scoria, C.crater, 0.5);
       break;
@@ -447,6 +453,8 @@ export function geoColor(t: VType, x: number, y: number, pl: Plumbing, rock: num
   if (cd.w > 0 && y > cd.y0 - 1 && y < cd.y1 && Math.abs(x - cd.x) < cd.w) return C.plug;
   for (const [x0, y0, x1, y1, w] of pl.dikes) if (segDist(x, y, x0, y0, x1, y1) < w) return C.intrusion;
   for (const [x0, y0, x1, y1, w] of pl.sills) if (segDist(x, y, x0, y0, x1, y1) < w * (1 + 0.6 * Math.sin(((x - x0) / (x1 - x0)) * Math.PI))) return C.intrusion;
+  // maar: diatrema – lej pokruszonej skały pod kraterem, zwężający się w głąb
+  if (t === 'maar' && y < 0.5 && y > -31 && Math.abs(x) < 2 + (y + 31) * 0.27 + 0.5 * n) return mixC(hex('#5d5550'), hex('#8f8070'), sm(0.4, 0.75, vnoise(x * 1.3 + 5, y * 1.3)));
   let c = layerColor(t, x, y, rock, n);
   if (q < 2.2) c = mixC(C.hotRock, c, sm(1, 2.2, q + 0.2 * n));
   return c;
@@ -469,6 +477,8 @@ function layerColor(t: VType, x: number, y: number, rock: number, n: number): RG
       if (y > base - 10) return pillow(x, y);
       return mixC(hex('#2c2f35'), hex('#3a3d44'), sm(-0.3, 0.3, n));
     }
+    // maar: przesiąknięta wodą warstwa piasku (to z nią spotyka się magma)
+    if (t === 'maar' && y < base - 6 && y > base - 9.5 + 0.4 * n && Math.abs(x) > 3) return mixC(hex('#6f8a96'), hex('#5f7c8a'), sm(-0.3, 0.3, n));
     // skały osadowe (poziome warstwy), głębiej – krystaliczne podłoże
     const yy = y + 0.9 * Math.sin(x * 0.05) + 0.4 * n;
     if (yy < base - 24) return mixC(hex('#6e5f63'), hex('#857077'), sm(-0.2, 0.4, fbm(x * 0.15, y * 0.15)));

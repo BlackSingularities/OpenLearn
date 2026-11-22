@@ -299,8 +299,8 @@ const TYPES: TypeTab[] = [
   {
     type: 'shield',
     title: 'Wulkan tarczowy',
-    cam: [12, 34, 150],
-    tgt: [0, -6, -14],
+    cam: [16, 24, 112],
+    tgt: [0, -2, -14],
     erupt: 'degas',
     body: (
       <>

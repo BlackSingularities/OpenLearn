@@ -3,7 +3,7 @@
  * nimi), przekrój (pół wulkanu zdjęte – widać komorę magmową, komin i warstwy), woda i lód, erupcje, gablota
  * z próbkami skał, makieta płyt tektonicznych, przyrządy do obserwacji i życie przy wulkanie.
  */
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Line } from '@react-three/drei';
 import * as THREE from 'three';
@@ -36,6 +36,7 @@ import {
   type Plumbing,
   type VType,
 } from './volcanoGeo';
+import { CalderaGhost, LavaLake, TYPE_FACTS, typeLabels } from './volcanoTypes';
 import { Flow, Puffs, Rocks, rnd, upCone, type FlowKind, type PuffSys, type RockSys, type V3 } from './volcanoFx';
 import { AshPlane, Instruments, LifeFeatures, Samples, Tectonics, VeiCube, Village, MON_STATIONS, GEYSER, TEC } from './volcanoExtras';
 
@@ -119,6 +120,35 @@ const NR = 120;
 const NT = 200;
 /** Promienie siatki – gęściej przy szczycie. */
 const RS = Array.from({ length: NR + 1 }, (_, i) => R_TERRAIN * Math.pow(i / NR, 1.55));
+/** Czas przejścia między rodzajami wulkanów (s). */
+const MORPH_T = 2.4;
+
+/** Kolory terenu rodzaju t (nachylenie z różnic wysokości – bez normalnych siatki, której jeszcze nie ma). */
+function terrainColors(s: Shape, t: VType, out: Float32Array) {
+  const h = (x: number, z: number) => {
+    const r = rockOf(s, t, x, z);
+    const i = iceH(t, x, z, s.melt);
+    return Number.isFinite(i) && i > r ? i : r;
+  };
+  let v = 0;
+  const put = (x: number, z: number) => {
+    const y = h(x, z);
+    const e = 0.6;
+    const slope = Math.hypot(h(x + e, z) - h(x - e, z), h(x, z + e) - h(x, z - e)) / (2 * e);
+    const c = surfColor(t, x, z, y, slope, rockOf(s, t, x, z), iceH(t, x, z, s.melt));
+    out[v * 3] = lin(c[0]);
+    out[v * 3 + 1] = lin(c[1]);
+    out[v * 3 + 2] = lin(c[2]);
+    v++;
+  };
+  put(0, 0);
+  for (let i = 1; i <= NR; i++)
+    for (let j = 0; j < NT; j++) {
+      const th = (j / NT) * Math.PI * 2;
+      put(RS[i] * Math.cos(th), RS[i] * Math.sin(th));
+    }
+}
+const colorKeyOf = (s: Shape) => `${s.b}|${s.grow < 1 ? Math.round(s.grow * 20) : 'g'}|${Math.round(s.infl * 10)}|${Math.round(s.melt * 20)}`;
 
 function Terrain({ shape, cut }: { shape: React.MutableRefObject<Shape>; cut: boolean }) {
   const geo = useMemo(() => {
@@ -145,38 +175,55 @@ function Terrain({ shape, cut }: { shape: React.MutableRefObject<Shape>; cut: bo
     mat.clippingPlanes = cut ? [CUT_PLANE] : NO_PLANES;
     mat.needsUpdate = true;
   }, [mat, cut]);
-  const seen = useRef({ ver: -1, colorType: '' as string, melt: -1 });
+  const seen = useRef({ ver: -1 });
+  // kolory: przy przejściu – płynne przenikanie z kolorów poprzedniego wulkanu (A) do nowego (B)
+  const cm = useRef({ key: '', morph: '', A: null as Float32Array | null, B: null as Float32Array | null });
   useFrame(() => {
     const s = shape.current;
-    if (seen.current.ver === s.ver) return;
-    seen.current.ver = s.ver;
-    const p = geo.getAttribute('position') as THREE.BufferAttribute;
-    p.setXYZ(0, 0, topS(s, 0, 0), 0);
-    for (let i = 1; i <= NR; i++)
-      for (let j = 0; j < NT; j++) {
-        const th = (j / NT) * Math.PI * 2;
-        const x = RS[i] * Math.cos(th);
-        const z = RS[i] * Math.sin(th);
-        p.setXYZ(1 + (i - 1) * NT + j, x, topS(s, x, z), z);
-      }
-    p.needsUpdate = true;
-    geo.computeVertexNormals();
-    const ct = curType(s);
-    const colorKey = `${ct}|${s.grow < 1 ? Math.round(s.grow * 20) : 'g'}|${Math.round(s.infl * 10)}`;
-    if (seen.current.colorType === colorKey && Math.abs(seen.current.melt - s.melt) < 0.05) return;
-    seen.current.colorType = colorKey;
-    seen.current.melt = s.melt;
-    const c = geo.getAttribute('color') as THREE.BufferAttribute;
-    const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
-    for (let v = 0; v < p.count; v++) {
-      const x = p.getX(v);
-      const y = p.getY(v);
-      const z = p.getZ(v);
-      const slope = Math.sqrt(Math.max(0, 1 - nrm.getY(v) ** 2)) / Math.max(0.05, nrm.getY(v));
-      const col = surfColor(ct, x, z, y, slope, rockOf(s, ct, x, z), iceH(ct, x, z, s.melt));
-      c.setXYZ(v, lin(col[0]), lin(col[1]), lin(col[2]));
+    if (seen.current.ver !== s.ver) {
+      seen.current.ver = s.ver;
+      const p = geo.getAttribute('position') as THREE.BufferAttribute;
+      p.setXYZ(0, 0, topS(s, 0, 0), 0);
+      for (let i = 1; i <= NR; i++)
+        for (let j = 0; j < NT; j++) {
+          const th = (j / NT) * Math.PI * 2;
+          const x = RS[i] * Math.cos(th);
+          const z = RS[i] * Math.sin(th);
+          p.setXYZ(1 + (i - 1) * NT + j, x, topS(s, x, z), z);
+        }
+      p.needsUpdate = true;
+      geo.computeVertexNormals();
     }
-    c.needsUpdate = true;
+    const c = geo.getAttribute('color') as THREE.BufferAttribute;
+    const arr = c.array as Float32Array;
+    const M = cm.current;
+    if (s.k < 1) {
+      const mk = `${s.a}>${s.b}`;
+      if (M.morph !== mk) {
+        M.morph = mk;
+        M.A = M.key ? Float32Array.from(arr) : null;
+        M.B = new Float32Array(arr.length);
+        terrainColors({ ...s, a: s.b, k: 1 }, s.b, M.B);
+        M.key = colorKeyOf(s);
+      }
+      const e = ease(s.k);
+      const A = M.A ?? M.B!;
+      const B = M.B!;
+      for (let i = 0; i < arr.length; i++) arr[i] = A[i] + (B[i] - A[i]) * e;
+      c.needsUpdate = true;
+      return;
+    }
+    if (M.morph) {
+      M.morph = '';
+      if (M.B) arr.set(M.B);
+      c.needsUpdate = true;
+    }
+    const key = colorKeyOf(s);
+    if (key !== M.key) {
+      M.key = key;
+      terrainColors(s, s.b, arr);
+      c.needsUpdate = true;
+    }
   });
   return <mesh geometry={geo} material={mat} />;
 }
@@ -197,24 +244,45 @@ function Plain({ shape, cut }: { shape: React.MutableRefObject<Shape>; cut: bool
   );
 }
 
-/** Woda: morze (wulkan podmorski) i jeziora w kraterach. */
-function Water({ type, cut, settled }: { type: VType; cut: boolean; settled: boolean }) {
+/** Morze i jeziora jednego rodzaju wulkanu; `weight()` – udział w przejściu (0…1), woda płynnie znika i się pojawia. */
+function WaterSet({ type, cut, weight }: { type: VType; cut: boolean; weight: () => number }) {
   const planes = cut ? [CUT_PLANE] : NO_PLANES;
-  if (!settled) return null;
+  const mats = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  useFrame(() => {
+    const w = weight();
+    for (const m of mats.current) {
+      if (!m) continue;
+      m.opacity = (m.userData.base as number) * w;
+      m.visible = w > 0.02;
+    }
+  });
+  const reg = (i: number, base: number) => (m: THREE.MeshStandardMaterial | null) => {
+    if (m) m.userData.base = base;
+    mats.current[i] = m;
+  };
   return (
     <>
       {hasSea(type) && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} renderOrder={2}>
           <circleGeometry args={[cut ? R_TERRAIN : 620, 96]} />
-          <meshStandardMaterial color="#2f6fa8" transparent opacity={0.62} roughness={0.15} metalness={0.1} clippingPlanes={planes} depthWrite={false} side={THREE.DoubleSide} />
+          <meshStandardMaterial ref={reg(0, 0.62)} color="#2f6fa8" transparent opacity={0} roughness={0.15} metalness={0.1} clippingPlanes={planes} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
       )}
       {lakesOf(type).map((l, i) => (
         <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[l.x, l.y, l.z]} renderOrder={2}>
           <circleGeometry args={[l.r, 72]} />
-          <meshStandardMaterial color={type === 'caldera' ? '#1f5f9e' : type === 'maar' ? '#3a6f6a' : '#4a8fb8'} transparent opacity={0.78} roughness={0.12} clippingPlanes={planes} depthWrite={false} side={THREE.DoubleSide} />
+          <meshStandardMaterial ref={reg(i + 1, 0.8)} color={type === 'caldera' ? '#1f5f9e' : type === 'maar' ? '#3a6f6a' : '#4a8fb8'} transparent opacity={0} roughness={0.12} clippingPlanes={planes} depthWrite={false} side={THREE.DoubleSide} />
         </mesh>
       ))}
+    </>
+  );
+}
+
+function Water({ from, to, cut, shape }: { from: VType; to: VType; cut: boolean; shape: React.MutableRefObject<Shape> }) {
+  return (
+    <>
+      {from !== to && <WaterSet key={`a-${from}`} type={from} cut={cut} weight={() => 1 - ease(shape.current.k)} />}
+      <WaterSet key={`b-${to}`} type={to} cut={cut} weight={() => ease(shape.current.k)} />
     </>
   );
 }
@@ -228,8 +296,12 @@ const TEX_W = 1400;
 const TEX_H = 400;
 const SEC_TOP = 31;
 const SEC_R = R_TERRAIN - 0.5;
-/** Gotowe tekstury przekroju (dla kształtów, które się nie zmieniają). */
-const SEC_CACHE = new Map<string, HTMLCanvasElement>();
+/** Gotowe tekstury przekroju (kształty, które się nie zmieniają). */
+const SEC_CACHE = new Map<string, THREE.CanvasTexture>();
+/** Kolejność malowania w tle – zanim użytkownik przejdzie do następnej zakładki, przekrój jest gotowy. */
+const PREFETCH: VType[] = ['strato', 'shield', 'cinder', 'dome', 'caldera', 'super', 'fissure', 'maar', 'sub', 'tuya'];
+const staticShape = (t: VType): Shape => ({ a: t, b: t, k: 1, melt: 0, infl: 0, grow: 1, ver: 0 });
+const secKey = (t: VType, s: Shape) => `${t}|${s.grow < 1 ? Math.round(s.grow * 12) : 'g'}|${Math.round(s.melt * 10)}|${Math.round(s.infl * 6)}`;
 
 interface SecJob {
   key: string;
@@ -237,11 +309,32 @@ interface SecJob {
   ct: VType;
   pl: Plumbing;
   snap: Shape;
-  canvas: HTMLCanvasElement;
   img: ImageData;
   /** Kolory poprzedniej kolumny (do linii granic warstw w pionie). */
   prev: Float32Array;
   i: number;
+}
+function newJob(key: string, t: VType, snap: Shape, cache: boolean): SecJob {
+  const img = new ImageData(TEX_W, TEX_H);
+  return { key, cache, ct: t, pl: plumbingOf(t), snap, img, prev: new Float32Array(TEX_H * 3), i: 0 };
+}
+function finishJob(job: SecJob) {
+  const canvas = document.createElement('canvas');
+  canvas.width = TEX_W;
+  canvas.height = TEX_H;
+  canvas.getContext('2d')!.putImageData(job.img, 0, 0);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  if (job.cache) {
+    SEC_CACHE.set(job.key, t);
+    if (SEC_CACHE.size > 16) {
+      const old = SEC_CACHE.keys().next().value as string;
+      SEC_CACHE.get(old)?.dispose();
+      SEC_CACHE.delete(old);
+    }
+  }
+  return t;
 }
 
 const grain = (i: number, j: number) => {
@@ -271,23 +364,17 @@ function paintColumns(job: SecJob, budgetMs: number) {
       let r = c[0];
       let g = c[1];
       let b = c[2];
-      // cienka, ciemniejsza linia na granicy warstw (jak na rysunku w podręczniku)
+      const up = j > 0 ? Math.abs(r - cur[(j - 1) * 3]) + Math.abs(g - cur[(j - 1) * 3 + 1]) + Math.abs(b - cur[(j - 1) * 3 + 2]) : 0;
+      const left = i > 0 ? Math.abs(r - prev[j * 3]) + Math.abs(g - prev[j * 3 + 1]) + Math.abs(b - prev[j * 3 + 2]) : 0;
+      cur[j * 3] = r;
+      cur[j * 3 + 1] = g;
+      cur[j * 3 + 2] = b;
       if (y <= top) {
-        const up = j > 0 ? Math.abs(r - cur[(j - 1) * 3]) + Math.abs(g - cur[(j - 1) * 3 + 1]) + Math.abs(b - cur[(j - 1) * 3 + 2]) : 0;
-        const left = i > 0 ? Math.abs(r - prev[j * 3]) + Math.abs(g - prev[j * 3 + 1]) + Math.abs(b - prev[j * 3 + 2]) : 0;
-        cur[j * 3] = r;
-        cur[j * 3 + 1] = g;
-        cur[j * 3 + 2] = b;
-        const edge = Math.max(up, left) > 0.1 ? 0.8 : 1;
-        // delikatne ziarno skały
-        const k = edge * (0.965 + 0.05 * grain(i, j));
+        // cienka, ciemniejsza linia na granicy warstw (jak na rysunku w podręczniku) i delikatne ziarno skały
+        const k = (Math.max(up, left) > 0.1 ? 0.8 : 1) * (0.965 + 0.05 * grain(i, j));
         r *= k;
         g *= k;
         b *= k;
-      } else {
-        cur[j * 3] = r;
-        cur[j * 3 + 1] = g;
-        cur[j * 3 + 2] = b;
       }
       const o = (j * TEX_W + i) * 4;
       d[o] = Math.min(255, r * 255);
@@ -301,6 +388,29 @@ function paintColumns(job: SecJob, budgetMs: number) {
   }
   return job.i >= TEX_W;
 }
+
+const SEC_VS = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const SEC_FS = /* glsl */ `
+uniform sampler2D mapA;
+uniform sampler2D mapB;
+uniform float k;
+varying vec2 vUv;
+void main() {
+  gl_FragColor = mix(texture2D(mapA, vUv), texture2D(mapB, vUv), k);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+const BLANK_SEC = (() => {
+  const t = new THREE.DataTexture(new Uint8Array([139, 115, 85, 255]), 1, 1);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
+})();
 
 /** Ściana przekroju w płaszczyźnie z = 0 oraz półkolista ściana bloku (jak makieta w muzeum). */
 function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
@@ -323,66 +433,65 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
     };
     return { cap: mk(CAP_NX, true), skirt: mk(160, false), floor: new THREE.CircleGeometry(R_TERRAIN, 80, Math.PI, Math.PI) };
   }, []);
-  const tex = useMemo(() => {
-    const c = document.createElement('canvas');
-    c.width = TEX_W;
-    c.height = TEX_H;
-    const g = c.getContext('2d')!;
-    g.fillStyle = '#8b7355';
-    g.fillRect(0, 0, TEX_W, TEX_H);
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 8;
-    t.generateMipmaps = true;
-    t.minFilter = THREE.LinearMipmapLinearFilter;
-    return t;
-  }, []);
-  useEffect(() => () => tex.dispose(), [tex]);
-  const job = useRef<SecJob | null>(null);
-  const shownKey = useRef('');
+  const mat = useMemo(() => new THREE.ShaderMaterial({ uniforms: { mapA: { value: BLANK_SEC }, mapB: { value: BLANK_SEC }, k: { value: 1 } }, vertexShader: SEC_VS, fragmentShader: SEC_FS, side: THREE.DoubleSide }), []);
+  useEffect(() => () => mat.dispose(), [mat]);
+  const st = useRef({ shown: '', fade: 1, speed: 1, job: null as SecJob | null, bg: null as SecJob | null, old: null as THREE.Texture | null });
   const seen = useRef({ ver: -1, key: '' });
-  const show = (canvas: HTMLCanvasElement) => {
-    // nowy obraz – stara kopia w karcie graficznej do zwolnienia
-    tex.dispose();
-    tex.image = canvas;
-    tex.needsUpdate = true;
-  };
-  useFrame(() => {
+  useFrame((_, dt0) => {
+    const dt = Math.min(dt0, 0.05);
     const s = shape.current;
-    const ct = curType(s);
-    // tekstura przekroju: z pamięci albo malowana w tle kolumna po kolumnie
+    const S = st.current;
     const dyn = s.grow < 1 || s.infl > 0.01 || s.melt > 0.01;
-    const key = `${ct}|${s.grow < 1 ? Math.round(s.grow * 12) : 'g'}|${Math.round(s.melt * 10)}|${Math.round(s.infl * 6)}`;
-    if (key !== shownKey.current && job.current?.key !== key) {
-      const hit = SEC_CACHE.get(key);
+    // przekrój docelowego wulkanu: z pamięci albo malowany w tle; potem płynne przenikanie ze starego
+    const want = secKey(s.b, s);
+    const startFade = (tex: THREE.Texture, key: string, speed: number) => {
+      const U = mat.uniforms;
+      // stary obraz: ten, który jest teraz widoczny (przy przerwanym przenikaniu – nowszy z dwóch)
+      const curTex = (S.fade < 0.5 ? U.mapA.value : U.mapB.value) as THREE.Texture;
+      if (S.old && S.old !== curTex && ![...SEC_CACHE.values()].includes(S.old as THREE.CanvasTexture)) S.old.dispose();
+      S.old = curTex;
+      U.mapA.value = curTex;
+      U.mapB.value = tex;
+      U.k.value = 0;
+      S.fade = 0;
+      S.speed = speed;
+      S.shown = key;
+    };
+    if (want !== S.shown) {
+      const hit = SEC_CACHE.get(want);
       if (hit) {
-        show(hit);
-        shownKey.current = key;
-        job.current = null;
-      } else {
-        const canvas = document.createElement('canvas');
-        canvas.width = TEX_W;
-        canvas.height = TEX_H;
-        const ctx = canvas.getContext('2d')!;
-        job.current = { key, cache: !dyn, ct, pl: plumbingOf(ct), snap: { ...s }, canvas, img: ctx.createImageData(TEX_W, TEX_H), prev: new Float32Array(TEX_H * 3), i: 0 };
+        startFade(hit, want, 1 / 1.4);
+        S.job = null;
+      } else if (S.job?.key !== want) S.job = newJob(want, s.b, { ...s, a: s.b, k: 1 }, !dyn);
+    }
+    if (S.job) {
+      if (paintColumns(S.job, 9)) {
+        const key = S.job.key;
+        const tex = finishJob(S.job);
+        S.job = null;
+        if (key === want) startFade(tex, key, dyn ? 4 : 1 / 1.2);
+      }
+    } else {
+      // w wolnej chwili malujemy przekroje pozostałych rodzajów
+      if (!S.bg) {
+        const t = PREFETCH.find((q) => !SEC_CACHE.has(secKey(q, staticShape(q))));
+        if (t) S.bg = newJob(secKey(t, staticShape(t)), t, staticShape(t), true);
+      }
+      if (S.bg && paintColumns(S.bg, 3)) {
+        finishJob(S.bg);
+        S.bg = null;
       }
     }
-    const jb = job.current;
-    if (jb && paintColumns(jb, 9)) {
-      jb.canvas.getContext('2d')!.putImageData(jb.img, 0, 0);
-      if (jb.cache) {
-        SEC_CACHE.set(jb.key, jb.canvas);
-        if (SEC_CACHE.size > 12) SEC_CACHE.delete(SEC_CACHE.keys().next().value as string);
-      }
-      show(jb.canvas);
-      shownKey.current = jb.key;
-      job.current = null;
+    if (S.fade < 1) {
+      S.fade = Math.min(1, S.fade + dt * S.speed);
+      mat.uniforms.k.value = ease(S.fade);
     }
     if (seen.current.ver === s.ver) return;
     seen.current.ver = s.ver;
+    const ct = curType(s);
     const pl = plumbingOf(ct);
-    const recolor = key !== seen.current.key;
-    seen.current.key = key;
+    const recolor = `${ct}|${secKey(ct, s)}` !== seen.current.key;
+    seen.current.key = `${ct}|${secKey(ct, s)}`;
     // ściana przekroju: wierzchołki do powierzchni terenu, współrzędne tekstury z położenia
     {
       const p = cap.getAttribute('position') as THREE.BufferAttribute;
@@ -392,10 +501,10 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
         const z = 0.02;
         const rock = rockS(s, x, z);
         const ice = iceS(s, x, z);
-        const top = Math.max(rock, Number.isFinite(ice) ? ice : -1e9, waterH(ct, x, z));
+        const water = waterH(s.k < 0.5 ? s.a : s.b, x, z);
+        const top = Math.max(rock, Number.isFinite(ice) ? ice : -1e9, water);
         for (let j = 0; j <= CAP_NY; j++) {
-          const f = j / CAP_NY;
-          const y = DEPTH + (top - DEPTH) * f;
+          const y = DEPTH + (top - DEPTH) * (j / CAP_NY);
           const v = i * (CAP_NY + 1) + j;
           p.setXYZ(v, x, y, z);
           uv.setXY(v, i / CAP_NX, (y - DEPTH) / (SEC_TOP - DEPTH));
@@ -432,9 +541,7 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
   });
   return (
     <>
-      <mesh geometry={cap}>
-        <meshBasicMaterial map={tex} side={THREE.DoubleSide} />
-      </mesh>
+      <mesh geometry={cap} material={mat} />
       <mesh geometry={skirt}>
         <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={1} />
       </mesh>
@@ -443,6 +550,24 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
       </mesh>
     </>
   );
+}
+
+/** Kanały magmy w chwili przejścia między rodzajami (komora i komin płynnie zmieniają miejsce i wielkość). */
+const PL_CACHE = new Map<VType, Plumbing>();
+const plOf = (t: VType) => {
+  if (!PL_CACHE.has(t)) PL_CACHE.set(t, plumbingOf(t));
+  return PL_CACHE.get(t)!;
+};
+function plumbingNow(s: Shape): Plumbing {
+  const b = plOf(s.b);
+  if (s.k >= 1) return b;
+  const a = plOf(s.a);
+  const e = ease(s.k);
+  return {
+    ...b,
+    chamber: { cx: mix(a.chamber.cx, b.chamber.cx, e), cy: mix(a.chamber.cy, b.chamber.cy, e), ax: mix(a.chamber.ax, b.chamber.ax, e), ay: mix(a.chamber.ay, b.chamber.ay, e) },
+    conduit: { x: mix(a.conduit.x, b.conduit.x, e), w: mix(a.conduit.w, b.conduit.w, e), y0: mix(a.conduit.y0, b.conduit.y0, e), y1: mix(a.conduit.y1, b.conduit.y1, e) },
+  };
 }
 
 /* ================= magma w przekroju ================= */
@@ -483,7 +608,7 @@ const MAGMA_TEX = (() => {
 })();
 
 /** Magma w kominie, pęcherzyki gazu (rosną przy wznoszeniu), poświata komory i nowa żyła. */
-function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.MutableRefObject<MagmaState>; onBurst?: (n: number) => void; dikePath?: [number, number][] }) {
+function MagmaOverlay({ getPl, st, onBurst, dikePath }: { getPl: () => Plumbing; st: React.MutableRefObject<MagmaState>; onBurst?: (n: number) => void; dikePath?: [number, number][] }) {
   const col = useRef<THREE.Mesh>(null);
   const glow = useRef<THREE.Mesh>(null);
   const dike = useRef<THREE.Mesh>(null);
@@ -491,7 +616,6 @@ function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.M
   const bubbles = useMemo<Bubble[]>(() => [], []);
   const m4 = useMemo(() => new THREE.Matrix4(), []);
   const acc = useRef(0);
-  const cd = pl.conduit;
   const dikeGeo = useMemo(() => {
     if (!dikePath) return null;
     const pos: number[] = [];
@@ -508,6 +632,9 @@ function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.M
   useFrame((state, dt0) => {
     const dt = Math.min(dt0, 0.05);
     const s = st.current;
+    const pl = getPl();
+    const cd = pl.conduit;
+    const ch = pl.chamber;
     const top = cd.y0 + (cd.y1 - cd.y0) * s.level;
     if (col.current) {
       col.current.visible = cd.w > 0 && s.level > 0.01;
@@ -517,6 +644,8 @@ function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.M
     if (glow.current) {
       const t = state.clock.elapsedTime;
       (glow.current.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.14 * s.glow * (0.6 + 0.4 * Math.sin(t * 2.2));
+      glow.current.position.set(ch.cx, ch.cy, 0.07);
+      glow.current.scale.set(ch.ax * 1.25, ch.ay * 1.35, 1);
     }
     if (dike.current && dikeGeo) {
       const n = dikeGeo.getIndex()!.count;
@@ -565,14 +694,13 @@ function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.M
     I.instanceMatrix.needsUpdate = true;
     if (burst) onBurst?.(burst);
   });
-  const ch = pl.chamber;
   return (
     <>
       <mesh ref={col} renderOrder={3}>
         <planeGeometry args={[1, 1]} />
         <meshBasicMaterial map={MAGMA_TEX} toneMapped={false} />
       </mesh>
-      <mesh ref={glow} position={[ch.cx, ch.cy, 0.07]} scale={[ch.ax * 1.25, ch.ay * 1.35, 1]} renderOrder={3}>
+      <mesh ref={glow} renderOrder={3}>
         <circleGeometry args={[1, 64]} />
         <meshBasicMaterial color="#ffb347" transparent opacity={0.25} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
       </mesh>
@@ -932,7 +1060,6 @@ function geyserParts(): Record<string, PartInfo> {
 /** Klikalne części na stronie głównej modułu (zakładka „0”). */
 function homeParts(mode: string): Record<string, PartInfo> | null {
   if (mode === 'in-home') return insideParts();
-  if (mode === 'type-strato') return typeParts();
   if (mode === 'er-hawaii') return hawaiiParts();
   if (mode === 'tec-layers') return earthParts();
   if (mode === 'mon-home') return monParts();
@@ -989,6 +1116,7 @@ export function VolcanoScene({ params }: SceneProps) {
   /* kształt: przejście między rodzajami */
   const shape = useRef<Shape>({ a: type, b: type, k: 1, melt: 0, infl: 0, grow: 1, ver: 0 });
   const [settled, setSettled] = useState(true);
+  const [fromType, setFromType] = useState<VType>(type);
   useEffect(() => {
     const s = shape.current;
     if (s.b !== type) {
@@ -996,6 +1124,7 @@ export function VolcanoScene({ params }: SceneProps) {
       s.b = type;
       s.k = 0;
       s.ver++;
+      setFromType(s.a);
       setSettled(false);
     }
   }, [type]);
@@ -1047,9 +1176,13 @@ export function VolcanoScene({ params }: SceneProps) {
     clock.current += dt;
     const s = shape.current;
     if (s.k < 1) {
-      s.k = Math.min(1, s.k + dt / 1.8);
+      // przejście liczone od rzeczywistego czasu (przy wolnych klatkach też trwa ok. 2,4 s)
+      s.k = Math.min(1, s.k + (paused ? 0 : Math.min(dt0, 0.25)) / MORPH_T);
       s.ver++;
-      if (s.k >= 1) setSettled(true);
+      if (s.k >= 1) {
+        setSettled(true);
+        setFromType(s.b);
+      }
     }
     if (tRun.current >= 0) tRun.current += dt;
     const t = tRun.current;
@@ -1144,7 +1277,10 @@ export function VolcanoScene({ params }: SceneProps) {
   // podpisy części
   const [sel, setSel] = useState<string | null>(null);
   useEffect(() => setSel(null), [mode]);
-  const parts = home ? homeParts(mode) : null;
+  // moduł „Rodzaje wulkanów”: podpisy części klikalne na każdej zakładce (każda zakładka to inny wulkan)
+  const typeMode = mode.startsWith('type-') || mode === 'glacier';
+  const parts = typeMode ? (settled ? typeLabels(type) : null) : home ? homeParts(mode) : null;
+  const facts = typeMode ? TYPE_FACTS[type] : null;
   const links = mode === 'home' && home ? homeLinks() : null;
   const veiInfo = VEI_TABLE[Math.max(0, Math.min(8, vei))];
 
@@ -1161,7 +1297,7 @@ export function VolcanoScene({ params }: SceneProps) {
         </>
       ) : (
         <>
-          <ambientLight intensity={0.5} />
+          <ambientLight intensity={0.62} />
           <hemisphereLight args={['#dfe9f5', '#4a4030', 0.55]} />
           <directionalLight position={[-60, 90, 70]} intensity={1.7} />
           <directionalLight position={[50, 20, -40]} intensity={0.35} color="#ffd9b0" />
@@ -1169,9 +1305,9 @@ export function VolcanoScene({ params }: SceneProps) {
       )}
       <Terrain shape={shape} cut={cut} />
       <Plain shape={shape} cut={cut} />
-      <Water type={type} cut={cut} settled={settled} />
+      <Water from={fromType} to={type} cut={cut} shape={shape} />
       {cut && <Section shape={shape} />}
-      {cut && settled && <MagmaOverlay pl={pl} st={mag} dikePath={dikePath} />}
+      {cut && <MagmaOverlay getPl={() => plumbingNow(shape.current)} st={mag} dikePath={dikePath} />}
       {cut && <Quakes spots={() => quakes.current} />}
       <Puffs sys={puffs} ground={groundRock} wind={() => [wind, 0, -wind * 0.25]} ceiling={mode === 'vei' ? 40 + clamp((vei - 3) / 5) * 60 : erupt === 'plinian' ? 88 : 70} />
       <Rocks sys={rocks} ground={groundRocks} />
@@ -1194,6 +1330,8 @@ export function VolcanoScene({ params }: SceneProps) {
       {(mode.startsWith('pr-sample') || mode === 'pr-home') && <Samples interactive={mode === 'pr-home' && home} />}
       {mode.startsWith('tec') && <Tectonics mode={mode} />}
       {mode === 'pr-gas' && <GasPool />}
+      {(type === 'shield' || fromType === 'shield') && <LavaLake visible={() => (shape.current.b === 'shield' ? ease(shape.current.k) : 1 - ease(shape.current.k))} />}
+      {type === 'caldera' && settled && cut && <CalderaGhost />}
 
       {parts &&
         Object.entries(parts).map(([id, p]) => (
@@ -1207,7 +1345,29 @@ export function VolcanoScene({ params }: SceneProps) {
             {p.name}
           </Lbl>
         ))}
-      {parts && (
+      {facts && (
+        <InfoPortal>
+          {phase && <div style={{ fontWeight: 700, color: '#7cc7ff' }}>{phase}</div>}
+          {sel && parts?.[sel] ? (
+            <>
+              <div style={{ fontWeight: 700, color: '#ffb35c' }}>{parts[sel].name}</div>
+              <div>{parts[sel].desc}</div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, opacity: 0.85 }}>Kliknij podpis na modelu, żeby przeczytać, co to jest.</div>
+          )}
+          <div style={{ fontWeight: 700, color: '#ffb35c', marginTop: 4 }}>{facts.name}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 12px', fontSize: 13 }}>
+            {facts.rows.map(([k, v]) => (
+              <Fragment key={k}>
+                <span style={{ opacity: 0.75 }}>{k}</span>
+                <b>{v}</b>
+              </Fragment>
+            ))}
+          </div>
+        </InfoPortal>
+      )}
+      {parts && !facts && (
         <InfoPortal>
           {sel && parts[sel] ? (
             <>
@@ -1219,7 +1379,7 @@ export function VolcanoScene({ params }: SceneProps) {
           )}
         </InfoPortal>
       )}
-      {phase && (
+      {phase && !facts && (
         <InfoPortal>
           <div style={{ fontWeight: 700, color: '#ffb35c' }}>{phase}</div>
         </InfoPortal>
