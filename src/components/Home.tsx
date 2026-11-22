@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { catalog, type CatalogModel } from '../lib/catalog';
@@ -50,41 +50,45 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
   const steps = topic ? allSteps(topic).length : 0;
   return (
     <motion.li
-      initial={{ opacity: 0, y: 18 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: [0.2, 0.7, 0.2, 1], delay: 0.08 + i * 0.08 }}
+      transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1], delay: Math.min(i, 12) * 0.025 }}
     >
       <Link to={`/temat/${m.topic}/1`} className="model-row" style={{ '--accent': m.color } as CSSProperties}>
-        <div className="row-cover">{m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}</div>
-        <div className="row-body">
-          <span className="row-index">{String(i + 1).padStart(2, '0')}</span>
-          <h2>{m.title}</h2>
-          <p>{m.summary}</p>
-          {modules.length > 0 && (
-            <ul className="row-modules" aria-label="Rozdziały">
-              {modules.map((pm) => (
-                <li key={pm.id}>{pm.title}</li>
-              ))}
-            </ul>
-          )}
-          <div className="row-foot">
-            <span className="row-meta">
-              {modules.length} rozdziałów · {steps} kroków
-            </span>
-            <span className="row-cta">
-              Otwórz model <Icon name="arrow-up-right" size={16} />
-            </span>
-          </div>
-        </div>
+        <span className="row-thumb">{m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}</span>
+        <span className="row-main">
+          <span className="row-title">{m.title}</span>
+          <span className="row-sum">{m.summary}</span>
+        </span>
+        <span className="row-meta">
+          {modules.length} rozdz. · {steps} kroków
+        </span>
+        <span className="row-go" aria-hidden>
+          <Icon name="arrow-up-right" size={18} />
+        </span>
       </Link>
     </motion.li>
   );
 }
 
+/** Wyszukiwanie bez wielkości liter i bez polskich znaków. */
+const fold = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/ł/g, 'l');
+
 export function Home() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+  const [query, setQuery] = useState('');
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  const list = catalog.filter((m) => {
+    const hay = fold(`${m.title} ${m.summary}`);
+    return words.every((w) => hay.includes(w));
+  });
 
   return (
     <div className="site home">
@@ -106,11 +110,22 @@ export function Home() {
           <p>Prawdziwe rzeczy w 3D, rozbierane na części krok po kroku – od środka, z podpisami i krótkim wyjaśnieniem obok.</p>
         </section>
 
+        <div className="list-head">
+          <span className="list-count">
+            {catalog.length} {catalog.length === 1 ? 'model' : catalog.length < 5 ? 'modele' : 'modeli'}
+          </span>
+          <label className="list-search">
+            <Icon name="search" size={18} />
+            <input type="search" placeholder="Szukaj modelu…" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Szukaj modelu" />
+          </label>
+        </div>
+
         <ul className="model-list">
-          {catalog.map((m, i) => (
+          {list.map((m, i) => (
             <ModelRow key={m.id} m={m} i={i} />
           ))}
         </ul>
+        {list.length === 0 && <p className="list-empty">Nie ma modelu pasującego do „{query}”.</p>}
       </main>
 
       <footer className="site-foot">
