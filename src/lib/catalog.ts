@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom';
+  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom' | 'woda';
 }
 
 export const catalog: CatalogModel[] = [
@@ -57,5 +57,13 @@ export const catalog: CatalogModel[] = [
     topic: 'elektrownia-jadrowa',
     color: '#0284c7',
     cover: 'atom',
+  },
+  {
+    id: 'elektrownia-wodna',
+    title: 'Elektrownia wodna',
+    summary: 'Zapora i elektrownia w górskiej dolinie w 3D: zapora w przekroju i napór wody, turbina Francisa i generator, energia spadającej wody, przelew i ochrona przed powodzią, elektrownia szczytowo-pompowa jako magazyn energii, ryby i sieć.',
+    topic: 'elektrownia-wodna',
+    color: '#0891b2',
+    cover: 'woda',
   },
 ];
