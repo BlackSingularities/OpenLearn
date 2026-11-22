@@ -128,11 +128,13 @@ function homeParts(mode: string): Record<string, PartInfo> | null {
       };
     case 'tu-home':
       return {
-        pen: { name: 'rurociąg', desc: 'Stalowa rura o średnicy ok. 5 m biegnie przez zaporę od wlotu do turbiny. Na dole woda ma ciśnienie ok. 7 atmosfer i płynie z prędkością ok. 4 m/s.', pos: [X, 24, 26] },
+        pen: { name: 'rurociąg', desc: 'Stalowa rura o średnicy ok. 5 m biegnie przez zaporę od wlotu do turbiny. Na dole woda ma ciśnienie ok. 7 atmosfer i płynie z prędkością ok. 4 m/s.', pos: [X, 7.5, 52] },
         spiral: { name: 'spirala', desc: 'Rura zwinięta jak ślimak dookoła turbiny, coraz węższa. Dzięki temu woda wpływa do turbiny równo ze wszystkich stron.', pos: [X, TU.y + 3.4, TU.z - 7] },
         vanes: { name: 'kierownica', desc: 'Pierścień 20 ruchomych łopatek. Obracając się, otwierają albo zamykają drogę wody do wirnika – tak reguluje się moc turbiny.', pos: [X, TU.y + 1.3, TU.z + 4.6] },
         runner: { name: 'wirnik Francisa', desc: 'Woda wpływa do wirnika z boku, oddaje mu energię na zakrzywionych łopatkach i wypływa w dół. Wirnik waży kilkadziesiąt ton i obraca się 250 razy na minutę.', pos: [X, TU.y - 1.2, TU.z] },
         draft: { name: 'rura ssawna', desc: 'Rozszerzająca się rura pod wirnikiem. Woda zwalnia w niej i dzięki temu turbina wyciąga z niej jeszcze trochę energii. Wylot jest pod wodą zbiornika dolnego.', pos: [X, -9, 100] },
+        servo: { name: 'serwomotory', desc: 'Dwa siłowniki hydrauliczne na pokrywie turbiny. Obracają pierścień regulacyjny, a ten przez dźwignie przekręca naraz wszystkie 20 łopatek kierownicy.', pos: [X, 2.6, TU.z + 3.6] },
+        thrust: { name: 'łożysko oporowe', desc: 'Na nim wisi cały wirujący zespół: wirnik generatora, wał i wirnik turbiny – razem kilkaset ton. Ślizga się na cienkiej warstwie oleju.', pos: [X, 16.4, TU.z + 3.2] },
         shaft: { name: 'wał', desc: 'Pionowy stalowy wał łączy wirnik turbiny z wirnikiem generatora. Cały zespół wiruje razem.', pos: [X, 5, TU.z + 1] },
         gen: { name: 'generator', desc: 'Nad turbiną, na podłodze hali. Wirujące elektromagnesy (bieguny) wytwarzają prąd w uzwojeniu nieruchomego stojana – ok. 50 MW.', pos: [X, GEN.y1 + 2, TU.z - 6] },
         crane: { name: 'suwnica', desc: 'Dźwig pod dachem hali. Przy remoncie wyjmuje nim się wirnik generatora i turbiny – najcięższe części ważą kilkaset ton.', pos: [-11, PH.roof - 1, 70] },
@@ -770,7 +772,7 @@ export function HydroScene({ params }: SceneProps) {
       {mode === 'za-types' && kind === 'ziemna' && <Embankment />}
       {showUnits && <Powerhouse open={cfg.hall} cut={cut} />}
       {showUnits &&
-        UNITS.map((u, i) => <HydroUnit key={u} u={u} spin={spin} open={vanes} detail={i === 2 && cut} cut={cut} />)}
+        UNITS.map((u, i) => <HydroUnit key={u} u={u} spin={spin} open={vanes} detail={i === 2 && cut} />)}
       {cut && !altDam && <Penstock u={CUT_X} />}
       {cut && <SectionCaps level={level} kind={kind === 'ziemna' && mode === 'za-types' ? 'ziemna' : 'ciezka'} />}
       <Switchyard />

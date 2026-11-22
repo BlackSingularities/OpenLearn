@@ -30,6 +30,7 @@ import {
   TAIL,
   TRAFO_Z,
   TU,
+  UNIT,
   UNITS,
   WEIR_Y,
   WEIR_Z,
@@ -226,6 +227,30 @@ export function waterMat(color: string, w: number, h: number, opacity = 0.88) {
   return new THREE.MeshStandardMaterial({ color, transparent: true, opacity, roughness: 0.06, metalness: 0.25, normalMap: nm, normalScale: new THREE.Vector2(0.45, 0.45), clippingPlanes: CLIP, side: THREE.DoubleSide });
 }
 
+/**
+ * Materiał bryły ciętej przekrojem: tylne ściany (widać je tylko przez płaszczyznę cięcia) są malowane płasko
+ * kolorem przekroju z ukośnym kreskowaniem – przecięty wał czy stojan wygląda jak pełny materiał, nie pusta skorupa.
+ */
+function solid(color: string, cut: string, o: THREE.MeshStandardMaterialParameters = {}) {
+  const m = std(color, { ...o, side: THREE.DoubleSide });
+  const v = [1, 3, 5].map((i) => parseInt(cut.slice(i, i + 2), 16) / 255);
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uCut = { value: new THREE.Vector3(v[0], v[1], v[2]) };
+    sh.fragmentShader =
+      'uniform vec3 uCut;\n' +
+      sh.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+  if (!gl_FrontFacing) {
+    float h = step(0.62, fract((gl_FragCoord.x + gl_FragCoord.y) / 9.0));
+    gl_FragColor = vec4(uCut * (1.0 - 0.14 * h), 1.0);
+  }`,
+      );
+  };
+  m.customProgramCacheKey = () => 'hydro-solid';
+  return m;
+}
+
 let HM: ReturnType<typeof makeMats> | null = null;
 function makeMats() {
   return {
@@ -273,6 +298,19 @@ function makeMats() {
     capDark: new THREE.MeshStandardMaterial({ color: '#1d232a', roughness: 1, side: THREE.DoubleSide }),
     capClay: new THREE.MeshStandardMaterial({ color: '#9b7048', roughness: 1, side: THREE.DoubleSide }),
     capFill: new THREE.MeshStandardMaterial({ map: hatchTex('#b9ad94', '#9d9079', 12), roughness: 1, side: THREE.DoubleSide }),
+    // hydrozespół – bryły z przekrojem
+    uRunner: solid('#cfd5dc', '#f1dfbd', { metalness: 0.5, roughness: 0.3 }),
+    uSteel: solid('#7d8995', '#c6ced6', { metalness: 0.55, roughness: 0.4 }),
+    uDark: solid('#4a545e', '#a3adb8', { metalness: 0.5, roughness: 0.5 }),
+    uShaft: solid('#d7dbe0', '#f4f5f7', { metalness: 0.9, roughness: 0.2 }),
+    uCore: solid('#5b6570', '#aab3bd', { metalness: 0.5, roughness: 0.45 }),
+    uCopper: solid('#c8773a', '#eeaa70', { metalness: 0.7, roughness: 0.35 }),
+    uPole: solid('#b5432e', '#e48068', { metalness: 0.4, roughness: 0.45 }),
+    uCase: solid('#3a6ea8', '#a3c1e2', { metalness: 0.3, roughness: 0.45 }),
+    uYellow: solid('#f2c230', '#f8de86', { roughness: 0.5 }),
+    uVane: solid('#d6a23a', '#f2d08a', { metalness: 0.6, roughness: 0.35 }),
+    uCooler: solid('#6b8f7a', '#b3cdbd', { metalness: 0.3, roughness: 0.6 }),
+    uConcrete: solid('#bdb8ad', '#ddd6c9', { roughness: 0.95 }),
   };
 }
 export const HMAT = () => (HM ??= makeMats());
@@ -312,6 +350,82 @@ export function Beam({ a, b, w, h = w, m }: { a: V3; b: V3; w: number; h?: numbe
   return (
     <mesh position={pos} quaternion={q} material={m}>
       <boxGeometry args={[len, h, w]} />
+    </mesh>
+  );
+}
+
+/**
+ * Bryła obrotowa z zamkniętego wielokąta (r, y), obróconego wokół osi y. Każdy bok profilu ma własne normalne
+ * (ostre krawędzie), boki prawie w jednej linii są wygładzane. Bryła jest szczelna, więc w przekroju z materiałem
+ * `solid` widać pełne cięcie.
+ */
+const LATHE = new Map<string, THREE.BufferGeometry>();
+export function latheSolid(prof0: [number, number][], seg = 48): THREE.BufferGeometry {
+  const key = seg + ':' + prof0.join(';');
+  const hit = LATHE.get(key);
+  if (hit) return hit;
+  let area = 0;
+  prof0.forEach((p, i) => {
+    const q = prof0[(i + 1) % prof0.length];
+    area += p[0] * q[1] - q[0] * p[1];
+  });
+  const prof = area < 0 ? [...prof0].reverse() : prof0;
+  const N = prof.length;
+  const en = prof.map((p, i) => {
+    const q = prof[(i + 1) % N];
+    const l = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+    return [(q[1] - p[1]) / l, -(q[0] - p[0]) / l];
+  });
+  const blend = (e: number[], o: number[]) => {
+    if (e[0] * o[0] + e[1] * o[1] < 0.85) return e;
+    const l = Math.hypot(e[0] + o[0], e[1] + o[1]);
+    return [(e[0] + o[0]) / l, (e[1] + o[1]) / l];
+  };
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i < N; i++) {
+    const A = prof[i];
+    const B = prof[(i + 1) % N];
+    if (Math.hypot(B[0] - A[0], B[1] - A[1]) < 1e-6) continue;
+    const na = blend(en[i], en[(i - 1 + N) % N]);
+    const nb = blend(en[i], en[(i + 1) % N]);
+    const base = pos.length / 3;
+    for (let k = 0; k <= seg; k++) {
+      const t = (k / seg) * Math.PI * 2;
+      const c = Math.cos(t);
+      const sn = Math.sin(t);
+      pos.push(A[0] * c, A[1], A[0] * sn, B[0] * c, B[1], B[0] * sn);
+      nor.push(na[0] * c, na[1], na[0] * sn, nb[0] * c, nb[1], nb[0] * sn);
+    }
+    for (let k = 0; k < seg; k++) {
+      const o = base + k * 2;
+      idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  LATHE.set(key, g);
+  return g;
+}
+/** Pierścień (rura o grubych ściankach) r0…r1 na wysokości y0…y1 – szczelna bryła. */
+export const ringSolid = (r0: number, r1: number, y0: number, y1: number, seg = 48) =>
+  latheSolid(
+    [
+      [r0, y0],
+      [r1, y0],
+      [r1, y1],
+      [r0, y1],
+    ],
+    seg,
+  );
+/** Prostopadłościan ustawiony promieniowo: środek w odległości `r` od osi, pod kątem `a`, `s` = [promieniowo, wysokość, stycznie]. */
+export function Radial({ a, r, y, s, m }: { a: number; r: number; y: number; s: V3; m: THREE.Material }) {
+  return (
+    <mesh position={[Math.cos(a) * r, y, Math.sin(a) * r]} rotation={[0, -a, 0]} material={m}>
+      <boxGeometry args={s} />
     </mesh>
   );
 }
@@ -413,6 +527,12 @@ const SUB_UPPER: [number, number][] = [
   [76, 2.4],
   [77.5, 2.6],
   [77.5, PH.floor - 0.6],
+  [81.1, PH.floor - 0.6],
+  [81.1, PH.floor],
+];
+const SUB_UPPER2: [number, number][] = [
+  [82.9, PH.floor],
+  [82.9, PH.floor - 0.6],
   [86.5, PH.floor - 0.6],
   [86.5, 2.6],
   [89.5, 2.6],
@@ -474,6 +594,7 @@ export function SectionCaps({ level, kind = 'ciezka' }: { level: () => number; k
             <Box key={i} p={[x + 0.4, y + h / 2, z + w / 2]} s={[0.1, h, w]} m={n.capDark} />
           ))}
           <Cap pts={SUB_UPPER} x={x - 0.01} m={n.capDam} />
+          <Cap pts={SUB_UPPER2} x={x - 0.01} m={n.capDam} />
           <Cap pts={SUB_LOWER} x={x - 0.01} m={n.capDam} />
           {/* ściana betonu za przekrojem (w połowie drogi do sąsiedniego hydrozespołu) */}
           <Cap pts={[[PH.z0, PH.floor - 0.6], [PH.z0, PH.base], [PH.z1, PH.base], [PH.z1, PH.floor - 0.6]]} x={CUT_X + 9} m={n.capDam} />
@@ -803,11 +924,40 @@ export function Spiral({ cover = true }: { cover?: boolean }) {
   );
 }
 
-/** Łopatki kierownicy – obracają się, otwierając i zamykając drogę wody do wirnika (`open()` 0…1). */
-export function GuideVanes({ open }: { open: () => number }) {
+/** Profil łopatki kierownicy: zaokrąglony nosek, cienki spływ (cięciwa wzdłuż x, środek obrotu w x = 0). */
+let VANE: THREE.BufferGeometry | null = null;
+function vaneGeo() {
+  if (VANE) return VANE;
+  const sh = new THREE.Shape();
+  const L = 1.2;
+  const pts: [number, number][] = [];
+  for (let k = 0; k <= 16; k++) {
+    const t = k / 16;
+    // grubość jak w profilu lotniczym (NACA), maks. ok. 0,2 m
+    const th = 2 * (0.2969 * Math.sqrt(t) - 0.126 * t - 0.3516 * t * t + 0.2843 * t ** 3 - 0.1036 * t ** 4);
+    pts.push([-L * 0.35 + t * L, th / 2]);
+  }
+  sh.moveTo(pts[0][0], 0);
+  pts.forEach(([x, y]) => sh.lineTo(x, y));
+  [...pts].reverse().forEach(([x, y]) => sh.lineTo(x, -y));
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 1.6, bevelEnabled: false, curveSegments: 4 });
+  g.rotateX(Math.PI / 2);
+  g.translate(0, 0.8, 0);
+  g.computeVertexNormals();
+  VANE = g;
+  return g;
+}
+
+/**
+ * Łopatki kierownicy – obracają się, otwierając i zamykając drogę wody do wirnika (`open()` 0…1). Każda ma czop
+ * wychodzący przez pokrywę i dźwignię; dźwignie ciągnie pierścień regulacyjny (`ring` – z pokrywą turbiny).
+ */
+export function GuideVanes({ open, ring = false }: { open: () => number; ring?: boolean }) {
   const n = HMAT();
   const N = 20;
-  const refs = useRef<(THREE.Mesh | null)[]>([]);
+  const refs = useRef<(THREE.Group | null)[]>([]);
+  const reg = useRef<THREE.Group>(null);
+  const rods = useRef<(THREE.Group | null)[]>([]);
   useFrame(() => {
     const k = open();
     refs.current.forEach((m, i) => {
@@ -816,95 +966,258 @@ export function GuideVanes({ open }: { open: () => number }) {
       // zamknięte: łopatki leżą stycznie i zachodzą na siebie; otwarte: obrócone o ok. 40°
       m.rotation.y = -a + Math.PI / 2 - 0.08 - k * 0.7;
     });
+    if (reg.current) reg.current.rotation.y = -k * 0.12;
+    rods.current.forEach((r, i) => r && (r.position.x = (i ? 1 : -1) * k * 0.38));
   });
+  const geo = vaneGeo();
   return (
     <group>
       {Array.from({ length: N }, (_, i) => {
         const a = (i / N) * Math.PI * 2;
         return (
-          <mesh key={i} ref={(m) => (refs.current[i] = m)} position={[Math.cos(a) * TU.rVane, 0, -Math.sin(a) * TU.rVane]} material={n.vane}>
-            <boxGeometry args={[1.15, 1.6, 0.12]} />
-          </mesh>
+          <group key={i} ref={(m) => (refs.current[i] = m)} position={[Math.cos(a) * TU.rVane, 0, -Math.sin(a) * TU.rVane]}>
+            <mesh geometry={geo} material={n.uVane} />
+            {ring && (
+              <>
+                <mesh position={[0, 1.45, 0]} material={n.uShaft}>
+                  <cylinderGeometry args={[0.1, 0.1, 1.3, 8]} />
+                </mesh>
+                <Box p={[0, 2.02, 0.28]} s={[0.16, 0.12, 0.7]} m={n.uSteel} />
+              </>
+            )}
+          </group>
         );
       })}
-    </group>
-  );
-}
-
-/** Wirnik Francisa: wieniec górny, pierścień dolny i zakrzywione łopatki. */
-export function FrancisRunner({ scale = 1 }: { scale?: number }) {
-  const n = HMAT();
-  const blades = useMemo(() => Array.from({ length: 13 }, (_, i) => (i / 13) * Math.PI * 2), []);
-  return (
-    <group scale={scale}>
-      <mesh position={[0, 0.75, 0]} material={n.runner}>
-        <cylinderGeometry args={[0.7, TU.rRun, 0.5, 40]} />
-      </mesh>
-      <mesh position={[0, -0.9, 0]} material={n.runner}>
-        <cylinderGeometry args={[TU.rRun - 0.05, TU.rRun - 0.35, 0.9, 40, 1, true]} />
-      </mesh>
-      {blades.map((a) => (
-        <group key={a} rotation={[0, a, 0]}>
-          <mesh position={[1.35, -0.1, 0]} rotation={[0.55, 0.35, -0.25]} material={n.runner}>
-            <boxGeometry args={[1.5, 1.5, 0.09]} />
-          </mesh>
-        </group>
-      ))}
-      <mesh position={[0, -0.6, 0]} material={n.runner}>
-        <coneGeometry args={[0.6, 1.6, 20]} />
-      </mesh>
-    </group>
-  );
-}
-
-/** Generator: stojan z uzwojeniem (miedź), wirnik z 24 biegunami, krzyżaki, obudowa. `cut` – widać wnętrze. */
-function Generator({ spinRef, cut }: { spinRef: React.RefObject<THREE.Group>; cut: boolean }) {
-  const n = HMAT();
-  const poles = useMemo(() => Array.from({ length: 24 }, (_, i) => (i / 24) * Math.PI * 2), []);
-  return (
-    <group>
-      {/* stojan: rdzeń z blach i uzwojenie */}
-      <CylY p={[0, GEN.y0, 0]} r={GEN.r} h={GEN.y1 - GEN.y0} m={n.stator} seg={48} open />
-      <CylY p={[0, GEN.y0, 0]} r={GEN.rIn + 0.15} h={GEN.y1 - GEN.y0} m={n.coil} seg={48} open />
-      <mesh position={[0, GEN.y1, 0]} rotation={[-Math.PI / 2, 0, 0]} material={n.stator}>
-        <ringGeometry args={[GEN.rIn + 0.15, GEN.r, 48]} />
-      </mesh>
-      <mesh position={[0, GEN.y0, 0]} rotation={[Math.PI / 2, 0, 0]} material={n.stator}>
-        <ringGeometry args={[GEN.rIn + 0.15, GEN.r, 48]} />
-      </mesh>
-      {/* wirnik z biegunami */}
-      <group ref={spinRef}>
-        <CylY p={[0, GEN.y0 + 0.2, 0]} r={GEN.rIn - 0.9} h={GEN.y1 - GEN.y0 - 0.4} m={n.steelDark} seg={32} />
-        {poles.map((a) => (
-          <mesh key={a} position={[Math.cos(a) * (GEN.rIn - 0.5), (GEN.y0 + GEN.y1) / 2, Math.sin(a) * (GEN.rIn - 0.5)]} rotation={[0, -a, 0]} material={n.pole}>
-            <boxGeometry args={[0.7, GEN.y1 - GEN.y0 - 0.6, 0.95]} />
-          </mesh>
-        ))}
-        {/* znacznik obrotu na wale */}
-        <Box p={[0.62, GEN.y1 + 2.2, 0]} s={[0.25, 0.8, 0.25]} m={n.yellow} />
-      </group>
-      {/* krzyżak górny i obudowa (ścianka na podłodze hali) */}
-      {[0, Math.PI / 3, (2 * Math.PI) / 3].map((a) => (
-        <Box key={a} p={[0, GEN.y1 + 0.5, 0]} s={[2 * GEN.r + 1, 0.6, 0.7]} r={[0, a, 0]} m={n.steelDark} />
-      ))}
-      {!cut && (
+      {ring && (
         <>
-          <CylY p={[0, PH.floor, 0]} r={GEN.r + 0.7} h={GEN.y1 + 1 - PH.floor} m={n.genCase} seg={48} />
-          <mesh position={[0, GEN.y1 + 1, 0]} rotation={[-Math.PI / 2, 0, 0]} material={n.yellow}>
-            <ringGeometry args={[GEN.r - 0.4, GEN.r + 0.7, 48]} />
-          </mesh>
-          <CylY p={[0, GEN.y1 + 1, 0]} r={2.2} h={1.4} m={n.genCase} seg={32} />
+          {/* pierścień regulacyjny z dwoma uchwytami */}
+          <group ref={reg}>
+            <mesh geometry={ringSolid(2.62, 2.92, 1.8, 2.1)} material={n.uSteel} />
+            {[0, Math.PI].map((a) => (
+              <Radial key={a} a={a + Math.PI / 2} r={3.15} y={1.95} s={[0.7, 0.26, 0.3]} m={n.uSteel} />
+            ))}
+          </group>
+          {/* serwomotory: siłowniki hydrauliczne obracające pierścień */}
+          {[1, -1].map((sg, i) => (
+            <group key={sg} position={[1.75, 1.95, sg * 3.3]}>
+              <mesh rotation={[0, 0, Math.PI / 2]} material={n.uDark}>
+                <cylinderGeometry args={[0.36, 0.36, 2.2, 16]} />
+              </mesh>
+              <mesh position={[1.15, 0, 0]} rotation={[0, 0, Math.PI / 2]} material={n.uDark}>
+                <cylinderGeometry args={[0.44, 0.44, 0.18, 16]} />
+              </mesh>
+              <group ref={(r) => (rods.current[i] = r)}>
+                <mesh position={[-1.35, 0, 0]} rotation={[0, 0, Math.PI / 2]} material={n.uShaft}>
+                  <cylinderGeometry args={[0.1, 0.1, 1.2, 8]} />
+                </mesh>
+              </group>
+            </group>
+          ))}
         </>
       )}
     </group>
   );
 }
 
+/** Wirnik Francisa – geometrie: wieniec górny z piastą, pierścień dolny i zakrzywiona łopatka. */
+let RUN: { crown: THREE.BufferGeometry; band: THREE.BufferGeometry; blade: THREE.BufferGeometry } | null = null;
+function runnerGeos() {
+  if (RUN) return RUN;
+  const crown = latheSolid(
+    [
+      [0, -1.55],
+      [0.32, -1.05],
+      [0.58, -0.45],
+      [0.9, -0.08],
+      [1.4, 0.28],
+      [1.9, 0.46],
+      [2.26, 0.5],
+      [2.26, 0.72],
+      [1.6, 0.8],
+      [0, 0.8],
+    ],
+    48,
+  );
+  const band = latheSolid(
+    [
+      [1.88, -1.48],
+      [2.06, -1.48],
+      [2.4, -0.76],
+      [2.4, -0.4],
+      [2.22, -0.4],
+      [2.1, -0.7],
+    ],
+    48,
+  );
+  // łopatka: powierzchnia między linią przy wieńcu a linią przy pierścieniu, wygięta wokół osi
+  const bez = (p: number[][], t: number) => [0, 1].map((k) => (1 - t) ** 2 * p[0][k] + 2 * (1 - t) * t * p[1][k] + t * t * p[2][k]);
+  const cl = [
+    [2.2, 0.49],
+    [1.35, 0.4],
+    [0.7, -0.25],
+  ];
+  const bl = [
+    [2.2, -0.42],
+    [2.1, -0.72],
+    [1.92, -1.44],
+  ];
+  const S = 6;
+  const T = 14;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let si = 0; si <= S; si++)
+    for (let ti = 0; ti <= T; ti++) {
+      const s = si / S;
+      const t = ti / T;
+      const c = bez(cl, t);
+      const b = bez(bl, t);
+      const r = c[0] + (b[0] - c[0]) * s;
+      const y = c[1] + (b[1] - c[1]) * s;
+      const th = -(0.45 * t + 0.55 * t * t) * (1.15 - 0.35 * s);
+      pos.push(r * Math.cos(th), y, r * Math.sin(th));
+      if (si && ti) {
+        const o = si * (T + 1) + ti;
+        idx.push(o - T - 2, o - T - 1, o, o - T - 2, o, o - 1);
+      }
+    }
+  const blade = new THREE.BufferGeometry();
+  blade.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  blade.setIndex(idx);
+  blade.computeVertexNormals();
+  RUN = { crown, band, blade };
+  return RUN;
+}
+
+/** Wirnik Francisa: wieniec górny z piastą, pierścień dolny i 13 zakrzywionych łopatek między nimi. */
+export function FrancisRunner({ scale = 1 }: { scale?: number }) {
+  const n = HMAT();
+  const g = runnerGeos();
+  const blades = useMemo(() => Array.from({ length: 13 }, (_, i) => (i / 13) * Math.PI * 2), []);
+  return (
+    <group scale={scale}>
+      <mesh geometry={g.crown} material={n.uRunner} />
+      <mesh geometry={g.band} material={n.uRunner} />
+      {blades.map((a) => (
+        <mesh key={a} geometry={g.blade} rotation={[0, a, 0]} material={n.runner} />
+      ))}
+    </group>
+  );
+}
+
+/** Pręty uzwojenia w żłobkach stojana (od strony wirnika): jedna siatka z 96 kopiami. */
+function SlotBars() {
+  const n = HMAT();
+  const N = 96;
+  return (
+    <instancedMesh
+      args={[undefined, undefined, N]}
+      material={n.uCopper}
+      ref={(m) => {
+        if (!m || m.userData.set) return;
+        const o = new THREE.Object3D();
+        for (let i = 0; i < N; i++) {
+          const a = (i / N) * Math.PI * 2;
+          o.position.set(Math.cos(a) * (GEN.rIn + 0.06), (GEN.y0 + GEN.y1) / 2, Math.sin(a) * (GEN.rIn + 0.06));
+          o.rotation.set(0, -a, 0);
+          o.updateMatrix();
+          m.setMatrixAt(i, o.matrix);
+        }
+        m.instanceMatrix.needsUpdate = true;
+        m.computeBoundingSphere();
+        m.userData.set = true;
+      }}
+    >
+      <boxGeometry args={[0.14, GEN.y1 - GEN.y0 + 0.5, 0.17]} />
+    </instancedMesh>
+  );
+}
+
 /**
- * Hydrozespół o osi x = u: spirala, kierownica, wirnik, rura ssawna, wał i generator. `spin()` – kąt obrotu wału,
- * `open()` – otwarcie kierownicy. `detail` – pełne wnętrze (dla hydrozespołu w przekroju); pozostałe – tylko generator.
+ * Generator w obudowie na podłodze hali: stojan (rdzeń z blach z prętami uzwojenia w żłobkach, czoła uzwojenia,
+ * kadłub), wirnik (piasta na wale, ramiona, wieniec, 24 bieguny z cewkami), krzyżak górny z łożyskiem oporowym,
+ * krzyżak dolny z łożyskiem prowadzącym i hamulcami, chłodnice powietrza i wzbudnica z pierścieniami ślizgowymi.
  */
-export function HydroUnit({ u, spin, open, detail, cut }: { u: number; spin: () => number; open: () => number; detail: boolean; cut: boolean }) {
+function Generator({ spinRef }: { spinRef: React.RefObject<THREE.Group> }) {
+  const n = HMAT();
+  const F = PH.floor;
+  const ym = (GEN.y0 + GEN.y1) / 2;
+  const poles = useMemo(() => Array.from({ length: UNIT.poles }, (_, i) => (i / UNIT.poles) * Math.PI * 2), []);
+  const six = [0, 1, 2, 3, 4, 5].map((i) => (i / 6) * Math.PI * 2 + Math.PI / 6);
+  const eight = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (i / 8) * Math.PI * 2 + Math.PI / 8);
+  return (
+    <group>
+      {/* obudowa (beczka) z pokrywą, żółty pierścień i kopuła wzbudnicy */}
+      <mesh geometry={ringSolid(6.95, 7.4, F, 15.2)} material={n.uCase} />
+      <mesh geometry={ringSolid(2.1, 7.4, 15.2, 15.55)} material={n.uCase} />
+      <mesh geometry={ringSolid(6.7, 7.5, 15.55, 15.8)} material={n.uYellow} />
+      <mesh geometry={ringSolid(1.5, 2.1, 15.55, 17.6, 32)} material={n.uCase} />
+      <mesh geometry={ringSolid(0.75, 2.1, 17.6, 17.9, 32)} material={n.uCase} />
+      {/* szczotki przy pierścieniach ślizgowych */}
+      {[0.6, 2.4].map((a) => (
+        <Radial key={a} a={a} r={1.2} y={16.6} s={[0.5, 0.9, 0.25]} m={n.uDark} />
+      ))}
+      {/* stojan: kadłub, rdzeń z blach, pręty w żłobkach i czoła uzwojenia */}
+      <mesh geometry={ringSolid(5.55, 6.05, GEN.y0 - 0.5, GEN.y1 + 0.5)} material={n.uDark} />
+      <mesh geometry={ringSolid(GEN.rIn + 0.12, 5.55, GEN.y0, GEN.y1)} material={n.uCore} />
+      <SlotBars />
+      {[GEN.y0 - 0.32, GEN.y1 + 0.32].map((y) => (
+        <mesh key={y} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} material={n.uCopper}>
+          <torusGeometry args={[GEN.rIn + 0.42, 0.3, 10, 64]} />
+        </mesh>
+      ))}
+      {eight.map((a) => (
+        <Radial key={a} a={a} r={5.8} y={F + (GEN.y0 - 0.5 - F) / 2} s={[0.8, GEN.y0 - 0.5 - F, 0.9]} m={n.uDark} />
+      ))}
+      {/* chłodnice powietrza między stojanem a obudową */}
+      {eight.map((a) => (
+        <Radial key={a} a={a + Math.PI / 8} r={6.5} y={ym} s={[0.8, GEN.y1 - GEN.y0 + 0.4, 2.1]} m={n.uCooler} />
+      ))}
+      {/* krzyżak górny z łożyskiem oporowym – na nim wisi cały wirujący zespół */}
+      {six.map((a) => (
+        <Radial key={a} a={a} r={4.42} y={14.75} s={[5.05, 0.45, 0.5]} m={n.uDark} />
+      ))}
+      <mesh geometry={ringSolid(0.75, 1.95, 14.45, 15.5, 32)} material={n.uDark} />
+      {/* krzyżak dolny z łożyskiem prowadzącym i hamulce pod wieńcem wirnika */}
+      {six.map((a) => (
+        <Radial key={a} a={a} r={3.2} y={F + 0.35} s={[4.5, 0.7, 0.5]} m={n.uDark} />
+      ))}
+      <mesh geometry={ringSolid(0.75, 1.55, F, 9.15, 32)} material={n.uDark} />
+      {six.map((a) => (
+        <mesh key={a} position={[Math.cos(a + 0.5) * 3.85, 9.1, Math.sin(a + 0.5) * 3.85]} material={n.uYellow}>
+          <cylinderGeometry args={[0.22, 0.22, 0.8, 12]} />
+        </mesh>
+      ))}
+      {/* wirnik: wał, piasta, ramiona, wieniec i bieguny z cewkami */}
+      <group ref={spinRef}>
+        <mesh geometry={ringSolid(0, 0.7, F - 0.6, 18.1, 24)} material={n.uShaft} />
+        <mesh geometry={ringSolid(0.7, 1.45, 9.3, 14.3, 32)} material={n.uDark} />
+        {eight.map((a) => (
+          <Radial key={a} a={a} r={2.55} y={ym} s={[2.3, 4.4, 0.3]} m={n.uSteel} />
+        ))}
+        <mesh geometry={ringSolid(3.6, 4.0, 9.6, 14.4, 64)} material={n.uSteel} />
+        {poles.map((a) => (
+          <group key={a}>
+            <Radial a={a} r={4.18} y={ym} s={[0.36, 3.9, 0.6]} m={n.uPole} />
+            <Radial a={a} r={4.16} y={ym} s={[0.26, 3.55, 0.86]} m={n.uCopper} />
+            <Radial a={a} r={4.44} y={ym} s={[0.12, 4.0, 0.98]} m={n.uPole} />
+          </group>
+        ))}
+        {/* pierścienie ślizgowe wzbudzenia i znacznik obrotu */}
+        {[16.3, 16.9].map((y) => (
+          <mesh key={y} geometry={ringSolid(0.7, 0.98, y, y + 0.25, 24)} material={n.uCopper} />
+        ))}
+        <Box p={[0.45, 18.25, 0]} s={[0.35, 0.3, 0.35]} m={n.uYellow} />
+      </group>
+    </group>
+  );
+}
+
+/**
+ * Hydrozespół o osi x = u: spirala, kierownica z pierścieniem regulacyjnym i serwomotorami, wirnik, rura ssawna,
+ * wał ze sprzęgłem i generator. `spin()` – kąt obrotu wału, `open()` – otwarcie kierownicy. `detail` – pełne
+ * wnętrze (dla hydrozespołu w przekroju); pozostałe – tylko generator.
+ */
+export function HydroUnit({ u, spin, open, detail }: { u: number; spin: () => number; open: () => number; detail: boolean }) {
   const n = HMAT();
   const runner = useRef<THREE.Group>(null);
   const rotor = useRef<THREE.Group>(null);
@@ -924,34 +1237,67 @@ export function HydroUnit({ u, spin, open, detail, cut }: { u: number; spin: () 
     ],
     [],
   );
+  const bolts = useMemo(() => Array.from({ length: 12 }, (_, i) => (i / 12) * Math.PI * 2), []);
   return (
     <group position={[u, TU.y, TU.z]}>
       {detail && (
         <>
-          <Spiral />
-          <GuideVanes open={open} />
+          <Spiral cover={false} />
+          <GuideVanes open={open} ring />
           <group ref={runner}>
             <FrancisRunner />
           </group>
+          {/* pokrywa turbiny z żebrami */}
+          <mesh
+            geometry={latheSolid([
+              [0.78, 0.85],
+              [4.3, 0.85],
+              [4.3, 1.2],
+              [3.2, 1.32],
+              [1.75, 1.65],
+              [0.78, 1.65],
+            ])}
+            material={n.uSteel}
+          />
+          {Array.from({ length: 10 }, (_, i) => (i / 10) * Math.PI * 2 + 0.31).map((a) => (
+            <Radial key={a} a={a} r={2.05} y={1.75} s={[0.9, 0.5, 0.16]} m={n.uSteel} />
+          ))}
           {/* rura ssawna: stożek pod wirnikiem i kolano do wylotu pod wodą */}
           <mesh position={[0, -3.6, 0]} material={n.lining}>
             <cylinderGeometry args={[TU.rRun - 0.3, 2.8, 4.8, 32, 1, true]} />
           </mesh>
           <Pipe pts={draft} r={2.9} m={n.lining} seg={20} />
+          {/* wał turbiny ze sprzęgłem kołnierzowym (śruby) */}
           <group ref={shaft}>
-            <CylY p={[0, 0.9, 0]} r={0.55} h={GEN.y1 + 2.5} m={n.shaft} seg={20} />
-            <Box p={[0.6, 5, 0]} s={[0.2, 1.2, 0.2]} m={n.yellow} />
+            <mesh geometry={ringSolid(0, 0.7, 0.75, PH.floor - 0.6, 24)} material={n.uShaft} />
+            <mesh geometry={ringSolid(0.7, 1.3, 6.1, 6.5, 32)} material={n.uShaft} />
+            <mesh geometry={ringSolid(0, 1.3, 6.55, 6.95, 32)} material={n.uShaft} />
+            {bolts.map((a) => (
+              <mesh key={a} position={[Math.cos(a) * 1.08, 6.52, Math.sin(a) * 1.08]} material={n.uDark}>
+                <cylinderGeometry args={[0.08, 0.08, 1.1, 6]} />
+              </mesh>
+            ))}
+            <Box p={[0.76, 4.4, 0]} s={[0.12, 1, 0.3]} m={n.uYellow} />
           </group>
-          {/* łożysko prowadzące turbiny i pokrywa */}
-          <CylY p={[0, 1.1, 0]} r={TU.rVane + 0.4} h={0.5} m={n.steel} seg={40} />
-          <CylY p={[0, 1.6, 0]} r={1.3} h={1.4} m={n.steelDark} seg={24} />
+          {/* łożysko prowadzące turbiny z uszczelnieniem wału */}
+          <mesh
+            geometry={latheSolid([
+              [0.74, 1.65],
+              [1.55, 1.65],
+              [1.55, 2.6],
+              [1.15, 3],
+              [0.74, 3],
+            ])}
+            material={n.uDark}
+          />
+          {/* szyb turbiny: stalowa wykładzina i pomost obsługi */}
+          <mesh position={[0, 5, 0]} material={n.lining}>
+            <cylinderGeometry args={[4.4, 4.4, 4.8, 48, 1, true]} />
+          </mesh>
+          <mesh geometry={ringSolid(3.3, 4.4, 4.3, 4.45, 48)} material={n.uSteel} />
         </>
       )}
-      <group position={[0, -TU.y, -TU.z]}>
-        <group position={[0, 0, TU.z]}>
-          <Generator spinRef={rotor} cut={cut && detail} />
-        </group>
-      </group>
+      <Generator spinRef={rotor} />
     </group>
   );
 }
@@ -1015,8 +1361,8 @@ export function Powerhouse({ open, cut }: { open: boolean; cut: boolean }) {
       <Box p={[-11, PH.roof - 3, hz]} s={[2.2, 1.6, D - 2]} m={n.yellow} />
       <Box p={[-11, PH.roof - 4.4, hz - 4]} s={[3, 1.4, 3]} m={n.orange} />
       {/* sterownia przy końcu hali */}
-      <Box p={[PH.x1 - 5, PH.floor + 4, hz]} s={[8, 8, 18]} m={n.white} />
-      <Box p={[PH.x1 - 9.05, PH.floor + 5, hz]} s={[0.1, 3, 14]} m={n.glass} />
+      <Box p={[PH.x1 - 5, PH.floor + 4, 92]} s={[8, 8, 7]} m={n.white} />
+      <Box p={[PH.x1 - 9.05, PH.floor + 5, 92]} s={[0.1, 3, 5]} m={n.glass} />
       {/* budynek biurowy przy lewym końcu hali */}
       <group position={[PH.x0 - 8, PH.floor, 82]}>
         <Box p={[0, 6, 0]} s={[16, 12, 26]} m={endW} />

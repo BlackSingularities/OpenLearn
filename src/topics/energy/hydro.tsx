@@ -26,8 +26,8 @@ const CUT_CAM: V3 = [CUT_X - 165, 55, 72];
 const CUT_TGT: V3 = [CUT_X, 26, 48];
 const TURB_CAM: V3 = [CUT_X - 52, 9, 96];
 const TURB_TGT: V3 = [CUT_X, 0, 86];
-const GEN_CAM: V3 = [CUT_X - 24, 17, 94];
-const GEN_TGT: V3 = [CUT_X, 10, 82];
+const GEN_CAM: V3 = [CUT_X - 30, 18, 97];
+const GEN_TGT: V3 = [CUT_X, 11, 82];
 const SPILL_CAM: V3 = [160, 100, 200];
 const SPILL_TGT: V3 = [40, 38, 60];
 const LAKE_CAM: V3 = [460, 320, 260];
@@ -259,8 +259,8 @@ const turbineModule: PartModule = {
   steps: [
     hyd({
       title: 'Pod halą elektrowni',
-      camera: [CUT_X - 70, 22, 110],
-      target: [CUT_X, 4, 76],
+      camera: [CUT_X - 52, 13, 100],
+      target: [CUT_X, 4.5, 80],
       preset: { mode: 'tu-home' },
       body: (
         <>
@@ -336,6 +336,9 @@ const turbineModule: PartModule = {
           </p>
           <p>
             Turbina wodna kręci się wolno – 250 razy na minutę, dwanaście razy wolniej niż w elektrowni węglowej. Żeby mimo to dać prąd o częstotliwości 50 Hz, generator ma dużo biegunów i dużą średnicę, ok. 12 m. Dlatego hydrozespół wygląda jak wielki płaski bęben.
+          </p>
+          <p>
+            W przekroju widać też części pomocnicze. Cały wirujący zespół wisi na <b>łożysku oporowym</b> nad generatorem. Generator się grzeje, więc wokół stojana stoją <b>chłodnice</b>: kręcący się wirnik przepycha przez nie powietrze jak wentylator, a woda w rurkach zabiera ciepło. Na górze, w małej kopule, prąd do elektromagnesów wpływa przez miedziane <b>pierścienie ślizgowe</b>.
           </p>
         </>
       ),

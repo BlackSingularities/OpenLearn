@@ -488,7 +488,7 @@ export function TurbineTypes({ spin }: { spin: () => number }) {
         </Lbl>
       </group>
       <group position={[0, 0, 0]}>
-        <group rotation={[0.55, 0, 0]}>
+        <group rotation={[-0.55, 0, 0]}>
           <group ref={francis}>
             <FrancisRunner scale={1.6} />
           </group>
