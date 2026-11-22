@@ -3,7 +3,6 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { legacyTopics, topics } from '../topics';
 import type { Params, ParamValue, Step } from '../lib/types';
-import { subjectLabels } from '../lib/subjects';
 import { TopicNavContext, type TopicNav } from '../lib/topicNav';
 import { Icon } from './ui';
 import { Controls } from './Controls';
@@ -138,7 +137,7 @@ export function TopicPlayer() {
     }
     return (
       <main className="page narrow">
-        <h1>Nie znaleziono tematu</h1>
+        <h1>Nie znaleziono modelu</h1>
         <Link to="/" className="btn">
           Wróć do katalogu
         </Link>
@@ -172,7 +171,7 @@ export function TopicPlayer() {
           <Icon name="left" size={18} />
         </button>
       ) : (
-        <Link to="/" className="nav-prev" aria-label="Do katalogu tematów" title="Do katalogu tematów">
+        <Link to="/" className="nav-prev" aria-label="Do listy modeli" title="Do listy modeli">
           <Icon name="left" size={18} />
         </Link>
       )}
@@ -193,7 +192,7 @@ export function TopicPlayer() {
         ) : (
           <Link to="/" className="nav-next">
             <span className="nav-text">
-              <small>koniec tematu</small>
+              <small>koniec</small>
               <span>Wróć do katalogu</span>
             </span>
             <span className="nav-arrow">
@@ -224,7 +223,7 @@ export function TopicPlayer() {
           {/* ścieżka w jednej linii: dziedzina › temat › strona główna modułu › zakładka (wszystko poza bieżącym miejscem jest klikalne) */}
           <nav className="crumb" aria-label="Ścieżka">
             <Link to="/" className="crumb-link">
-              {subjectLabels[topic.subject]}
+              Modele
             </Link>
             <span aria-hidden>›</span>
             {module ? (
@@ -260,7 +259,7 @@ export function TopicPlayer() {
             )}
           </nav>
         </div>
-        <nav className="step-nav" aria-label={module ? `Zakładki: ${module.title}` : 'Kroki lekcji'}>
+        <nav className="step-nav" aria-label={module ? `Zakładki: ${module.title}` : 'Kroki'}>
           {!spotNav && (
             <ol className="step-rail">
               {labels.map((title, i) => (

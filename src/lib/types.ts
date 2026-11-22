@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
+import type { Category } from './catalog';
 
 /** Wartości parametrów sterujących sceną (suwaki, przełączniki, listy). */
 export type ParamValue = number | boolean | string;
@@ -84,7 +85,8 @@ export interface PartModule {
   steps: Step[];
 }
 
-export type Subject = 'matematyka' | 'fizyka' | 'chemia' | 'lotnictwo' | 'polski' | 'angielski';
+/** Dziedzina modelu (kategoria w katalogu na stronie głównej). */
+export type Subject = Category;
 
 export interface Topic {
   id: string;
