@@ -54,17 +54,19 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.2, 0.7, 0.2, 1], delay: Math.min(i, 12) * 0.025 }}
     >
-      <Link to={`/temat/${m.topic}/1`} className="model-row" style={{ '--accent': m.color } as CSSProperties}>
-        <span className="row-thumb">{m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}</span>
-        <span className="row-main">
-          <span className="row-title">{m.title}</span>
-          <span className="row-sum">{m.summary}</span>
+      <Link to={`/temat/${m.topic}/1`} className="tile" style={{ '--accent': m.color } as CSSProperties}>
+        <span className="tile-cover">
+          {m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}
+          <span className="tile-go" aria-hidden>
+            <Icon name="arrow-up-right" size={18} />
+          </span>
         </span>
-        <span className="row-meta">
-          {modules.length} rozdz. · {steps} kroków
-        </span>
-        <span className="row-go" aria-hidden>
-          <Icon name="arrow-up-right" size={18} />
+        <span className="tile-body">
+          <span className="tile-title">{m.title}</span>
+          <span className="tile-sum">{m.summary}</span>
+          <span className="tile-meta">
+            {modules.length} rozdz. · {steps} kroków
+          </span>
         </span>
       </Link>
     </motion.li>
@@ -120,7 +122,7 @@ export function Home() {
           </label>
         </div>
 
-        <ul className="model-list">
+        <ul className="tile-grid">
           {list.map((m, i) => (
             <ModelRow key={m.id} m={m} i={i} />
           ))}
