@@ -464,7 +464,7 @@ const floodModule: PartModule = {
     hyd({
       title: 'Niecka wypadowa',
       spot: [(SPILL.x0 + SPILL.x1) / 2, 12, 96],
-      camera: [160, 46, 200],
+      camera: [112, 40, 212],
       target: [38, 4, 92],
       preset: { mode: 'po-basin' },
       controls: [{ type: 'slider', key: 'spill', label: 'Otwarcie zamknięć przelewu', min: 0, max: 100, step: 5, default: 60, unit: '%' }],

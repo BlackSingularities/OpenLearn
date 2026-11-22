@@ -110,11 +110,127 @@ function hatchTex(base: string, line: string, step = 16) {
   return t;
 }
 
+/**
+ * Beton zapory: bloki co 15 m (szwy dylatacyjne), poziome warstwy betonowania co 3 m, zacieki i plamy.
+ * Współrzędne tekstury ściany są w metrach (u – wysokość, v – długość zapory), więc powtórzenie 1/15.
+ */
+function concreteTex() {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#d2cdc3';
+  g.fillRect(0, 0, S, S);
+  const r = rng(91);
+  for (let i = 0; i < 2600; i++) {
+    const v = 190 + Math.floor(r() * 40);
+    g.fillStyle = `rgba(${v},${v - 4},${v - 12},0.35)`;
+    g.fillRect(r() * S, r() * S, 1 + r() * 3, 1 + r() * 3);
+  }
+  // zacieki: smugi wzdłuż wysokości (w teksturze – wzdłuż osi x)
+  for (let i = 0; i < 7; i++) {
+    const y = r() * S;
+    const gr = g.createLinearGradient(0, 0, S, 0);
+    gr.addColorStop(0, 'rgba(120,112,98,0)');
+    gr.addColorStop(0.5 + r() * 0.4, `rgba(120,112,98,${0.08 + r() * 0.1})`);
+    gr.addColorStop(1, 'rgba(120,112,98,0.02)');
+    g.fillStyle = gr;
+    g.fillRect(0, y, S, 4 + r() * 10);
+  }
+  // warstwy betonowania (stała wysokość) i szew między blokami (stała długość)
+  g.fillStyle = 'rgba(140,134,122,0.35)';
+  for (let k = 0; k < 5; k++) g.fillRect((k / 5) * S, 0, 1.5, S);
+  g.fillStyle = 'rgba(70,66,60,0.75)';
+  g.fillRect(0, 0, S, 2.5);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1 / 15, 1 / 15);
+  t.anisotropy = 8;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Elewacja hali: wysokie okna w ramach z betonu, ciemniejszy cokół. Jedno pole – 9 m szerokości. */
+let FACADE: THREE.Texture | null = null;
+function facadeTex() {
+  if (FACADE) return FACADE;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 128;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ddd7ca';
+  g.fillRect(0, 0, 64, 128);
+  const gr = g.createLinearGradient(0, 14, 0, 104);
+  gr.addColorStop(0, '#9cc0d8');
+  gr.addColorStop(1, '#4f7690');
+  g.fillStyle = gr;
+  g.fillRect(9, 14, 46, 90);
+  g.fillStyle = '#c9c2b2';
+  for (const x of [24, 39]) g.fillRect(x, 14, 2, 90);
+  for (const y of [44, 74]) g.fillRect(9, y, 46, 2);
+  g.fillStyle = '#b4ad9f';
+  g.fillRect(0, 112, 64, 16);
+  FACADE = new THREE.CanvasTexture(c);
+  FACADE.wrapS = FACADE.wrapT = THREE.RepeatWrapping;
+  FACADE.colorSpace = THREE.SRGBColorSpace;
+  return FACADE;
+}
+/** Materiał elewacji o długości `len` metrów (okno co 9 m). */
+function facadeMat(len: number) {
+  const t = facadeTex().clone();
+  t.needsUpdate = true;
+  t.repeat.set(Math.max(1, Math.round(len / 9)), 1);
+  return std('#ffffff', { map: t, roughness: 0.7, side: THREE.DoubleSide });
+}
+
+/** Fale: bezszwowa mapa normalnych z sumy sinusów (całkowite częstotliwości – kafelek się powtarza bez szwu). */
+let WAVE: THREE.Texture | null = null;
+function waveTex() {
+  if (WAVE) return WAVE;
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(S, S);
+  const r = rng(77);
+  const waves = Array.from({ length: 9 }, () => ({ kx: Math.round((r() - 0.5) * 14), ky: Math.round((r() - 0.5) * 14) || 3, a: 0.4 + r(), ph: r() * 6.28 }));
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      let dx = 0;
+      let dy = 0;
+      for (const w of waves) {
+        const arg = ((w.kx * x + w.ky * y) / S) * Math.PI * 2 + w.ph;
+        const k = Math.cos(arg) * w.a;
+        dx += k * w.kx;
+        dy += k * w.ky;
+      }
+      const nx = -dx * 0.012;
+      const ny = -dy * 0.012;
+      const l = Math.hypot(nx, ny, 1);
+      const i = (y * S + x) * 4;
+      img.data[i] = ((nx / l) * 0.5 + 0.5) * 255;
+      img.data[i + 1] = ((ny / l) * 0.5 + 0.5) * 255;
+      img.data[i + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+  WAVE = new THREE.CanvasTexture(c);
+  WAVE.wrapS = WAVE.wrapT = THREE.RepeatWrapping;
+  return WAVE;
+}
+/** Materiał wody z falami: `w`, `h` – wymiary płaszczyzny (m), fale co ok. 45 m. */
+export function waterMat(color: string, w: number, h: number, opacity = 0.88) {
+  const nm = waveTex().clone();
+  nm.needsUpdate = true;
+  nm.repeat.set(w / 45, h / 45);
+  return new THREE.MeshStandardMaterial({ color, transparent: true, opacity, roughness: 0.06, metalness: 0.25, normalMap: nm, normalScale: new THREE.Vector2(0.45, 0.45), clippingPlanes: CLIP, side: THREE.DoubleSide });
+}
+
 let HM: ReturnType<typeof makeMats> | null = null;
 function makeMats() {
   return {
-    dam: std('#cfcac0', { roughness: 0.9 }),
-    damDark: std('#a8a397', { roughness: 0.95 }),
+    dam: std('#ffffff', { map: concreteTex(), roughness: 0.9 }),
+    damDark: std('#c9c3b6', { map: concreteTex(), roughness: 0.95 }),
     concrete: std('#bdb8ad', { roughness: 0.95, side: THREE.DoubleSide }),
     hall: std('#ffffff', { map: windowTex(), roughness: 0.7, side: THREE.DoubleSide }),
     roof: std('#6d737b', { roughness: 0.8, side: THREE.DoubleSide }),
@@ -380,76 +496,85 @@ export function SectionCaps({ level, kind = 'ciezka' }: { level: () => number; k
 function groundColor(x: number, z: number, y: number, slope: number, c: THREE.Color) {
   const f = fbm(x / 90 + 5, z / 90 - 2);
   if (y < 9.5 && z > 100 && Math.abs(x - cz(z)) < 56) return c.set('#9a917f').lerp(new THREE.Color('#b5ab92'), f);
-  if (z < 0 && y < LEVEL + 1.5) return c.set('#8d8470');
+  if (z < 0 && y < LEVEL - 2.5) return c.set('#8d8470');
+  // pas zmiennego poziomu wody: gołe skały i żwir tuż nad jeziorem
+  if (z < 20 && y < LEVEL + 3.5 && y > -1) return c.set('#a39782').lerp(new THREE.Color('#8f8573'), f);
   if (slope > 0.75) return c.set('#7d776c').lerp(new THREE.Color('#9a9386'), f);
   return c.set('#4f6b3a').lerp(new THREE.Color('#6f8a4c'), f * 0.8).lerp(new THREE.Color('#4a5f36'), sm(120, 190, y) * 0.5);
 }
 
-/** Teren doliny: zbocza z lasem, skały na stromych miejscach, koryto rzeki. */
+function terrainGeo(size: number, seg: number, inner = 0) {
+  const g = new THREE.PlaneGeometry(size, size, seg, seg);
+  g.rotateX(-Math.PI / 2);
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    const z = p.getZ(i);
+    // zewnętrzny pierścień jest rzadszy – pod szczegółowym terenem chowamy go odrobinę niżej
+    const under = Math.max(Math.abs(x), Math.abs(z)) < inner ? 4 : 0;
+    p.setY(i, groundH(x, z) - 0.05 - under);
+  }
+  g.computeVertexNormals();
+  const nrm = g.getAttribute('normal');
+  const col: number[] = [];
+  const c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    groundColor(p.getX(i), p.getZ(i), p.getY(i), 1 - nrm.getY(i), c);
+    col.push(c.r, c.g, c.b);
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return g;
+}
+
+/** Teren doliny: zbocza z lasem, skały na stromych miejscach, koryto rzeki; dalej – rzadsza siatka gór aż po horyzont. */
 export function Terrain() {
-  const geo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(2600, 2600, 260, 260);
-    g.rotateX(-Math.PI / 2);
-    const p = g.getAttribute('position');
-    for (let i = 0; i < p.count; i++) p.setY(i, groundH(p.getX(i), p.getZ(i)) - 0.05);
-    g.computeVertexNormals();
-    const nrm = g.getAttribute('normal');
-    const col: number[] = [];
-    const c = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      groundColor(p.getX(i), p.getZ(i), p.getY(i), 1 - nrm.getY(i), c);
-      col.push(c.r, c.g, c.b);
-    }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    return g;
-  }, []);
+  const geo = useMemo(() => terrainGeo(2600, 260), []);
+  const far = useMemo(() => terrainGeo(4600, 115, 1290), []);
   const mat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, clippingPlanes: CLIP }), []);
   return (
     <group>
       <mesh geometry={geo} material={mat} />
-      {/* dalekie góry za krawędzią terenu */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 150, 0]}>
-        <ringGeometry args={[1290, 6000, 48, 1]} />
-        <meshStandardMaterial color="#56703f" roughness={1} />
-      </mesh>
+      <mesh geometry={far} material={mat} />
     </group>
   );
 }
 
 /** Woda: zbiornik górny (poziom `level()`), zbiornik dolny pod elektrownią, rzeka za jazem. */
 export function Waters({ level, hideLake = false, noPlant = false }: { level: () => number; hideLake?: boolean; noPlant?: boolean }) {
-  const n = HMAT();
   const lake = useRef<THREE.Mesh>(null);
-  useFrame(({ clock }) => {
+  // każda płaszczyzna ma własny materiał (fale w skali jej wymiarów); rzeka płynie w stronę +z, jezioro faluje w miejscu
+  const planes = useMemo(() => {
+    const tailW = WEIR_Z - PH.z1;
+    const list: { key: string; pos: V3; size: [number, number]; color: string; flow: number }[] = [
+      { key: 'tail', pos: [0, TAIL, (PH.z1 + WEIR_Z) / 2], size: [2600, tailW], color: '#356f86', flow: 0.012 },
+      { key: 'r', pos: [(PH.x1 + 1300) / 2, TAIL, (PH.z0 + PH.z1) / 2], size: [1300 - PH.x1, PH.z1 - PH.z0], color: '#356f86', flow: 0.02 },
+      { key: 'l', pos: [(PH.x0 - 1300) / 2, TAIL, (PH.z0 + PH.z1) / 2], size: [1300 + PH.x0, PH.z1 - PH.z0], color: '#356f86', flow: 0.02 },
+      { key: 'down', pos: [0, DOWN, (WEIR_Z + 1900) / 2], size: [3800, 1900 - WEIR_Z], color: '#3c7890', flow: 0.03 },
+    ];
+    if (noPlant) list.push({ key: 'ph', pos: [(PH.x0 + PH.x1) / 2, TAIL, (PH.z0 + PH.z1) / 2], size: [PH.x1 - PH.x0, PH.z1 - PH.z0], color: '#356f86', flow: 0.02 });
+    return list.map((p) => ({ ...p, mat: waterMat(p.color, p.size[0], p.size[1]) }));
+  }, [noPlant]);
+  const lakeMat = useMemo(() => waterMat('#2b6688', 3800, 1900, 0.9), []);
+  useFrame(({ clock }, dt0) => {
+    const dt = Math.min(dt0, 0.05);
     if (lake.current) lake.current.position.y = level() + 0.05 * Math.sin(clock.elapsedTime * 0.7);
+    const nm = lakeMat.normalMap!;
+    nm.offset.x = Math.sin(clock.elapsedTime * 0.05) * 0.4;
+    nm.offset.y += dt * 0.004;
+    for (const p of planes) p.mat.normalMap!.offset.y += dt * p.flow * (p.size[1] / 400);
   });
   return (
     <group>
       {!hideLake && (
-        <mesh ref={lake} rotation={[-Math.PI / 2, 0, 0]} position={[0, LEVEL, -650]} material={n.lake}>
-          <planeGeometry args={[2600, 1300]} />
+        <mesh ref={lake} rotation={[-Math.PI / 2, 0, 0]} position={[0, LEVEL, -950]} material={lakeMat}>
+          <planeGeometry args={[3800, 1900]} />
         </mesh>
       )}
-      {/* zbiornik dolny: poniżej elektrowni i przelewu aż do jazu */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, TAIL, (PH.z1 + WEIR_Z) / 2]} material={n.river}>
-        <planeGeometry args={[2600, WEIR_Z - PH.z1]} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(PH.x1 + 1300) / 2, TAIL, (PH.z0 + PH.z1) / 2]} material={n.river}>
-        <planeGeometry args={[1300 - PH.x1, PH.z1 - PH.z0]} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(PH.x0 - 1300) / 2, TAIL, (PH.z0 + PH.z1) / 2]} material={n.river}>
-        <planeGeometry args={[1300 + PH.x0, PH.z1 - PH.z0]} />
-      </mesh>
-      {/* bez elektrowni (inne rodzaje zapór) woda wypełnia też miejsce po budynku */}
-      {noPlant && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(PH.x0 + PH.x1) / 2, TAIL, (PH.z0 + PH.z1) / 2]} material={n.river}>
-          <planeGeometry args={[PH.x1 - PH.x0, PH.z1 - PH.z0]} />
+      {planes.map((p) => (
+        <mesh key={p.key} rotation={[-Math.PI / 2, 0, 0]} position={p.pos} material={p.mat}>
+          <planeGeometry args={p.size} />
         </mesh>
-      )}
-      {/* rzeka za jazem */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, DOWN, (WEIR_Z + 1300) / 2]} material={n.river}>
-        <planeGeometry args={[2600, 1300 - WEIR_Z]} />
-      </mesh>
+      ))}
     </group>
   );
 }
@@ -462,11 +587,11 @@ export function Forest() {
     const pine: V3[] = [];
     const leaf: V3[] = [];
     let guard = 0;
-    while (pine.length + leaf.length < 2600 && guard++ < 40000) {
-      const x = r() * 2500 - 1250;
-      const z = r() * 2500 - 1250;
+    while (pine.length + leaf.length < 6500 && guard++ < 90000) {
+      const x = r() * 4000 - 2000;
+      const z = r() * 4000 - 2000;
       const y = groundH(x, z);
-      if (y < LEVEL + 3 && z < 30) continue;
+      if (y < LEVEL + 12 && z < 30) continue;
       if (y < 11) continue;
       if (Math.abs(x) < 110 && z > -40 && z < 150) continue;
       if (x > SWY.x0 - 30 && x < SWY.x1 + 30 && z > SWY.z0 - 30 && z < SWY.z1 + 30) continue;
@@ -592,6 +717,20 @@ export function Dam({ gate }: { gate: () => number }) {
           <Box p={[u, CREST + 1.5, 4]} s={[8, 3, 5]} m={n.white} />
         </group>
       ))}
+      {/* suwnica bramowa na koronie – opuszcza zamknięcia awaryjne wlotów i czyści kraty */}
+      <group position={[-30, CREST, 5]}>
+        {[-4.2, 4.2].map((dz) =>
+          [-3.5, 3.5].map((dx) => <Box key={`${dx}${dz}`} p={[dx, 5, dz]} s={[0.7, 10, 0.7]} m={n.yellow} />),
+        )}
+        {[-4.2, 4.2].map((dz) => (
+          <Box key={dz} p={[0, 10.3, dz]} s={[8.4, 1, 0.8]} m={n.yellow} />
+        ))}
+        <Box p={[0, 11.6, -1]} s={[4, 2.2, 6]} m={n.orange} />
+        <Box p={[0, 11.6, -7.2]} s={[1.4, 1, 6]} m={n.yellow} />
+      </group>
+      {[0.9, 9.1].map((z) => (
+        <Box key={z} p={[-35, CREST + 0.12, z]} s={[70, 0.15, 0.25]} m={n.rail} />
+      ))}
       {/* korona: droga, balustrady, latarnie */}
       {[
         [DAM.x0, SPILL.x0],
@@ -644,6 +783,16 @@ export function Spiral({ cover = true }: { cover?: boolean }) {
           <torusGeometry args={[s.R, s.r, 12, 10, (Math.PI * 1.85) / 11 + 0.02]} />
         </mesh>
       ))}
+      {/* łopatki stałe (kierownica stała) między spiralą a ruchomymi łopatkami */}
+      {Array.from({ length: 12 }, (_, i) => {
+        const a = (i / 12) * Math.PI * 2;
+        const R = TU.rVane + 0.75;
+        return (
+          <mesh key={i} position={[Math.cos(a) * R, 0, -Math.sin(a) * R]} rotation={[0, a + 1.1, 0]} material={n.steel}>
+            <boxGeometry args={[0.9, 1.6, 0.2]} />
+          </mesh>
+        );
+      })}
       {/* pierścień kierownicy (górny i dolny) */}
       {(cover ? [-0.85, 0.85] : [-0.85]).map((y) => (
         <mesh key={y} position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} material={n.steel}>
@@ -819,29 +968,61 @@ export function Powerhouse({ open, cut }: { open: boolean; cut: boolean }) {
   const W = PH.x1 - PH.x0;
   const cx = (PH.x0 + PH.x1) / 2;
   const hz = (PH.z0 + PH.hallZ1) / 2;
+  const D = PH.hallZ1 - PH.z0;
   const H = PH.roof - PH.floor;
+  const longW = useMemo(() => facadeMat(W), [W]);
+  const endW = useMemo(() => facadeMat(D), [D]);
+  const pil = useMemo(() => Array.from({ length: Math.round(W / 9) + 1 }, (_, i) => PH.x0 + (i * W) / Math.round(W / 9)), [W]);
   return (
     <group>
       {/* część podwodna i pomost za halą */}
       <Box p={[(subX0 + PH.x1) / 2, (PH.base + PH.floor) / 2, (PH.z0 + PH.z1) / 2]} s={[PH.x1 - subX0, PH.floor - PH.base, PH.z1 - PH.z0]} m={n.concrete} />
       {cut && <Box p={[(PH.x0 + CUT_X + 9) / 2, PH.floor - 0.3, (PH.z0 + PH.z1) / 2]} s={[CUT_X + 9 - PH.x0, 0.6, PH.z1 - PH.z0]} m={n.floor} />}
-      {/* hala maszyn */}
-      <Box p={[cx, PH.floor + H / 2, PH.z0 + 0.3]} s={[W, H, 0.6]} m={n.hall} />
-      {!open && <Box p={[cx, PH.floor + H / 2, PH.hallZ1]} s={[W, H, 0.6]} m={n.hall} />}
+      {/* krawędź pomostu z barierką */}
+      <Box p={[cx, PH.floor + 0.55, PH.z1 - 0.2]} s={[W, 1.1, 0.15]} m={n.white} />
+      {/* hala maszyn: elewacja z wysokimi oknami między pilastrami */}
+      <Box p={[cx, PH.floor + H / 2, PH.z0 + 0.3]} s={[W, H, 0.6]} m={longW} />
+      {!open && (
+        <>
+          <Box p={[cx, PH.floor + H / 2, PH.hallZ1]} s={[W, H, 0.6]} m={longW} />
+          {pil.map((x) => (
+            <Box key={x} p={[x, PH.floor + H / 2 + 0.6, PH.hallZ1 + 0.55]} s={[1.3, H + 1.2, 0.9]} m={n.concrete} />
+          ))}
+          <Box p={[cx, PH.floor + 1, PH.hallZ1 + 0.45]} s={[W + 1.4, 2, 0.9]} m={n.concrete} />
+        </>
+      )}
       {[PH.x0, PH.x1].map((x) => (
-        <Box key={x} p={[x, PH.floor + H / 2, hz]} s={[0.6, H, PH.hallZ1 - PH.z0]} m={n.hall} />
+        <Box key={x} p={[x, PH.floor + H / 2, hz]} s={[0.6, H, D]} m={endW} />
       ))}
-      {!open && <Box p={[cx, PH.roof + 0.4, hz]} s={[W + 1, 0.8, PH.hallZ1 - PH.z0 + 1]} m={n.roof} />}
-      <Box p={[cx, PH.floor + 0.05, hz]} s={[W, 0.1, PH.hallZ1 - PH.z0]} m={n.floor} />
+      {!open && (
+        <group>
+          <Box p={[cx, PH.roof + 0.5, hz]} s={[W + 1.6, 1, D + 1.6]} m={n.concrete} />
+          <Box p={[cx, PH.roof + 1.02, hz]} s={[W - 0.4, 0.06, D - 0.4]} m={n.roof} />
+          {/* świetlik wzdłuż hali i wentylatory */}
+          <mesh position={[cx, PH.roof + 1.9, hz]} rotation={[0, 0, Math.PI / 2]} material={n.glass}>
+            <cylinderGeometry args={[1.6, 1.6, W - 8, 3, 1]} />
+          </mesh>
+          {[-50, -38, 2].map((x) => (
+            <Box key={x} p={[x, PH.roof + 1.8, PH.z0 + 5]} s={[3, 1.6, 3]} m={n.steel} />
+          ))}
+        </group>
+      )}
+      <Box p={[cx, PH.floor + 0.05, hz]} s={[W, 0.1, D]} m={n.floor} />
       {/* tory i suwnica */}
       {[PH.z0 + 1.4, PH.hallZ1 - 1.4].map((z) => (
         <Box key={z} p={[cx, PH.roof - 4, z]} s={[W, 0.8, 0.8]} m={n.rail} />
       ))}
-      <Box p={[-11, PH.roof - 3, hz]} s={[2.2, 1.6, PH.hallZ1 - PH.z0 - 2]} m={n.yellow} />
+      <Box p={[-11, PH.roof - 3, hz]} s={[2.2, 1.6, D - 2]} m={n.yellow} />
       <Box p={[-11, PH.roof - 4.4, hz - 4]} s={[3, 1.4, 3]} m={n.orange} />
       {/* sterownia przy końcu hali */}
       <Box p={[PH.x1 - 5, PH.floor + 4, hz]} s={[8, 8, 18]} m={n.white} />
       <Box p={[PH.x1 - 9.05, PH.floor + 5, hz]} s={[0.1, 3, 14]} m={n.glass} />
+      {/* budynek biurowy przy lewym końcu hali */}
+      <group position={[PH.x0 - 8, PH.floor, 82]}>
+        <Box p={[0, 6, 0]} s={[16, 12, 26]} m={endW} />
+        <Box p={[0, 12.3, 0]} s={[16.8, 0.6, 26.8]} m={n.roof} />
+        <Box p={[0, 1.6, 13.4]} s={[4, 3.2, 0.3]} m={n.glass} />
+      </group>
       {/* transformatory blokowe na pomoście i bramka linii */}
       {UNITS.map((u) => (
         <group key={u} position={[u, PH.floor, TRAFO_Z]}>
@@ -850,12 +1031,27 @@ export function Powerhouse({ open, cut }: { open: boolean; cut: boolean }) {
           {[-1.8, 0, 1.8].map((x) => (
             <CylY key={x} p={[x, 6, -1]} r={0.3} h={3} m={n.white} />
           ))}
+          {/* ściana ogniowa między transformatorami */}
+          <Box p={[9, 4, 0]} s={[0.5, 8, 7]} m={n.concrete} />
         </group>
       ))}
       {[-64, -56].map((x) => (
         <Box key={x} p={[x, PH.floor + 10, TRAFO_Z + 2]} s={[0.8, 20, 0.8]} m={n.steel} />
       ))}
       <Box p={[-60, PH.floor + 19.6, TRAFO_Z + 2]} s={[9, 0.8, 0.8]} m={n.steel} />
+      {/* suwnica bramowa nad zamknięciami rur ssawnych (na krawędzi pomostu) */}
+      <group position={[-28, PH.floor, PH.z1 - 2.4]}>
+        {[-2.2, 2.2].map((dz) =>
+          [-3, 3].map((dx) => <Box key={`${dx}${dz}`} p={[dx, 4.5, dz]} s={[0.6, 9, 0.6]} m={n.yellow} />),
+        )}
+        {[-2.2, 2.2].map((dz) => (
+          <Box key={dz} p={[0, 9.2, dz]} s={[7.4, 0.9, 0.7]} m={n.yellow} />
+        ))}
+        <Box p={[0, 10.2, 0]} s={[3, 1.6, 4.4]} m={n.orange} />
+      </group>
+      {[PH.z1 - 4.6, PH.z1 - 0.2].map((z) => (
+        <Box key={z} p={[cx, PH.floor + 0.1, z]} s={[W, 0.2, 0.3]} m={n.rail} />
+      ))}
     </group>
   );
 }

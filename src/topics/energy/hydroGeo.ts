@@ -70,7 +70,9 @@ export function groundH(x: number, z: number) {
   if (z > 112) bed = mix(z > WEIR_Z + 6 ? -1.5 : 0, 9, sm(40, 54, xp) * sm(112, 150, z));
   // zbiornik górny płytszy pod koniec, rzeka wpływa z gór
   if (z < -950) bed += (-950 - z) * 0.24;
-  let h = Math.max(hills, bed);
+  // dalekie góry dookoła (Bieszczady): grzbiety wyrastają za krawędzią doliny
+  const far = 340 * sm(1100, 1950, Math.hypot(x, z - 100)) * (0.45 + 0.55 * fbm(x / 420 + 7, z / 420 - 3));
+  let h = Math.max(hills, bed) + far;
   // wykop pod elektrownią: teren nie może przechodzić przez jej część podwodną (widać to w przekroju)
   if (x > -69 && x < 9 && z > 58 && z < 112) return -16;
   const dx = Math.max(SWY.x0 - x, 0, x - SWY.x1);

@@ -94,6 +94,161 @@ export function SpillFlow({ open, level }: { open: () => number; level: () => nu
   );
 }
 
+/** Smugi spływającej wody (kafelek: jasne pasma wzdłuż spadku i przezroczyste szczeliny). */
+let STREAK: THREE.Texture | null = null;
+function streakTex() {
+  if (STREAK) return STREAK;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const r = rng(17);
+  g.fillStyle = 'rgba(200,230,250,0.55)';
+  g.fillRect(0, 0, 64, 64);
+  for (let i = 0; i < 40; i++) {
+    const x = r() * 64;
+    const y = r() * 64;
+    g.fillStyle = `rgba(255,255,255,${0.35 + r() * 0.5})`;
+    g.fillRect(x, y, 1 + r() * 2, 10 + r() * 30);
+    g.fillRect(x, y - 64, 1 + r() * 2, 10 + r() * 30);
+  }
+  STREAK = new THREE.CanvasTexture(c);
+  STREAK.wrapS = STREAK.wrapT = THREE.RepeatWrapping;
+  return STREAK;
+}
+/** Piana: białe plamy różnej wielkości (bez szwu – plamy rysowane też przesunięte o kafelek). */
+let FOAM: THREE.Texture | null = null;
+function foamTex() {
+  if (FOAM) return FOAM;
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d')!;
+  const r = rng(23);
+  for (let i = 0; i < 160; i++) {
+    const x = r() * S;
+    const y = r() * S;
+    const rad = 2 + r() * 9;
+    for (const dx of [-S, 0, S])
+      for (const dy of [-S, 0, S]) {
+        const gr = g.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rad);
+        gr.addColorStop(0, `rgba(255,255,255,${0.5 + r() * 0.4})`);
+        gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gr;
+        g.fillRect(x + dx - rad, y + dy - rad, rad * 2, rad * 2);
+      }
+  }
+  FOAM = new THREE.CanvasTexture(c);
+  FOAM.wrapS = FOAM.wrapT = THREE.RepeatWrapping;
+  return FOAM;
+}
+
+/**
+ * Strumień na przelewie jako zwarta warstwa wody: wstęga po progu i ścianie zapory w każdym przęśle, ze smugami
+ * pędzącymi w dół; w niecce i za nią – piana. `open()` – otwarcie zamknięć.
+ */
+export function SpillSheet({ open }: { open: () => number }) {
+  const PATH = SPILL_PATH.slice(1, 7);
+  const geo = useMemo(() => {
+    const pos: number[] = [];
+    const uv: number[] = [];
+    const idx: number[] = [];
+    let base = 0;
+    for (const [x0, x1] of BAYS) {
+      let len = 0;
+      PATH.forEach(([z, y], i) => {
+        if (i > 0) len += Math.hypot(z - PATH[i - 1][0], y - PATH[i - 1][1]);
+        pos.push(x0 + 0.2, y + 0.25, z, x1 - 0.2, y + 0.25, z);
+        uv.push(0, len / 14, (x1 - x0) / 14, len / 14);
+        if (i > 0) {
+          const o = base + (i - 1) * 2;
+          idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+        }
+      });
+      base += PATH.length * 2;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }, [PATH]);
+  const sheet = useMemo(() => {
+    const t = streakTex().clone();
+    t.needsUpdate = true;
+    return new THREE.MeshStandardMaterial({ map: t, transparent: true, opacity: 0, roughness: 0.2, depthWrite: false, side: THREE.DoubleSide, emissive: '#5a7f99', emissiveIntensity: 0.25 });
+  }, []);
+  const foam = useMemo(() => {
+    const t = foamTex().clone();
+    t.needsUpdate = true;
+    t.repeat.set(3, 4);
+    return new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+  }, []);
+  const foam2 = useMemo(() => {
+    const t = foamTex().clone();
+    t.needsUpdate = true;
+    t.repeat.set(2.4, 3);
+    t.offset.set(0.37, 0.11);
+    return new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+  }, []);
+  useFrame(({ clock }, dt0) => {
+    const dt = Math.min(dt0, 0.05);
+    const k = open();
+    sheet.opacity = 0.9 * Math.min(1, k * 4);
+    sheet.map!.offset.y -= dt * (1.2 + 1.5 * k);
+    foam.opacity = 0.85 * Math.min(1, k * 3);
+    foam.map!.offset.y -= dt * 0.25;
+    foam.map!.offset.x = Math.sin(clock.elapsedTime * 0.7) * 0.05;
+    foam2.opacity = 0.6 * Math.min(1, k * 3);
+    foam2.map!.offset.y -= dt * 0.12;
+  });
+  const z0 = zFace(0) - 2;
+  const z1 = PH.z1 + 45;
+  return (
+    <group>
+      <mesh geometry={geo} material={sheet} renderOrder={3} />
+      <mesh position={[(SPILL.x0 + SPILL.x1) / 2, TAIL + 0.25, (z0 + z1) / 2]} rotation={[-Math.PI / 2, 0, 0]} material={foam} renderOrder={3}>
+        <planeGeometry args={[SPILL.x1 - SPILL.x0 + 6, z1 - z0]} />
+      </mesh>
+      <mesh position={[(SPILL.x0 + SPILL.x1) / 2, TAIL + 0.3, z1 + 30]} rotation={[-Math.PI / 2, 0, 0]} material={foam2} renderOrder={3}>
+        <planeGeometry args={[SPILL.x1 - SPILL.x0 + 14, 70]} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Kłębiąca się woda nad wylotami rur ssawnych – tym silniej, im więcej wody płynie przez turbiny (`rate()`). */
+export function OutletFoam({ units, rate }: { units: number[]; rate: () => number }) {
+  const mats = useMemo(
+    () =>
+      units.map((_, i) => {
+        const t = foamTex().clone();
+        t.needsUpdate = true;
+        t.repeat.set(1.2, 1.6);
+        t.offset.set(i * 0.31, i * 0.17);
+        return new THREE.MeshBasicMaterial({ map: t, transparent: true, opacity: 0, depthWrite: false, toneMapped: false });
+      }),
+    [units],
+  );
+  useFrame((_, dt0) => {
+    const dt = Math.min(dt0, 0.05);
+    const k = Math.max(0, Math.min(1, rate()));
+    mats.forEach((m) => {
+      m.opacity = 0.6 * k;
+      m.map!.offset.y -= dt * 0.35;
+    });
+  });
+  return (
+    <group>
+      {units.map((u, i) => (
+        <mesh key={u} position={[u, TAIL + 0.35, PH.z1 + 16]} rotation={[-Math.PI / 2, 0, 0]} material={mats[i]} renderOrder={3}>
+          <planeGeometry args={[14, 30]} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 /* ================= deszcz i parowanie ================= */
 
 /** Deszcz nad górami powyżej zbiornika i para unosząca się z wody (`on()` 0…1). */

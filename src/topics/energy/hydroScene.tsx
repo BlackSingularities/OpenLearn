@@ -50,7 +50,8 @@ import {
   type V3,
 } from './hydroGeo';
 import { ArchDam, Dam, Embankment, Forest, HydroUnit, Penstock, Powerhouse, SectionCaps, Switchyard, Terrain, Waters, Weir, damArea, setCut } from './hydroPlant';
-import { Fish, GateLab, PressureArrows, RainCycle, SpillFlow, TurbineTypes } from './hydroFx';
+import { Fish, GateLab, OutletFoam, PressureArrows, RainCycle, SpillFlow, SpillSheet, TurbineTypes } from './hydroFx';
+import { Cars, Lake, Roads, Village } from './hydroWorld';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
 const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
@@ -775,6 +776,12 @@ export function HydroScene({ params }: SceneProps) {
       <Switchyard />
       <Weir />
       {cfg.spill && <SpillFlow open={() => st.current.gate} level={level} />}
+      {!altDam && <SpillSheet open={() => st.current.gate} />}
+      {showUnits && <OutletFoam units={UNITS} rate={() => (mode === 'pp-day' ? Math.max(0, st.current.pump) : st.current.vanes * st.current.speed)} />}
+      <Roads />
+      <Village />
+      <Cars />
+      <Lake level={level} />
       {cfg.rain && <RainCycle on={() => 1} />}
       {cfg.arrows && <PressureArrows level={level} />}
       {cfg.lab && <TurbineTypes spin={spin} />}
@@ -790,8 +797,8 @@ export function HydroScene({ params }: SceneProps) {
             {mode === 'pp-day' && <EnergyFlow path={[...unitPath(u)].reverse()} count={90} speed={16} size={0.9} color="#7dd3fc" rate={back} />}
           </group>
         ))}
-      {flows.includes('river') && [-22, -8, 8, 22].map((o) => <EnergyFlow key={o} path={riverPath(o)} count={90} speed={18} size={1.5} color="#8fd3ff" />)}
-      {flows.includes('inflow') && [-10, 10].map((o) => <EnergyFlow key={o} path={inflowPath(o)} count={40} speed={22} size={1.6} color="#8fd3ff" />)}
+      {flows.includes('river') && [-22, -8, 8, 22].map((o) => <EnergyFlow key={o} path={riverPath(o)} count={70} speed={18} size={0.9} color="#8fd3ff" />)}
+      {flows.includes('inflow') && [-10, 10].map((o) => <EnergyFlow key={o} path={inflowPath(o)} count={40} speed={22} size={1.1} color="#8fd3ff" />)}
       {(flows.includes('power') || mode === 'pp-day' || mode === 'si-start') && (
         <>
           <EnergyFlow path={P_POWER} count={110} speed={60} size={1.6} color="#ffd34d" rate={() => (mode === 'pp-day' ? Math.max(0, st.current.pump) : st.current.P)} />
