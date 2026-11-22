@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom' | 'woda';
+  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom' | 'woda' | 'komputer';
 }
 
 export const catalog: CatalogModel[] = [
@@ -65,5 +65,13 @@ export const catalog: CatalogModel[] = [
     topic: 'elektrownia-wodna',
     color: '#0891b2',
     cover: 'woda',
+  },
+  {
+    id: 'komputer-osobisty',
+    title: 'Komputer osobisty',
+    summary: 'Komputer stacjonarny w 3D: obudowa i zasilacz od środka, płyta główna w przekroju, procesor od tranzystora po chłodzenie, pamięć RAM i dyski, karta graficzna i powstawanie obrazu, klawiatura, mysz i monitor oraz muzeum komputerów od ENIAC-a.',
+    topic: 'komputer-osobisty',
+    color: '#7c3aed',
+    cover: 'komputer',
   },
 ];

@@ -115,6 +115,26 @@ function HydroSketch() {
   );
 }
 
+/** Okładka komputera: monitor, obudowa z wentylatorami i płytą w środku, klawiatura. */
+function PcSketch() {
+  return (
+    <svg className="row-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
+      <g className="cover-motif">
+        <path d="M40 40 H170 V118 H40 Z" className="cv-ink" />
+        <path d="M95 118 V134 M75 140 H115" className="cv-ink" />
+        <path d="M52 52 H158 V106 H52 Z" className="cv-thin" stroke="var(--accent)" />
+        <path d="M200 30 H272 V150 H200 Z" className="cv-ink" />
+        <path d="M210 42 H248 V96 H210 Z" className="cv-thin" stroke="var(--accent)" />
+        <circle cx="260" cy="58" r="8" className="cv-thin" />
+        <circle cx="260" cy="82" r="8" className="cv-thin" />
+        <path d="M210 112 H262 M210 122 H262" className="cv-dash" stroke="var(--accent)" />
+        <path d="M40 156 H170" className="cv-dash" />
+        <path d="M24 164 H296" className="cv-dash" />
+      </g>
+    </svg>
+  );
+}
+
 function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
   const topic = topics.find((t) => t.id === m.topic);
   const modules = topic?.modules ?? [];
@@ -127,7 +147,7 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
     >
       <Link to={`/temat/${m.topic}/1`} className="tile" style={{ '--accent': m.color } as CSSProperties}>
         <span className="tile-cover">
-          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : m.cover === 'atom' ? <NuclearSketch /> : m.cover === 'woda' ? <HydroSketch /> : <VolcanoSketch />}
+          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : m.cover === 'atom' ? <NuclearSketch /> : m.cover === 'woda' ? <HydroSketch /> : m.cover === 'komputer' ? <PcSketch /> : <VolcanoSketch />}
           <span className="tile-go" aria-hidden>
             <Icon name="arrow-up-right" size={18} />
           </span>
