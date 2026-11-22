@@ -2,12 +2,12 @@
  * Moduł „Kokpit” – wnętrze kokpitu A350, wbudowane w nos samolotu (ten sam samolot co w innych modułach: kamera
  * wlatuje przez szyby). Ściany, sufit i szyby to kadłub (wykładzina i otwory szyb), tu – podłoga stanowiska, tylna
  * ściana z drzwiami i całe wyposażenie. Dwa poziomy szczegółów: z daleka same bryły (widać je przez szyby), z bliska
- * – ekrany i lica paneli malowane na żywo.
+ * – ekrany i lico panelu górnego malowane na żywo.
  *
- * Fotele, panel główny z sześcioma ekranami, osłona przeciwsłoneczna z panelem autopilota (FCU), panel górny,
- * pulpit środkowy z dźwigniami, boczne drążki, pedały i okna, za którymi widać niebo i ziemię. Ekrany w 3D pokazują
- * prawdziwy obraz PFD, ND i ECAM (te same komponenty co w doku kokpitu) – komponent rysuje się w ukrytym korzeniu
- * Reacta, a jego SVG trafia na kanwę tekstury. Tak samo powstają lica paneli (FCU, panel górny, pulpit).
+ * Bryły wyposażenia (fotele, panel główny z sześcioma ramkami ekranów, osłona przeciwsłoneczna z FCU, panel górny,
+ * pulpit środkowy, pulpity boczne z drążkami, pedały) pochodzą z modelu A350 do FlightGeara – zob. fgCockpit.tsx.
+ * Ekrany w 3D pokazują prawdziwy obraz PFD, ND i ECAM (te same komponenty co w doku kokpitu) – komponent rysuje się
+ * w ukrytym korzeniu Reacta, a jego SVG trafia na kanwę tekstury. Tak samo powstaje lico panelu górnego.
  *
  * Każda zakładka ma własny scenariusz (start, zakręt, podejście, pożar silnika, przygotowanie kokpitu…), który
  * przestawia przełączniki i dźwignie sam – użytkownik naciska tylko „Rozpocznij”.
@@ -17,13 +17,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Html, RoundedBox } from '@react-three/drei';
+import { Html } from '@react-three/drei';
 import type { Params, PartModule, Step } from '../../lib/types';
 import { InfoPortal } from '../../lib/plot';
 import { speedInText, useSpeed } from '../../components/ui';
 import { useSceneHidden } from '../../lib/topicNav';
 import { AIRBUS, CockpitDock, Ecam, EngStartPanel, FlapLever, GearLever, Nd, PanelBox, Pfd, Pushbutton, Sidestick, SpeedBrakeLever, ThrustLevers, cockpitFont, type EcamPage } from '../../components/cockpit';
 import { COCKPIT_EYE, COCKPIT_FLOOR, COCKPIT_REAR, FLOOR, PLANE_LEVELS, fusPt, fusTheta } from './airliner';
+import { FgCockpit, useFgCockpit, type FgDrive } from './fgCockpit';
 
 type V3 = [number, number, number];
 /** Jednostki otoczenia za oknami (niebo, ziemia) – zachowane z dawnej sceny powiększonej trzykrotnie. */
@@ -1586,12 +1587,9 @@ function Bx({ p, s, c, r, rough = 0.7, metal = 0.05, emit }: { p: V3; s: V3; c: 
     </mesh>
   );
 }
-/** Barwy wnętrza A350: błękitnoszare panele, jaśniejsze blaty, ciemna osłona przeciwsłoneczna. */
+/** Barwy wnętrza A350: błękitnoszara wykładzina i panele. */
 const C_LINING = '#b3c3cf';
 const C_PANEL = '#8ea2b2';
-const C_FACE = '#66737f';
-const C_TOP = '#a2b4c2';
-const C_GLARE = '#7a8590';
 
 /** Ekran: ramka i obraz z tekstury (bez zasilania – czarny). */
 function Screen({ w, h, tex, on, p, glow, bare = false }: { w: number; h: number; tex?: CanvasTex; on: () => boolean; p: V3; glow?: () => boolean; bare?: boolean }) {
@@ -1643,193 +1641,6 @@ function Face({ w, h, tex, p, r }: { w: number; h: number; tex?: CanvasTex; p: V
       <planeGeometry args={[w, h]} />
       <meshStandardMaterial key={tex ? 'tex' : 'flat'} map={tex?.tex ?? null} color={tex ? '#ffffff' : C_PANEL} roughness={0.75} metalness={0.05} />
     </mesh>
-  );
-}
-
-/** Klawiatura (QWERTY) wysuwanej półki: ciemne klawisze na szarej płycie. */
-let keyTex: THREE.CanvasTexture | null = null;
-function getKeyTex() {
-  if (keyTex) return keyTex;
-  const t = makeCanvasTex(512, 200);
-  const { ctx } = t;
-  ctx.fillStyle = '#4a535d';
-  ctx.fillRect(0, 0, 512, 200);
-  ctx.fillStyle = '#1b1f24';
-  for (let r = 0; r < 5; r++) for (let c = 0; c < 14; c++) ctx.fillRect(8 + c * 35.5, 8 + r * 37, 30, 31);
-  ctx.fillRect(120, 8 + 5 * 37 - 37, 260, 31);
-  t.tex.needsUpdate = true;
-  keyTex = t.tex;
-  return keyTex;
-}
-/** Plakietka „A350” i naklejka „2 LIFE VESTS” na skorupie oparcia. */
-let badgeTex: THREE.CanvasTexture | null = null;
-function getBadgeTex() {
-  if (badgeTex) return badgeTex;
-  const t = makeCanvasTex(256, 512);
-  const { ctx } = t;
-  ctx.fillStyle = '#9fb2c1';
-  ctx.fillRect(0, 0, 256, 512);
-  ctx.fillStyle = '#c9b98a';
-  ctx.beginPath();
-  ctx.ellipse(128, 70, 62, 30, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#2a2f35';
-  ctx.font = 'bold 40px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('A350', 128, 84);
-  ctx.fillStyle = '#c8262b';
-  ctx.fillRect(48, 330, 160, 34);
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 20px Arial, sans-serif';
-  ctx.fillText('2 LIFE VESTS', 128, 354);
-  ctx.strokeStyle = '#7f909e';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(30, 300, 196, 190);
-  t.tex.needsUpdate = true;
-  badgeTex = t.tex;
-  return badgeTex;
-}
-
-/** Tkanina foteli A350: szaroniebieska, w drobne jaśniejsze gwiazdki. */
-let starTex: THREE.CanvasTexture | null = null;
-function getStarTex() {
-  if (starTex) return starTex;
-  const t = makeCanvasTex(256, 256);
-  const { ctx } = t;
-  ctx.fillStyle = '#56667c';
-  ctx.fillRect(0, 0, 256, 256);
-  // delikatna faktura tkaniny
-  for (let i = 0; i < 1800; i++) {
-    ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},0.05)`;
-    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
-  }
-  const star = (x: number, y: number, r: number) => {
-    ctx.beginPath();
-    for (let i = 0; i < 8; i++) {
-      const a = (i * Math.PI) / 4;
-      const rr = i % 2 ? r * 0.28 : r;
-      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
-    }
-    ctx.closePath();
-    ctx.fill();
-  };
-  ctx.fillStyle = 'rgba(214,224,238,0.75)';
-  const pts: [number, number, number][] = [[40, 50, 16], [170, 30, 9], [120, 120, 20], [220, 150, 11], [60, 190, 10], [190, 230, 15], [20, 120, 6], [240, 60, 6], [100, 230, 6], [150, 190, 5]];
-  pts.forEach(([x, y, r]) => star(x, y, r));
-  t.tex.wrapS = t.tex.wrapT = THREE.RepeatWrapping;
-  t.tex.repeat.set(3.5, 3.5);
-  t.tex.needsUpdate = true;
-  starTex = t.tex;
-  return starTex;
-}
-
-/** Fotel pilota A350: kolumna na szynach, siedzisko i oparcie z bocznymi wałkami, zagłówek, dwa podłokietniki. */
-function Seat({ x }: { x: number }) {
-  const fab = getStarTex();
-  const F = ({ children, ...p }: { children?: ReactNode } & Record<string, unknown>) => (
-    <RoundedBox {...p} radius={0.035} smoothness={3}>
-      <meshStandardMaterial map={fab} roughness={0.95} />
-      {children}
-    </RoundedBox>
-  );
-  return (
-    <group position={[x, 0, 0.08]}>
-      {/* szyny w podłodze i kolumna fotela */}
-      {[-0.14, 0.14].map((dx) => (
-        <Bx key={dx} p={[dx, 0.01, 0]} s={[0.04, 0.02, 0.8]} c="#5b6672" metal={0.4} />
-      ))}
-      <Bx p={[0, 0.18, 0.02]} s={[0.3, 0.32, 0.36]} c="#3a434d" />
-      {/* siedzisko z bocznymi wałkami */}
-      <F args={[0.5, 0.11, 0.5]} position={[0, 0.4, 0.02]} />
-      {[-1, 1].map((k) => (
-        <F key={k} args={[0.07, 0.07, 0.48]} position={[k * 0.225, 0.47, 0.02]} />
-      ))}
-      {/* oparcie (lekko odchylone), boczki i zagłówek */}
-      <group position={[0, 0.48, 0.27]} rotation={[-0.16, 0, 0]}>
-        <F args={[0.48, 0.7, 0.12]} position={[0, 0.35, 0]} />
-        {[-1, 1].map((k) => (
-          <F key={k} args={[0.07, 0.6, 0.15]} position={[k * 0.235, 0.33, -0.02]} />
-        ))}
-        <RoundedBox args={[0.32, 0.2, 0.13]} radius={0.04} smoothness={3} position={[0, 0.8, 0.01]}>
-          <meshStandardMaterial color="#2d333b" roughness={0.95} />
-        </RoundedBox>
-        {/* twarda skorupa oparcia od tyłu: plakietka A350 i kieszeń z kamizelkami ratunkowymi */}
-        <RoundedBox args={[0.5, 0.74, 0.04]} radius={0.02} smoothness={2} position={[0, 0.36, 0.08]}>
-          <meshStandardMaterial color="#9fb2c1" roughness={0.55} />
-        </RoundedBox>
-        <mesh position={[0, 0.36, 0.101]}>
-          <planeGeometry args={[0.44, 0.68]} />
-          <meshStandardMaterial map={getBadgeTex()} roughness={0.55} />
-        </mesh>
-        {/* szelki pasów */}
-        {[-0.09, 0.09].map((dx) => (
-          <Bx key={dx} p={[dx, 0.42, -0.065]} s={[0.045, 0.62, 0.012]} c="#2b3138" />
-        ))}
-      </group>
-      {/* podłokietniki (składane) z pokrętłami regulacji */}
-      {[-1, 1].map((k) => (
-        <group key={k}>
-          <RoundedBox args={[0.07, 0.055, 0.36]} radius={0.02} smoothness={2} position={[k * 0.3, 0.66, 0.06]}>
-            <meshStandardMaterial color="#2f3640" roughness={0.85} />
-          </RoundedBox>
-          <mesh position={[k * 0.3, 0.66, -0.13]} rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.022, 0.022, 0.02, 14]} />
-            <meshStandardMaterial color="#1a1e23" />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-/** Boczny drążek w gumowej osłonie na pulpicie bocznym; `get` – wychylenie [w bok, do siebie]. */
-function SideStick({ x, get }: { x: number; get: () => [number, number] }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame(() => {
-    const [sx, sy] = get();
-    if (g.current) {
-      g.current.rotation.z += (-sx * 0.32 - g.current.rotation.z) * 0.3;
-      g.current.rotation.x += (sy * 0.3 - g.current.rotation.x) * 0.3;
-    }
-  });
-  const inner = x < 0 ? 1 : -1;
-  return (
-    <group position={[x, 0.672, -0.15]}>
-      {/* osłona: schodkowa, z gumy */}
-      {[0, 1, 2].map((i) => (
-        <Bx key={i} p={[0, 0.008 + i * 0.016, 0]} s={[0.13 - i * 0.028, 0.016, 0.15 - i * 0.03]} c="#16191d" rough={0.95} />
-      ))}
-      <group ref={g} position={[0, 0.05, 0]}>
-        {/* uchwyt pochylony do przodu, przycisk wyłączenia autopilota (czerwony) i spust */}
-        <mesh position={[0, 0.06, -0.01]} rotation={[-0.18, 0, 0]}>
-          <cylinderGeometry args={[0.019, 0.024, 0.13, 16]} />
-          <meshStandardMaterial color="#1b1f24" roughness={0.55} />
-        </mesh>
-        <mesh position={[0, 0.135, -0.025]} scale={[1, 1.15, 1.3]}>
-          <sphereGeometry args={[0.025, 16, 12]} />
-          <meshStandardMaterial color="#1b1f24" roughness={0.55} />
-        </mesh>
-        <mesh position={[inner * 0.014, 0.155, -0.03]}>
-          <sphereGeometry args={[0.008, 12, 8]} />
-          <meshStandardMaterial color="#d92c22" roughness={0.4} />
-        </mesh>
-        <Bx p={[0, 0.09, -0.032]} s={[0.012, 0.03, 0.012]} c="#30363d" />
-      </group>
-    </group>
-  );
-}
-
-/** Dźwignia na pulpicie: obraca się wokół osi poprzecznej; `get` – kąt (rad, + do tyłu). */
-function Lever({ p, len, get, knob, w = 0.018, color = '#1d2024', knobColor = '#d9dde2' }: { p: V3; len: number; get: () => number; knob: V3; w?: number; color?: string; knobColor?: string }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (g.current) g.current.rotation.x += (get() - g.current.rotation.x) * 0.2;
-  });
-  return (
-    <group position={p} ref={g}>
-      <Bx p={[0, len / 2, 0]} s={[w, len, w]} c={color} rough={0.5} metal={0.3} />
-      <Bx p={[0, len, 0]} s={knob} c={knobColor} rough={0.4} metal={0.2} />
-    </group>
   );
 }
 
@@ -2138,268 +1949,80 @@ type CkTex = Record<'pfd' | 'nd' | 'ewd' | 'sd' | 'oh' | 'fcu' | 'efis' | 'ped' 
 function CockpitEquipment({ sim, tex }: { sim: MutableRefObject<Sim>; tex?: CkTex }) {
   const S = () => sim.current.st;
   const lit = Boolean(tex);
+  const fg = useFgCockpit();
   const warnT = useMemo(() => (lit ? labelTex('MASTER\nWARN', '#ff6b5b') : null), [lit]);
   const cautT = useMemo(() => (lit ? labelTex('MASTER\nCAUT', '#ffb347') : null), [lit]);
   const hl = (id: string) => () => highlightOf(sim.current) === id;
   const on = (min: number) => () => lit && S().power > min;
-  const knob = (p: V3, r = 0.016, c = '#d9dde2') => (
-    <mesh position={p} rotation={[Math.PI / 2, 0, 0]}>
-      <cylinderGeometry args={[r, r * 1.1, 0.02, 18]} />
-      <meshStandardMaterial color={c} roughness={0.45} metalness={0.2} />
-    </mesh>
+  const drive = useMemo<FgDrive>(
+    () => ({
+      lever: () => S().lever as [number, number],
+      flap: () => ['0', '1', '1+F', '2', '3', 'FULL'].indexOf(S().conf),
+      spd: () => S().spd.pos,
+      gear: () => S().gear.lever,
+      stick: () => S().stick,
+      pedals: () => S().pedals,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sim],
   );
-  return (
-    <group>
-      {/* ---------- osłona przeciwsłoneczna: daszek, czoło z FCU i EFIS, lampki MASTER ---------- */}
-      <Bx p={[0, 0.885, -0.72]} s={[1.8, 0.03, 0.2]} c={C_GLARE} rough={0.95} />
-      <Bx p={[0, 0.845, -0.625]} s={[1.78, 0.085, 0.02]} c={C_FACE} rough={0.8} />
-      <Bx p={[0, 0.8, -0.65]} s={[1.76, 0.015, 0.06]} c={C_GLARE} rough={0.9} />
-      <Face w={0.62} h={0.075} tex={tex?.fcu} p={[0, 0.848, -0.614]} />
-      {[-1, 1].map((k) => (
-        <group key={k}>
-          <Face w={0.24} h={0.07} tex={tex?.efis} p={[k * 0.47, 0.848, -0.614]} />
-          {warnT && cautT && (
-            <>
-              <Annunciator p={[k * 0.73, 0.862, -0.613]} color="#ff3b30" get={() => S().masterWarn} label={warnT} />
-              <Annunciator p={[k * 0.73, 0.832, -0.613]} color="#ffb000" get={() => false} label={cautT} />
-            </>
-          )}
-          {/* przyciski zegara i dźwięku na końcach czoła */}
-          {knob([k * 0.83, 0.848, -0.612], 0.011, '#2a3138')}
-        </group>
-      ))}
-
-      {/* ---------- panel główny: pięć ekranów w rzędzie ---------- */}
-      <Bx p={[0, 0.665, -0.705]} s={[2.06, 0.3, 0.04]} c={C_FACE} />
-      <group position={[0, 0.68, -0.665]} rotation={[-0.15, 0, 0]}>
-        {/* kapitan: PFD i ND na jednym ekranie */}
-        <DisplayUnit p={[-0.42, 0, 0]} w={0.36} h={0.25}>
-          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[-0.088, 0.045, 0]} on={on(0)} glow={hl('pfd')} bare />
-          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[0.088, 0.045, 0]} on={on(0.6)} glow={hl('nd')} bare />
-          {/* dolne sekcje: pod PFD skrzynka łączności z ATC, pod ND profil pionowy (VD) */}
-          <Screen w={0.17} h={0.075} tex={tex?.mbx} p={[-0.088, -0.083, 0]} on={on(0.6)} glow={hl('mbx')} bare />
-          <Screen w={0.17} h={0.075} tex={tex?.vd} p={[0.088, -0.083, 0]} on={on(0.6)} glow={hl('vd')} bare />
-        </DisplayUnit>
-        {/* środek: EWD – silniki, ostrzeżenia, MEMO */}
-        {/* środek: z lewej ECAM (silniki i ostrzeżenia, pod nimi strona systemu), z prawej ograniczenia i MEMO */}
-        <DisplayUnit p={[0, 0, 0]} w={0.36} h={0.25}>
-          <Screen w={0.17} h={0.227} tex={tex?.ecam} p={[-0.088, 0, 0]} on={on(0)} glow={() => hl('ewd')() || hl('sd')()} bare />
-          <Screen w={0.17} h={0.227} tex={tex?.memo} p={[0.088, 0, 0]} on={on(0.6)} glow={hl('memo')} bare />
-        </DisplayUnit>
-        {/* pierwszy oficer: ND i PFD */}
-        <DisplayUnit p={[0.42, 0, 0]} w={0.36} h={0.25}>
-          <Screen w={0.17} h={0.156} tex={tex?.nd} p={[-0.088, 0.045, 0]} on={on(0.6)} glow={hl('nd')} bare />
-          <Screen w={0.17} h={0.156} tex={tex?.pfd} p={[0.088, 0.045, 0]} on={on(0.6)} glow={hl('pfd')} bare />
-          <Screen w={0.17} h={0.075} tex={tex?.vd} p={[-0.088, -0.083, 0]} on={on(0.6)} glow={hl('vd')} bare />
-          <Screen w={0.17} h={0.075} tex={tex?.mbx} p={[0.088, -0.083, 0]} on={on(0.6)} glow={hl('mbx')} bare />
-        </DisplayUnit>
-        {/* skrajne OIT, odchylone w stronę pilota */}
-        {[-1, 1].map((k) => (
-          <group key={k} position={[k * 0.85, 0, 0.035]} rotation={[0, -k * 0.36, 0]}>
-            <DisplayUnit p={[0, 0, 0]} w={0.34} h={0.23}>
-              {k > 0 ? (
-                <Screen w={0.33} h={0.21} tex={tex?.oit} p={[0, 0, 0]} on={on(0.6)} glow={hl('oit')} bare />
-              ) : (
-                <>
-                  {/* lewy OIT: strony komputera nawigacyjnego – plan lotu i INIT */}
-                  <Screen w={0.158} h={0.21} tex={tex?.fpln} p={[-0.083, 0, 0]} on={on(0.6)} glow={hl('oit')} bare />
-                  <Screen w={0.158} h={0.21} tex={tex?.mfd} p={[0.083, 0, 0]} on={on(0.6)} glow={hl('oit')} bare />
-                </>
-              )}
-            </DisplayUnit>
-          </group>
-        ))}
-        {/* wąskie panele między ekranami: przełączniki źródeł danych i jasności */}
-        {[-1, 1].map((k) => (
-          <group key={'d' + k}>
-            <Bx p={[k * 0.21, 0, 0.005]} s={[0.056, 0.25, 0.02]} c={C_FACE} />
-            {/* z lewej: pokrętła źródeł danych (AIR DATA); z prawej: dźwignia podwozia */}
-            {k < 0 && knob([k * 0.21, 0.06, 0.02], 0.013)}
-            {k < 0 && knob([k * 0.21, -0.03, 0.02], 0.013)}
-            <Bx p={[k * 0.645, 0, 0.005]} s={[0.07, 0.24, 0.02]} c={C_FACE} />
-            {knob([k * 0.645, 0.06, 0.02], 0.013)}
-            {knob([k * 0.645, -0.02, 0.02], 0.013)}
-            <Bx p={[k * 0.645, -0.09, 0.016]} s={[0.04, 0.025, 0.008]} c="#1d2228" />
-          </group>
-        ))}
-        <group position={[0.21 - 0.245, -0.02, 0.005]}>
-          <GearLever3D get={() => S().gear.lever} />
-        </group>
-      </group>
-
-      {/* ---------- pod EWD: dolny ekran (SD i MFD), przyrządy zapasowe, podwozie, autobrake ---------- */}
-      <Bx p={[0, 0.4, -0.74]} s={[0.62, 0.32, 0.04]} c={C_PANEL} />
-      {/* dolny ekran leży na pochyłym czole pulpitu: dolna krawędź przy klawiaturach, górna tuż pod EWD */}
-      <Bx p={[0, 0.3, -0.66]} s={[0.56, 0.2, 0.2]} c={C_PANEL} />
-      <group position={[0, 0.48, -0.628]} rotation={[-0.74, 0, 0]}>
-        <Bx p={[0, 0, -0.03]} s={[0.62, 0.24, 0.04]} c={C_FACE} />
-        {/* dolny, wspólny ekran: mapa trasy z obrazem pogody */}
-        <DisplayUnit p={[0, 0, 0]} w={0.34} h={0.21}>
-          <Screen w={0.33} h={0.208} tex={tex?.map} p={[0, 0, 0]} on={on(0.6)} glow={hl('map')} bare />
-        </DisplayUnit>
-        {/* z prawej: zapasowy wskaźnik nawigacyjny i zegar */}
-        <Bx p={[0.245, 0.06, 0.0]} s={[0.075, 0.075, 0.012]} c="#0c0f12" />
-        <mesh position={[0.245, 0.06, 0.007]}>
-          <ringGeometry args={[0.022, 0.026, 32]} />
-          <meshBasicMaterial color={lit ? '#e6edf5' : '#2a3138'} />
-        </mesh>
-        <Screen w={0.07} h={0.07} tex={tex?.isis} p={[-0.245, 0.05, 0.0]} on={on(0)} glow={hl('isis')} />
-        {knob([-0.245, -0.06, 0.0], 0.02, '#1d2228')}
-      </group>
-      {/* pod panelem: ciemne wnęki na kolana, uchwyty regulacji pedałów */}
-      {[-1, 1].map((k) => (
-        <group key={'kn' + k}>
-          <Bx p={[k * 0.66, 0.44, -0.72]} s={[0.7, 0.2, 0.05]} c="#2b3238" rough={0.9} />
-          <Bx p={[k * 0.53, 0.39, -0.69]} s={[0.08, 0.02, 0.025]} c="#15181c" />
-        </group>
-      ))}
-      <Bx p={[0, 0.13, -0.68]} s={[0.5, 0.26, 0.1]} c="#3a434c" rough={0.9} />
-
-      {/* ---------- pulpit środkowy: wierzch opada lekko ku przodowi (do dolnego ekranu) ---------- */}
-      <group position={[0, 0.49, -0.06]} rotation={[-0.19, 0, 0]}>
-        <Bx p={[0, -0.32, 0]} s={[0.56, 0.64, 1.0]} c={C_PANEL} />
-        <Face w={0.56} h={1.0} tex={tex?.ped} p={[0, 0.001, 0]} r={[-Math.PI / 2, 0, 0]} />
-        {/* podpórki dłoni przy klawiaturach (z kulką kursora pod palcami) */}
-        {[-1, 1].map((k) => (
-          <group key={'hr' + k} position={[k * 0.165, 0, -0.13]}>
-            <mesh scale={[0.085, 0.06, 0.08]}>
-              <sphereGeometry args={[1, 28, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-              <meshStandardMaterial color="#8fa4b5" roughness={0.6} />
-            </mesh>
-            <mesh position={[0, 0.002, -0.095]}>
-              <sphereGeometry args={[0.02, 16, 12]} />
-              <meshStandardMaterial color="#1a1e23" roughness={0.3} />
-            </mesh>
-          </group>
-        ))}
-        {/* dźwignie ciągu: masywne uchwyty; 0 – bieg jałowy, 1 – CL, 1,5 – FLX, 2 – TOGA, < 0 – odwracacz */}
-        {[0, 1].map((i) => (
-          <Lever key={i} p={[i ? 0.024 : -0.024, 0, -0.3]} len={0.1} w={0.026} knob={[0.044, 0.09, 0.055]} color="#22272c" knobColor="#262b31" get={() => 0.35 - ((Math.max(-1, Math.min(2, S().lever[i])) + 1) / 3) * 0.95} />
-        ))}
-        {/* klapy (prawa) i hamulce aerodynamiczne (lewa) – z tyłu pulpitu */}
-        <Lever p={[0.185, 0, 0.36]} len={0.11} knob={[0.05, 0.03, 0.04]} color="#2a2f35" knobColor="#c9ced4" get={() => -0.45 + ['0', '1', '1+F', '2', '3', 'FULL'].indexOf(S().conf) * 0.15} />
-        <Lever p={[-0.185, 0, 0.36]} len={0.11} knob={[0.04, 0.03, 0.035]} color="#2a2f35" knobColor="#1d2228" get={() => -0.4 + S().spd.pos * 0.7 - (S().spd.armed ? 0.05 : 0)} />
-        {/* przełączniki ENG MASTER */}
-        {[0, 1].map((i) => (
-          <Lever key={'m' + i} p={[i ? 0.046 : -0.046, 0, 0.02]} len={0.035} knob={[0.024, 0.026, 0.024]} color="#9aa1a9" knobColor="#e3e6ea" get={() => (S().masters[i] ? -0.5 : 0.5)} />
-        ))}
-      </group>
-
-      {/* ---------- pulpity boczne ---------- */}
-      {[-1, 1].map((k) => (
-        <group key={k}>
-          <Bx p={[k * 0.98, 0.33, -0.1]} s={[0.3, 0.66, 0.9]} c={C_PANEL} />
-          <Bx p={[k * 0.98, 0.665, -0.1]} s={[0.3, 0.012, 0.9]} c={C_TOP} />
-          {/* drążek w gumowej osłonie, przed nim kieszeń; podłokietnik z tyłu */}
-          <SideStick x={k * 0.98} get={() => (k < 0 ? S().stick : [0, 0])} />
-          <Bx p={[k * 0.98, 0.672, -0.42]} s={[0.2, 0.01, 0.12]} c="#1d2228" />
-          <Bx p={[k * 1.0, 0.7, 0.22]} s={[0.12, 0.05, 0.3]} c="#3c4652" rough={0.9} />
-          {/* tiller – kierownica przedniego koła (uchwyt w kształcie litery T) */}
-          <group position={[k * 0.87, 0.67, -0.3]}>
-            <mesh position={[0, 0.03, 0]}>
-              <cylinderGeometry args={[0.02, 0.026, 0.06, 16]} />
-              <meshStandardMaterial color="#1d2228" roughness={0.6} />
-            </mesh>
-            <mesh position={[0, 0.07, 0]} rotation={[0, 0, Math.PI / 2]}>
-              <capsuleGeometry args={[0.014, 0.08, 6, 12]} />
-              <meshStandardMaterial color="#1d2228" roughness={0.5} />
-            </mesh>
-          </group>
-          {/* panel przy oknie: maska tlenowa, głośnik, oświetlenie */}
-          <Bx p={[k * 1.0, 0.75, -0.53]} s={[0.24, 0.17, 0.03]} c={C_FACE} />
-          {knob([k * 0.95, 0.79, -0.512], 0.014)}
-          {knob([k * 0.95, 0.73, -0.512], 0.014)}
-          <Bx p={[k * 1.05, 0.76, -0.513]} s={[0.08, 0.1, 0.004]} c="#2b3238" />
-          {/* pedały steru kierunku */}
-          {[-1, 1].map((j) => (
-            <Pedal key={j} p={[k * 0.53 + j * 0.11, 0.16, -0.88]} get={() => (k < 0 ? S().pedals * j * -0.05 : 0)} />
-          ))}
-          <Seat x={k * 0.53} />
-        </group>
-      ))}
-
-      {/* ---------- wysuwana klawiatura z gładzikiem przed pierwszym oficerem (do ekranów OIT) ---------- */}
-      <group position={[0.5, 0.6, -0.5]} rotation={[-0.22, 0, 0]}>
-        <Bx p={[0, -0.012, 0.03]} s={[0.44, 0.014, 0.32]} c="#8c97a2" rough={0.6} />
-        <mesh position={[0, 0.0, -0.03]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[0.38, 0.15]} />
-          <meshStandardMaterial map={getKeyTex()} roughness={0.7} />
-        </mesh>
-        <Bx p={[0, -0.002, 0.1]} s={[0.12, 0.004, 0.08]} c="#3a434d" />
-        {/* ramię mocowania pod panelem */}
-        <Bx p={[0, -0.04, -0.17]} s={[0.12, 0.05, 0.06]} c="#2b3238" />
-      </group>
-
-      {/* ---------- słupek szyby: obudowa kompasu zapasowego ---------- */}
-      <Bx p={[0, 1.42, -0.27]} s={[0.1, 0.2, 0.09]} c="#9aa6b1" rough={0.6} />
-      <Bx p={[0, 1.35, -0.223]} s={[0.06, 0.03, 0.004]} c="#0c0f12" />
-
-      {/* ---------- panel górny nad głowami pilotów, w obudowie pod sufitem ---------- */}
-      <Bx p={[0, 1.635, 0.465]} s={[1.1, 0.17, 0.73]} c={C_LINING} />
-      <group position={[0, 1.53, 0.4]} rotation={[Math.PI / 2 - 0.17, 0, 0]}>
-        {/* lico patrzy w dół (lokalne +z), płyta panelu jest nad nim */}
-        <Bx p={[0, 0, -0.027]} s={[0.94, 0.84, 0.05]} c={C_FACE} />
-        <Face w={0.88} h={0.8} tex={tex?.oh} p={[0, 0, 0.0]} r={[0, 0, 0]} />
-      </group>
-      {/* lampki do czytania nad fotelami */}
-      {[-1, 1].map((k) => (
-        <mesh key={'rl' + k} position={[k * 0.62, 1.56, 0.25]}>
-          <cylinderGeometry args={[0.03, 0.03, 0.02, 16]} />
-          <meshStandardMaterial color="#2a3138" emissive="#fff2d6" emissiveIntensity={lit ? 0.4 : 0} />
-        </mesh>
-      ))}
+  if (!fg) return null;
+  // obraz w ramce jednostki wyświetlacza (pole 0,372 × 0,214 m): dwa formaty obok siebie, pod nimi pasy dolnych sekcji
+  const W = 0.184;
+  const X = 0.094;
+  const unit = (m: THREE.Matrix4, children: ReactNode) => (
+    <group matrixAutoUpdate={false} matrix={m}>
+      {children}
     </group>
+  );
+  const split = (left: CanvasTex | undefined, right: CanvasTex | undefined, lo: [CanvasTex | undefined, CanvasTex | undefined] | null, ids: [string, string, string, string], mins: [number, number]) =>
+    lo ? (
+      <>
+        <Screen w={W} h={0.142} tex={left} p={[-X, 0.036, 0]} on={on(mins[0])} glow={hl(ids[0])} bare />
+        <Screen w={W} h={0.142} tex={right} p={[X, 0.036, 0]} on={on(mins[1])} glow={hl(ids[1])} bare />
+        <Screen w={W} h={0.068} tex={lo[0]} p={[-X, -0.073, 0]} on={on(0.6)} glow={hl(ids[2])} bare />
+        <Screen w={W} h={0.068} tex={lo[1]} p={[X, -0.073, 0]} on={on(0.6)} glow={hl(ids[3])} bare />
+      </>
+    ) : (
+      <>
+        <Screen w={W} h={0.214} tex={left} p={[-X, 0, 0]} on={on(mins[0])} glow={hl(ids[0])} bare />
+        <Screen w={W} h={0.214} tex={right} p={[X, 0, 0]} on={on(mins[1])} glow={hl(ids[1])} bare />
+      </>
+    );
+  return (
+    <FgCockpit data={fg} drive={drive}>
+      {(du) => (
+        <>
+          {/* kapitan: PFD i ND, pod nimi skrzynka łączności z ATC i profil pionowy (VD) */}
+          {unit(du.dL, split(tex?.pfd, tex?.nd, [tex?.mbx, tex?.vd], ['pfd', 'nd', 'mbx', 'vd'], [0, 0.6]))}
+          {/* środek: ECAM (silniki, ostrzeżenia, strona systemu) oraz ograniczenia i MEMO */}
+          {unit(du.dC, split(tex?.ecam, tex?.memo, null, ['ewd', 'memo', '', ''], [0, 0.6]))}
+          {/* pierwszy oficer: ND i PFD */}
+          {unit(du.dR, split(tex?.nd, tex?.pfd, [tex?.vd, tex?.mbx], ['nd', 'pfd', 'vd', 'mbx'], [0.6, 0.6]))}
+          {/* skrajne OIT: z lewej plan lotu i strona komputera, z prawej mapa lotniska */}
+          {unit(du.oL, split(tex?.fpln, tex?.mfd, null, ['oit', 'oit', '', ''], [0.6, 0.6]))}
+          {unit(du.oR, <Screen w={0.372} h={0.214} tex={tex?.oit} p={[0, 0, 0]} on={on(0.6)} glow={hl('oit')} bare />)}
+          {/* dolny, wspólny ekran: mapa trasy z obrazem pogody */}
+          {unit(du.low, <Screen w={0.372} h={0.214} tex={tex?.map} p={[0, 0, 0]} on={on(0.6)} glow={() => hl('map')() || hl('sd')()} bare />)}
+          {/* panel górny: lico z przełącznikami (to samo co w doku) tuż pod płytą panelu z modelu, pochylone jak ona */}
+          {tex && <Face w={1.1} h={1.0} tex={tex.oh} p={[0, 1.618, 0.216]} r={[1.052, 0, 0]} />}
+          {/* lampki MASTER WARN / MASTER CAUT na czole osłony przeciwsłonecznej */}
+          {warnT &&
+            cautT &&
+            [-1, 1].map((k) => (
+              <group key={k} position={[k * 0.7, 1.08, -0.575]} rotation={[-0.21, 0, 0]}>
+                <Annunciator p={[0, 0.026, 0]} color="#ff3b30" get={() => S().masterWarn} label={warnT} />
+                <Annunciator p={[0, -0.026, 0]} color="#ffb000" get={() => false} label={cautT} />
+              </group>
+            ))}
+        </>
+      )}
+    </FgCockpit>
   );
 }
 
-/** Jednostka wyświetlacza: ramka (bezel) z ciemną szybą; w środku obrazy (jeden albo dwa formaty obok siebie). */
-function DisplayUnit({ p, w, h, children }: { p: V3; w: number; h: number; children: ReactNode }) {
-  return (
-    <group position={p}>
-      <Bx p={[0, 0, -0.012]} s={[w + 0.045, h + 0.05, 0.03]} c="#55616d" rough={0.55} />
-      <mesh position={[0, 0, 0.0035]}>
-        <planeGeometry args={[w, h]} />
-        <meshStandardMaterial color="#030405" roughness={0.15} metalness={0.3} />
-      </mesh>
-      <group position={[0, 0, 0.002]}>{children}</group>
-    </group>
-  );
-}
 
-function Pedal({ p, get }: { p: V3; get: () => number }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (g.current) g.current.position.z = p[2] + get();
-  });
-  return (
-    <group ref={g} position={p}>
-      <Bx p={[0, 0, 0]} s={[0.1, 0.2, 0.025]} c="#2b3038" r={[-0.35, 0, 0]} />
-    </group>
-  );
-}
 
-function GearLever3D({ get }: { get: () => 'up' | 'down' }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (g.current) g.current.position.y += ((get() === 'up' ? 0.06 : -0.06) - g.current.position.y) * 0.15;
-  });
-  return (
-    <group position={[0.245, 0, 0.02]}>
-      {/* prowadnica dźwigni i trzy zielone lampki podwozia */}
-      <Bx p={[0, 0, -0.004]} s={[0.03, 0.17, 0.008]} c="#14181c" />
-      {[-1, 0, 1].map((i) => (
-        <Bx key={i} p={[0.035 + i * 0.0, 0.03 + i * 0.022, -0.002]} s={[0.014, 0.012, 0.004]} c="#1d3b22" emit={get() === 'down' ? '#3ee36b' : undefined} />
-      ))}
-      <group ref={g}>
-        <Bx p={[0, 0, 0.02]} s={[0.012, 0.012, 0.04]} c="#c9ced4" metal={0.4} />
-        <mesh position={[0, 0, 0.045]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.02, 0.02, 0.045, 20]} />
-          <meshStandardMaterial color="#e5e7eb" roughness={0.4} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
 
 /* ---------- klucze odświeżania paneli ---------- */
 
@@ -2443,30 +2066,30 @@ function EcamFor({ st, width = 238 }: { st: CkState; width?: number }) {
 
 type Part = { name: string; desc: string; pos: V3; color: string };
 const PARTS: Record<string, Part> = {
-  pfd: { name: 'PFD – główny ekran lotu', color: '#7cc7ff', pos: [-0.51, 0.8, -0.66], desc: 'Najważniejszy ekran pilota: sztuczny horyzont (położenie samolotu względem ziemi), prędkość, wysokość, prędkość wznoszenia i kurs. U góry – pasek trybów autopilota. Każdy pilot ma swój PFD tuż przed sobą.' },
-  nd: { name: 'ND – ekran nawigacyjny', color: '#7cc7ff', pos: [-0.33, 0.8, -0.66], desc: 'Mapa widziana z góry: zaplanowana trasa, punkty nawigacyjne, wiatr, a na życzenie obraz radaru pogodowego i inne samoloty w pobliżu. Na ziemi pokazuje plan lotniska.' },
-  vd: { name: 'VD – profil pionowy', color: '#7cc7ff', pos: [-0.33, 0.55, -0.66], desc: 'Dolna część ekranu pod ND: trasa widziana z boku. Symbol samolotu, zielona linia – którędy samolot poleci w górę albo w dół, niebieska przerywana – wysokość wybrana na panelu autopilota, a przy ziemi brązowy teren pod trasą. Od razu widać, czy samolot zdąży zejść albo czy nie zbliży się do gór.' },
-  mbx: { name: 'ATC MAILBOX – wiadomości z kontroli', color: '#7cc7ff', pos: [-0.51, 0.55, -0.66], desc: 'Dolna część ekranu pod PFD: skrzynka wiadomości tekstowych z kontrolą ruchu lotniczego (CPDLC). Kontroler przysyła polecenie, np. zmianę wysokości, a pilot odpowiada przyciskiem WILCO (wykonam) albo UNABLE (nie mogę) – bez rozmowy przez radio, która nad oceanem bywa trudna.' },
-  memo: { name: 'ograniczenia i MEMO', color: '#7cc7ff', pos: [0.09, 0.81, -0.66], desc: 'Prawa połowa środkowego ekranu. U góry ograniczenia – czego nie wolno robić przy obecnej usterce, osobno dla całego lotu i dla podejścia. Niżej zielone notatki MEMO: przypomnienia o włączonych systemach, np. APU, hamulec postojowy, napisy w kabinie.' },
-  map: { name: 'dolny ekran – mapa i pogoda', color: '#7cc7ff', pos: [0, 0.6, -0.6], desc: 'Wspólny ekran obu pilotów, na pochyłym czole pulpitu. Najczęściej pokazuje mapę trasy z obrazem pogody (żółte i czerwone plamy to opady i burze), a na żądanie strony komputera nawigacyjnego obsługiwane klawiaturą z kulką.' },
-  ewd: { name: 'ECAM – silniki i alarmy', color: '#7cc7ff', pos: [-0.09, 0.81, -0.66], desc: 'Ekran silników: ciąg, temperatura spalin, paliwo. Pod spodem pojawiają się ostrzeżenia razem z listą czynności do wykonania – wykonane znikają.' },
-  sd: { name: 'ECAM – strona systemu', color: '#7cc7ff', pos: [-0.09, 0.6, -0.66], desc: 'Schematy systemów samolotu: elektryka, paliwo, hydraulika, drzwi, klimatyzacja, koła. Komputer sam pokazuje stronę, która w danej chwili jest najważniejsza.' },
-  isis: { name: 'przyrządy zapasowe (ISIS)', color: '#9fb3c8', pos: [-0.245, 0.55, -0.64], desc: 'Mały, niezależny ekran z horyzontem, prędkością i wysokością. Działa nawet wtedy, gdy zgasną wszystkie duże ekrany.' },
-  oit: { name: 'OIT – ekrany z dokumentacją', color: '#9fb3c8', pos: [-0.85, 0.8, -0.62], desc: 'Ekrany po bokach: elektroniczna dokumentacja, mapy lotnisk, listy kontrolne i obliczenia osiągów. Zastępują dawną teczkę pełną papierów.' },
-  fcu: { name: 'FCU – panel autopilota', color: '#ffd36b', pos: [0, 0.93, -0.62], desc: 'Pokrętła i przyciski autopilota: prędkość, kurs, wysokość i prędkość pionowa, przyciski AP1, AP2 i A/THR (autociąg). Pociągnięcie pokrętła – pilot wybiera wartość sam, wciśnięcie – samolot leci według planu z komputera.' },
-  efis: { name: 'panele EFIS', color: '#ffd36b', pos: [-0.47, 0.93, -0.62], desc: 'Po jednym dla każdego pilota: ustawienie ciśnienia odniesienia wysokościomierza, trybu i zasięgu mapy na ND oraz tego, co ma być na niej widoczne.' },
-  warn: { name: 'MASTER WARN / CAUT', color: '#ff8a80', pos: [-0.73, 0.92, -0.6], desc: 'Duże lampki ostrzegawcze: czerwona (zagrożenie, działaj od razu) i bursztynowa (usterka, zajmij się nią). Pilot gasi je, wciskając lampkę – szczegóły są na ECAM.' },
-  overhead: { name: 'panel górny', color: '#c4b5fd', pos: [0, 1.42, 0.4], desc: 'Przełączniki wszystkich systemów: prąd, paliwo, powietrze i klimatyzacja, ochrona przed oblodzeniem, gaszenie pożaru, światła zewnętrzne i napisy w kabinie. Zasada „ciemnego kokpitu”: gdy wszystko działa normalnie, lampki nie świecą.' },
-  thrust: { name: 'dźwignie ciągu', color: '#86efac', pos: [0, 0.68, -0.38], desc: 'Dwie dźwignie z położeniami TOGA (pełna moc), FLX (moc startowa), CL (wznoszenie – tu pracuje autociąg) i IDLE (bieg jałowy). Za IDLE – odwracacze ciągu do hamowania po lądowaniu.' },
-  flaps: { name: 'dźwignia klap', color: '#86efac', pos: [0.19, 0.74, 0.3], desc: 'Położenia 0, 1, 2, 3 i FULL. Im dalej, tym bardziej wysunięte klapy i sloty – skrzydło daje więcej siły nośnej przy małej prędkości (start, lądowanie).' },
-  spdbrk: { name: 'hamulce aerodynamiczne', color: '#86efac', pos: [-0.19, 0.74, 0.3], desc: 'Dźwignia płyt na górze skrzydła (spojlerów). W locie pomaga szybciej zwolnić albo zejść niżej, a uzbrojona przed lądowaniem sama wysuwa płyty po przyziemieniu.' },
-  eng: { name: 'rozruch silników', color: '#86efac', pos: [0, 0.62, -0.04], desc: 'Przełączniki ENG MASTER 1 i 2 (paliwo i zapłon dla każdego silnika) i przełącznik trybu: NORM, IGN/START (rozruch).' },
-  kccu: { name: 'klawiatury z kulką (KCCU)', color: '#86efac', pos: [-0.17, 0.55, -0.42], desc: 'Klawiatura i kulka do przesuwania kursora po ekranach – piloci wpisują trasę, sprawdzają listy i zmieniają strony ECAM bez dotykania ekranów.' },
-  stick: { name: 'boczny drążek', color: '#fca5a5', pos: [-0.98, 0.95, -0.15], desc: 'Zamiast wolantu – mały drążek z boku, jak joystick. Jego ruchy trafiają do komputerów, a te poruszają sterami (fly-by-wire). Czerwony przycisk wyłącza autopilota.' },
-  tiller: { name: 'kółko sterowania na ziemi', color: '#fca5a5', pos: [-0.87, 0.8, -0.3], desc: 'Tiller – małe kółko do skręcania przednim kołem przy kołowaniu po lotnisku.' },
-  pedals: { name: 'pedały', color: '#fca5a5', pos: [-0.53, 0.32, -0.86], desc: 'Pedały steru kierunku i hamulców kół. Wciśnięcie górnej części pedału hamuje koła po tej stronie.' },
-  gear: { name: 'dźwignia podwozia', color: '#fca5a5', pos: [0.21, 0.62, -0.64], desc: 'W górę – podwozie się chowa, w dół – wypuszcza. Obok trzy lampki: zielone, gdy koła są wypuszczone i zablokowane.' },
-  seats: { name: 'fotele pilotów', color: '#d1d5db', pos: [0.53, 1.3, 0.4], desc: 'Kapitan siedzi po lewej, pierwszy oficer po prawej. Fotele przesuwają się na szynach i mają pięciopunktowe pasy. Kokpit ma też trzeci i czwarty fotel – dla obserwatora i dodatkowego pilota.' },
+  pfd: { name: 'PFD – główny ekran lotu', color: '#7cc7ff', pos: [-0.533, 0.8, -0.76], desc: 'Najważniejszy ekran pilota: sztuczny horyzont (położenie samolotu względem ziemi), prędkość, wysokość, prędkość wznoszenia i kurs. U góry – pasek trybów autopilota. Każdy pilot ma swój PFD tuż przed sobą.' },
+  nd: { name: 'ND – ekran nawigacyjny', color: '#7cc7ff', pos: [-0.345, 0.8, -0.76], desc: 'Mapa widziana z góry: zaplanowana trasa, punkty nawigacyjne, wiatr, a na życzenie obraz radaru pogodowego i inne samoloty w pobliżu. Na ziemi pokazuje plan lotniska.' },
+  vd: { name: 'VD – profil pionowy', color: '#7cc7ff', pos: [-0.345, 0.69, -0.74], desc: 'Dolna część ekranu pod ND: trasa widziana z boku. Symbol samolotu, zielona linia – którędy samolot poleci w górę albo w dół, niebieska przerywana – wysokość wybrana na panelu autopilota, a przy ziemi brązowy teren pod trasą. Od razu widać, czy samolot zdąży zejść albo czy nie zbliży się do gór.' },
+  mbx: { name: 'ATC MAILBOX – wiadomości z kontroli', color: '#7cc7ff', pos: [-0.533, 0.69, -0.74], desc: 'Dolna część ekranu pod PFD: skrzynka wiadomości tekstowych z kontrolą ruchu lotniczego (CPDLC). Kontroler przysyła polecenie, np. zmianę wysokości, a pilot odpowiada przyciskiem WILCO (wykonam) albo UNABLE (nie mogę) – bez rozmowy przez radio, która nad oceanem bywa trudna.' },
+  memo: { name: 'ograniczenia i MEMO', color: '#7cc7ff', pos: [0.094, 0.8, -0.76], desc: 'Prawa połowa środkowego ekranu. U góry ograniczenia – czego nie wolno robić przy obecnej usterce, osobno dla całego lotu i dla podejścia. Niżej zielone notatki MEMO: przypomnienia o włączonych systemach, np. APU, hamulec postojowy, napisy w kabinie.' },
+  map: { name: 'dolny ekran – mapa i pogoda', color: '#7cc7ff', pos: [0, 0.57, -0.62], desc: 'Wspólny ekran obu pilotów, na pochyłym czole pulpitu. Najczęściej pokazuje mapę trasy z obrazem pogody (żółte i czerwone plamy to opady i burze), a na żądanie strony komputera nawigacyjnego obsługiwane klawiaturą z kulką.' },
+  ewd: { name: 'ECAM – silniki i alarmy', color: '#7cc7ff', pos: [-0.094, 0.8, -0.76], desc: 'Ekran silników: ciąg, temperatura spalin, paliwo. Pod spodem pojawiają się ostrzeżenia razem z listą czynności do wykonania – wykonane znikają.' },
+  sd: { name: 'ECAM – strona systemu', color: '#7cc7ff', pos: [-0.094, 0.7, -0.75], desc: 'Schematy systemów samolotu: elektryka, paliwo, hydraulika, drzwi, klimatyzacja, koła. Komputer sam pokazuje stronę, która w danej chwili jest najważniejsza.' },
+  isis: { name: 'przyrządy zapasowe (ISIS)', color: '#9fb3c8', pos: [-0.23, 0.6, -0.67], desc: 'Mały, niezależny ekran z horyzontem, prędkością i wysokością. Działa nawet wtedy, gdy zgasną wszystkie duże ekrany.' },
+  oit: { name: 'OIT – ekrany z dokumentacją', color: '#9fb3c8', pos: [-0.81, 0.78, -0.68], desc: 'Ekrany po bokach: elektroniczna dokumentacja, mapy lotnisk, listy kontrolne i obliczenia osiągów. Zastępują dawną teczkę pełną papierów.' },
+  fcu: { name: 'FCU – panel autopilota', color: '#ffd36b', pos: [0, 1.07, -0.57], desc: 'Pokrętła i przyciski autopilota: prędkość, kurs, wysokość i prędkość pionowa, przyciski AP1, AP2 i A/THR (autociąg). Pociągnięcie pokrętła – pilot wybiera wartość sam, wciśnięcie – samolot leci według planu z komputera.' },
+  efis: { name: 'panele EFIS', color: '#ffd36b', pos: [-0.47, 1.07, -0.57], desc: 'Po jednym dla każdego pilota: ustawienie ciśnienia odniesienia wysokościomierza, trybu i zasięgu mapy na ND oraz tego, co ma być na niej widoczne.' },
+  warn: { name: 'MASTER WARN / CAUT', color: '#ff8a80', pos: [-0.7, 1.12, -0.56], desc: 'Duże lampki ostrzegawcze: czerwona (zagrożenie, działaj od razu) i bursztynowa (usterka, zajmij się nią). Pilot gasi je, wciskając lampkę – szczegóły są na ECAM.' },
+  overhead: { name: 'panel górny', color: '#c4b5fd', pos: [0, 1.62, 0.12], desc: 'Przełączniki wszystkich systemów: prąd, paliwo, powietrze i klimatyzacja, ochrona przed oblodzeniem, gaszenie pożaru, światła zewnętrzne i napisy w kabinie. Zasada „ciemnego kokpitu”: gdy wszystko działa normalnie, lampki nie świecą.' },
+  thrust: { name: 'dźwignie ciągu', color: '#86efac', pos: [0, 0.66, -0.31], desc: 'Dwie dźwignie z położeniami TOGA (pełna moc), FLX (moc startowa), CL (wznoszenie – tu pracuje autociąg) i IDLE (bieg jałowy). Za IDLE – odwracacze ciągu do hamowania po lądowaniu.' },
+  flaps: { name: 'dźwignia klap', color: '#86efac', pos: [0.12, 0.52, -0.1], desc: 'Położenia 0, 1, 2, 3 i FULL. Im dalej, tym bardziej wysunięte klapy i sloty – skrzydło daje więcej siły nośnej przy małej prędkości (start, lądowanie).' },
+  spdbrk: { name: 'hamulce aerodynamiczne', color: '#86efac', pos: [-0.1, 0.52, -0.05], desc: 'Dźwignia płyt na górze skrzydła (spojlerów). W locie pomaga szybciej zwolnić albo zejść niżej, a uzbrojona przed lądowaniem sama wysuwa płyty po przyziemieniu.' },
+  eng: { name: 'rozruch silników', color: '#86efac', pos: [0, 0.47, -0.2], desc: 'Przełączniki ENG MASTER 1 i 2 (paliwo i zapłon dla każdego silnika) i przełącznik trybu: NORM, IGN/START (rozruch).' },
+  kccu: { name: 'klawiatury z kulką (KCCU)', color: '#86efac', pos: [-0.23, 0.62, -0.64], desc: 'Klawiatura i kulka do przesuwania kursora po ekranach – piloci wpisują trasę, sprawdzają listy i zmieniają strony ECAM bez dotykania ekranów.' },
+  stick: { name: 'boczny drążek', color: '#fca5a5', pos: [-0.89, 0.76, -0.36], desc: 'Zamiast wolantu – mały drążek z boku, jak joystick. Jego ruchy trafiają do komputerów, a te poruszają sterami (fly-by-wire). Czerwony przycisk wyłącza autopilota.' },
+  tiller: { name: 'kółko sterowania na ziemi', color: '#fca5a5', pos: [-1.22, 0.6, -0.3], desc: 'Tiller – małe kółko do skręcania przednim kołem przy kołowaniu po lotnisku.' },
+  pedals: { name: 'pedały', color: '#fca5a5', pos: [-0.53, 0.3, -0.95], desc: 'Pedały steru kierunku i hamulców kół. Wciśnięcie górnej części pedału hamuje koła po tej stronie.' },
+  gear: { name: 'dźwignia podwozia', color: '#fca5a5', pos: [0.21, 0.76, -0.72], desc: 'W górę – podwozie się chowa, w dół – wypuszcza. Obok trzy lampki: zielone, gdy koła są wypuszczone i zablokowane.' },
+  seats: { name: 'fotele pilotów', color: '#d1d5db', pos: [0.53, 1.3, 0.3], desc: 'Kapitan siedzi po lewej, pierwszy oficer po prawej. Fotele przesuwają się na szynach i mają pięciopunktowe pasy. Kokpit ma też trzeci i czwarty fotel – dla obserwatora i dodatkowego pilota.' },
 };
 
 function Tag({ pos, color, children, onClick, active = false }: { pos: V3; color: string; children: ReactNode; onClick?: () => void; active?: boolean }) {
@@ -2800,8 +2423,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'Sześć ekranów',
       cam: [0, 1.17, 0.2],
-      tgt: [0, 0.62, -0.66],
-      spot: [0, 0.72, -0.63],
+      tgt: [0, 0.7, -0.74],
+      spot: [0, 0.79, -0.75],
       preset: { ck: 'screens' },
       controls: [
         {
@@ -2839,8 +2462,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'PFD – główny ekran lotu',
       cam: [-0.53, 1.17, -0.05],
-      tgt: [-0.49, 0.68, -0.66],
-      spot: [-0.49, 0.68, -0.63],
+      tgt: [-0.533, 0.76, -0.77],
+      spot: [-0.533, 0.76, -0.75],
       preset: { ck: 'pfd' },
       controls: [
         {
@@ -2871,8 +2494,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'ND – ekran nawigacyjny',
       cam: [-0.35, 1.15, -0.05],
-      tgt: [-0.31, 0.68, -0.66],
-      spot: [-0.31, 0.68, -0.63],
+      tgt: [-0.345, 0.76, -0.77],
+      spot: [-0.345, 0.76, -0.75],
       preset: { ck: 'nd' },
       controls: [RUN],
       body: (
@@ -2890,8 +2513,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'ECAM – silniki i alarmy',
       cam: [0.05, 1.12, -0.05],
-      tgt: [0, 0.6, -0.68],
-      spot: [0.05, 0.7, -0.64],
+      tgt: [0, 0.68, -0.72],
+      spot: [-0.09, 0.79, -0.75],
       preset: { ck: 'ecam' },
       controls: [
         {
@@ -2921,8 +2544,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'Boczny drążek',
       cam: [-0.4, 1.3, 0.55],
-      tgt: [-0.95, 0.75, -0.2],
-      spot: [-0.98, 0.85, -0.15],
+      tgt: [-0.89, 0.62, -0.36],
+      spot: [-0.89, 0.8, -0.36],
       preset: { ck: 'stick' },
       controls: [RUN],
       body: (
@@ -2939,9 +2562,9 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     }),
     ck({
       title: 'Panel autopilota (FCU)',
-      cam: [0, 1.15, -0.1],
-      tgt: [0, 0.86, -0.62],
-      spot: [0.15, 0.9, -0.6],
+      cam: [0, 1.2, -0.05],
+      tgt: [0, 1.0, -0.6],
+      spot: [0.15, 1.07, -0.56],
       preset: { ck: 'fcu' },
       controls: [RUN],
       body: (
@@ -2958,9 +2581,9 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     }),
     ck({
       title: 'Panel górny',
-      cam: [0, 0.95, 0.1],
-      tgt: [0, 1.53, 0.4],
-      spot: [0.25, 1.46, 0.3],
+      cam: [0, 0.98, 0.7],
+      tgt: [0, 1.62, 0.0],
+      spot: [0.25, 1.62, 0.2],
       preset: { ck: 'overhead' },
       controls: [RUN],
       body: (
@@ -2978,8 +2601,8 @@ export function makeCockpitModule(plane: PlaneStep): PartModule {
     ck({
       title: 'Pulpit środkowy',
       cam: [0.12, 1.35, 0.55],
-      tgt: [0, 0.5, -0.15],
-      spot: [0.05, 0.6, -0.1],
+      tgt: [0, 0.48, -0.25],
+      spot: [0.05, 0.55, -0.2],
       preset: { ck: 'pedestal' },
       controls: [RUN],
       body: (

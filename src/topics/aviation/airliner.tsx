@@ -779,11 +779,11 @@ function fusSec900(x: number) {
   if (x < -24.5) {
     // nos dopasowany do pomiarów modelu referencyjnego A350-900: szpic owiewki radaru nisko (ok. 1,4 m pod osią),
     // spód szybko dochodzi do pełnego przekroju, góra wznosi się łagodnie (długi skos szyb kokpitu), nos jest smukły.
-    // Górny obrys poprawiony według rysunku z dokumentacji Airbusa (A350-900 Aircraft Characteristics, rys. 2-2-0
-    // i 4-4-0): nad szybami kokpitu grzbiet jest o 0,2–0,35 m niżej niż w modelu referencyjnym.
+    // Górny obrys dopasowany do modeli referencyjnych A350-900 (SketchUp i FlightGear – oba zgodne): nad kokpitem
+    // grzbiet jest pełny, tak że panel górny mieści się nad głowami pilotów (różnica do modelu SketchUp do ±6 cm).
     const u = Math.max(0, (x + 33.4) / 8.9);
     const tip = -1.4;
-    const top = tip + (3.05 - tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.45), 0.97);
+    const top = tip + (3.05 - tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.9), 1.05);
     const bot = tip - (3.05 + tip) * Math.pow(Math.max(0, 1 - (1 - u) ** 2.95), 0.53);
     const w = 2.98 * Math.pow(Math.max(0, 1 - (1 - u) ** 1.25), 0.53);
     return { yc: (top + bot) / 2, h: (top - bot) / 2, w };
