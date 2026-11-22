@@ -1128,7 +1128,7 @@ function Pk({ id, children }: { id: string; children: ReactNode }) {
     );
   if (!ctx) return <>{lit(children, base)}</>;
   const { pick, hover, setHover, accept } = ctx;
-  const glow = pick.selected === id ? 0.42 : hover === id ? 0.24 : base;
+  const glow = pick.selected === id ? 0.42 : base;
   return (
     <GlowCtx.Provider value={hl ? Math.max(glow, 1.1) : glow}>
     <GlowColorCtx.Provider value={hl ?? '#7dd3fc'}>
@@ -3454,7 +3454,7 @@ function WingLabels({ range }: { range?: { z0: number; z1: number } | null }) {
     const p = sp(WING, r, s, side);
     // w przyciętym kawałku skrzydła podpisy części, których nie widać, są ukryte
     if (range && (p[2] < range.z0 + 0.6 || p[2] > range.z1 - 0.6)) return null;
-    const on = ctx ? ctx.pick.selected === id || ctx.hover === id : false;
+    const on = ctx ? ctx.pick.selected === id : false;
     // kolor grupy (konstrukcja, paliwo, krawędź natarcia/spływu, końcówka); wybrany – biały
     return (
       <Lbl
@@ -3779,7 +3779,7 @@ export const tailColorOf = (id: string) => TAIL_GROUP_COLOR[id];
 function TailLabels() {
   const ctx = useContext(PickCtx);
   const L = (pos: V3, txt: string, id: string, occlude = true) => {
-    const on = ctx ? ctx.pick.selected === id || ctx.hover === id : false;
+    const on = ctx ? ctx.pick.selected === id : false;
     return (
       <Lbl
         key={txt}
@@ -5376,7 +5376,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
       document.body.style.cursor = '';
     },
   } : {};
-  const glow = (p: PlanePart) => (p === focus ? 0 : hover === p ? 0.22 : highlight === p ? 0.16 : 0);
+  const glow = (p: PlanePart) => (p === focus ? 0 : highlight === p ? 0.16 : 0);
   // zwykła funkcja (nie komponent) – inaczej każde najechanie myszą przebudowywałoby całą geometrię
   const part = (p: PlanePart, children: ReactNode) => (
     <GlowCtx.Provider value={glow(p)}>
@@ -5505,7 +5505,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
             occlude
             pos={anchorAt(p)}
             color={p === tip ? '#fbbf24' : '#e2e8f0'}
-            active={hover === p || highlight === p}
+            active={highlight === p}
             onHover={(on) => setHover(on ? p : (h) => (h === p ? null : h))}
             onClick={() => {
               const mod = PART_MODULE[p];
@@ -5527,7 +5527,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
               pos={anchorAt(p)}
               link
               color={p === tip ? '#fbbf24' : '#e2e8f0'}
-              active={hover === p}
+              active={false}
               onHover={(on) => setHover(on ? p : (h) => (h === p ? null : h))}
               onClick={() => {
                 const mod = PART_MODULE[p];

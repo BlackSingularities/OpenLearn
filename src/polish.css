@@ -1050,7 +1050,6 @@
   backdrop-filter: blur(6px);
   transition: background 0.2s, transform 0.2s;
 }
-.engine-label.part-name:hover,
 .engine-label.part-name.on {
   background: color-mix(in srgb, var(--accent, #0ea5e9) 32%, rgba(10, 12, 18, 0.85));
   transform: translateY(-1px);
@@ -1062,10 +1061,6 @@
   vertical-align: -2px;
   opacity: 0.75;
   transition: transform 0.2s, opacity 0.2s;
-}
-.engine-label.part-name.module-link:hover .module-link-icon {
-  transform: translateX(2px);
-  opacity: 1;
 }
 .engine-label.part-name.module-link {
   font: italic 500 15px/1 var(--font-serif);
