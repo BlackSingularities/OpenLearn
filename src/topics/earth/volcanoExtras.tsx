@@ -435,10 +435,6 @@ function EarthLayers() {
           </mesh>
         </group>
       ))}
-      <Lbl pos={[TEC[0] + 6, TEC[1] + 19, TEC[2] + 6]}>skorupa (do 70 km)</Lbl>
-      <Lbl pos={[TEC[0] + 10, TEC[1] + 11, TEC[2] + 10]}>płaszcz – gorąca skała, płynie powoli</Lbl>
-      <Lbl pos={[TEC[0] + 5, TEC[1] + 4, TEC[2] + 6]}>jądro zewnętrzne – ciekłe żelazo</Lbl>
-      <Lbl pos={[TEC[0] + 1, TEC[1] - 1.5, TEC[2] + 2]}>jądro wewnętrzne, ok. 5000 °C</Lbl>
     </group>
   );
 }
@@ -636,7 +632,7 @@ export function Instruments({ mode, shape }: { mode: string; shape: () => number
               )}
             </group>
             {kind === 'gps' && mode === 'mon-swell' && k > 0.05 && <Arrow3D from={[x, y + 1.3, z]} vec={[out[0] * k * 6, out[1] * k * 4, out[2] * k * 6]} color="#7cc7ff" radius={0.12} />}
-            {(i < 4 || mode === 'mon-home') && <Lbl pos={[x, y + 2.2, z]}>{STATION_NAME[kind]}</Lbl>}
+            {i < 4 && mode !== 'mon-home' && <Lbl pos={[x, y + 2.2, z]}>{STATION_NAME[kind]}</Lbl>}
           </group>
         );
       })}
@@ -733,7 +729,7 @@ export function VeiCube({ vei }: { vei: number }) {
 
 /* ================= życie przy wulkanie ================= */
 
-const GEYSER: [number, number] = [40, -22];
+export const GEYSER: [number, number] = [40, -22];
 const PLANT: [number, number] = [-42, -12];
 
 /** Gejzer, gorące źródła, pola uprawne, elektrownia geotermalna. */
@@ -800,7 +796,7 @@ export function LifeFeatures({ mode }: { mode: string }) {
         <circleGeometry args={[0.9, 32]} />
         <meshStandardMaterial color="#2f8fd0" roughness={0.1} />
       </mesh>
-      <Lbl pos={[GEYSER[0], gy + 4, GEYSER[1]]}>gejzer</Lbl>
+      {mode !== 'life-geyser' && <Lbl pos={[GEYSER[0], gy + 4, GEYSER[1]]}>gejzer</Lbl>}
       {mode === 'life-springs' && <Springs />}
       {mode === 'life-soil' && <Fields />}
       {mode === 'life-geo' && <Geothermal />}

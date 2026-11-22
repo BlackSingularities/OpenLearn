@@ -292,6 +292,7 @@ const TYPES: TypeTab[] = [
         <p>
           Przykłady: <b>Fudżi</b> (Japonia, 3776 m), <b>Etna</b> i <b>Wezuwiusz</b> (Włochy), <b>Mount St. Helens</b> (USA), <b>Kilimandżaro</b> (Tanzania). Większość z nich leży nad strefami subdukcji, wokół Oceanu Spokojnego.
         </p>
+        <p>Kliknij podpis na modelu, żeby przeczytać o części wulkanu. Kolejne zakładki pokazują pozostałe rodzaje – góra zmienia kształt na Twoich oczach.</p>
       </>
     ),
   },
@@ -490,6 +491,7 @@ const ERUPTS: EruptTab[] = [
           Najspokojniejsza erupcja: rzadka lawa bazaltowa tryska z krateru albo szczeliny <b>fontannami</b> wysokimi na dziesiątki, czasem setki metrów, i spływa po zboczach jęzorami. Gaz łatwo uchodzi z rzadkiej lawy, więc nie ma gwałtownych wybuchów. Do takiej erupcji można podejść dość blisko – trzeba tylko uważać na gazy i na to, gdzie popłynie lawa.
         </p>
         <p>Nazwa pochodzi od Hawajów, gdzie tak wybucha Kīlauea – jeden z najaktywniejszych wulkanów świata.</p>
+        <p>Kliknij podpis na modelu, żeby przeczytać, co widzisz. Kolejne zakładki pokazują pozostałe rodzaje erupcji, od najspokojniejszych po najgwałtowniejsze.</p>
       </>
     ),
   },
@@ -813,6 +815,7 @@ const tecModule: PartModule = {
           <p>
             Płaszcz to nie morze lawy – jest zbudowany ze stałej skały. Ta skała jest jednak tak gorąca, że przez miliony lat powoli płynie, jak bardzo gęsta smoła. Ciepło z wnętrza Ziemi napędza ten ruch, a on przesuwa płyty skorupy. Skały topią się tylko w kilku szczególnych miejscach – i tam powstają wulkany.
           </p>
+          <p>Kliknij podpis warstwy, żeby przeczytać o niej więcej.</p>
         </>
       ),
     }),
@@ -882,7 +885,7 @@ const monModule: PartModule = {
           <p>
             Najgroźniejsze wulkany świata są obserwowane przez całą dobę. Na ich zboczach stoją małe stacje pomiarowe zasilane z paneli słonecznych, które wysyłają dane drogą radiową do <b>obserwatorium</b>. Naukowcy porównują pomiary z tym, co działo się przed dawnymi erupcjami.
           </p>
-          <p>Kliknij numer na modelu, żeby zobaczyć, co mierzą sejsmometry, jak GPS wykrywa puchnięcie góry, jak mierzy się gazy i jak ogłasza się alarm.</p>
+          <p>Kliknij podpis przyrządu, żeby przeczytać, co mierzy. Numery na modelu prowadzą do zakładek: trzęsienia ziemi, puchnięcie góry, gazy i ciepło, alarm i ewakuacja oraz popiół a samoloty.</p>
         </>
       ),
     }),
@@ -1022,6 +1025,7 @@ const lifeModule: PartModule = {
             <b>Gejzer</b> to gorące źródło, które co jakiś czas wyrzuca w górę słup wody i pary. Pod nim jest wąski kanał wypełniony wodą, ogrzewaną od dołu przez gorące skały. Woda na dnie kanału jest pod ciśnieniem słupa wody nad nią, więc może się nagrzać ponad 100 °C i nie zawrzeć – jak w szybkowarze.
           </p>
           <p>Gdy w końcu zawrze, para wypycha wodę z kanału. Ciśnienie spada i nagle wrze cała woda naraz – gejzer wybucha. Potem kanał powoli napełnia się znowu. Słynny Old Faithful w Yellowstone wybucha mniej więcej co półtorej godziny, a słowo „gejzer” pochodzi od islandzkiego Geysiru.</p>
+          <p>Kliknij podpis na modelu, żeby przeczytać więcej. Numery prowadzą do zakładek o gorących źródłach, żyznych glebach i energii z wnętrza Ziemi.</p>
         </>
       ),
     }),

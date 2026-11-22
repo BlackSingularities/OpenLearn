@@ -37,7 +37,7 @@ import {
   type VType,
 } from './volcanoGeo';
 import { Flow, Puffs, Rocks, rnd, upCone, type FlowKind, type PuffSys, type RockSys, type V3 } from './volcanoFx';
-import { AshPlane, Instruments, LifeFeatures, Samples, Tectonics, VeiCube, Village, MON_STATIONS } from './volcanoExtras';
+import { AshPlane, Instruments, LifeFeatures, Samples, Tectonics, VeiCube, Village, MON_STATIONS, GEYSER, TEC } from './volcanoExtras';
 
 /* ================= parametry ================= */
 
@@ -223,15 +223,94 @@ function Water({ type, cut, settled }: { type: VType; cut: boolean; settled: boo
 
 const CAP_NX = 380;
 const CAP_NY = 120;
+/** Tekstura przekroju: szerokość pokrywa x ∈ [−R, R], wysokość y ∈ [DEPTH, SEC_TOP]. */
+const TEX_W = 1400;
+const TEX_H = 400;
+const SEC_TOP = 31;
+const SEC_R = R_TERRAIN - 0.5;
+/** Gotowe tekstury przekroju (dla kształtów, które się nie zmieniają). */
+const SEC_CACHE = new Map<string, HTMLCanvasElement>();
+
+interface SecJob {
+  key: string;
+  cache: boolean;
+  ct: VType;
+  pl: Plumbing;
+  snap: Shape;
+  canvas: HTMLCanvasElement;
+  img: ImageData;
+  /** Kolory poprzedniej kolumny (do linii granic warstw w pionie). */
+  prev: Float32Array;
+  i: number;
+}
+
+const grain = (i: number, j: number) => {
+  let h = Math.imul(i, 73856093) ^ Math.imul(j, 19349663);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h >>> 0) % 1000) / 1000;
+};
+
+/** Maluje kolejne kolumny tekstury przekroju (w kawałkach, żeby nie zacinać animacji). */
+function paintColumns(job: SecJob, budgetMs: number) {
+  const t0 = performance.now();
+  const { img, prev, ct, pl, snap } = job;
+  const d = img.data;
+  const cur = new Float32Array(TEX_H * 3);
+  while (job.i < TEX_W) {
+    const i = job.i;
+    const x = -SEC_R + ((i + 0.5) / TEX_W) * 2 * SEC_R;
+    const z = 0.02;
+    const rock = rockOf(snap, ct, x, z);
+    const ice = iceH(ct, x, z, snap.melt);
+    const water = waterH(ct, x, z);
+    const top = Math.max(rock, Number.isFinite(ice) ? ice : -1e9, water);
+    const topCol = geoColor(ct, x, top - 0.02, pl, rock, ice, water);
+    for (let j = 0; j < TEX_H; j++) {
+      const y = SEC_TOP - ((j + 0.5) / TEX_H) * (SEC_TOP - DEPTH);
+      const c = y > top ? topCol : geoColor(ct, x, y, pl, rock, ice, water);
+      let r = c[0];
+      let g = c[1];
+      let b = c[2];
+      // cienka, ciemniejsza linia na granicy warstw (jak na rysunku w podręczniku)
+      if (y <= top) {
+        const up = j > 0 ? Math.abs(r - cur[(j - 1) * 3]) + Math.abs(g - cur[(j - 1) * 3 + 1]) + Math.abs(b - cur[(j - 1) * 3 + 2]) : 0;
+        const left = i > 0 ? Math.abs(r - prev[j * 3]) + Math.abs(g - prev[j * 3 + 1]) + Math.abs(b - prev[j * 3 + 2]) : 0;
+        cur[j * 3] = r;
+        cur[j * 3 + 1] = g;
+        cur[j * 3 + 2] = b;
+        const edge = Math.max(up, left) > 0.1 ? 0.8 : 1;
+        // delikatne ziarno skały
+        const k = edge * (0.965 + 0.05 * grain(i, j));
+        r *= k;
+        g *= k;
+        b *= k;
+      } else {
+        cur[j * 3] = r;
+        cur[j * 3 + 1] = g;
+        cur[j * 3 + 2] = b;
+      }
+      const o = (j * TEX_W + i) * 4;
+      d[o] = Math.min(255, r * 255);
+      d[o + 1] = Math.min(255, g * 255);
+      d[o + 2] = Math.min(255, b * 255);
+      d[o + 3] = 255;
+    }
+    prev.set(cur);
+    job.i++;
+    if (performance.now() - t0 > budgetMs) break;
+  }
+  return job.i >= TEX_W;
+}
 
 /** Ściana przekroju w płaszczyźnie z = 0 oraz półkolista ściana bloku (jak makieta w muzeum). */
 function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
   const { cap, skirt, floor } = useMemo(() => {
-    const mk = (nx: number) => {
+    const mk = (nx: number, uv: boolean) => {
       const g = new THREE.BufferGeometry();
       const n = (nx + 1) * (CAP_NY + 1);
       g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
-      g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
+      if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+      else g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
       const idx: number[] = [];
       for (let i = 0; i < nx; i++)
         for (let j = 0; j < CAP_NY; j++) {
@@ -242,32 +321,103 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
       g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 200);
       return g;
     };
-    return { cap: mk(CAP_NX), skirt: mk(160), floor: new THREE.CircleGeometry(R_TERRAIN, 80, Math.PI, Math.PI) };
+    return { cap: mk(CAP_NX, true), skirt: mk(160, false), floor: new THREE.CircleGeometry(R_TERRAIN, 80, Math.PI, Math.PI) };
   }, []);
+  const tex = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = TEX_W;
+    c.height = TEX_H;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#8b7355';
+    g.fillRect(0, 0, TEX_W, TEX_H);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    return t;
+  }, []);
+  useEffect(() => () => tex.dispose(), [tex]);
+  const job = useRef<SecJob | null>(null);
+  const shownKey = useRef('');
   const seen = useRef({ ver: -1, key: '' });
+  const show = (canvas: HTMLCanvasElement) => {
+    // nowy obraz – stara kopia w karcie graficznej do zwolnienia
+    tex.dispose();
+    tex.image = canvas;
+    tex.needsUpdate = true;
+  };
   useFrame(() => {
     const s = shape.current;
+    const ct = curType(s);
+    // tekstura przekroju: z pamięci albo malowana w tle kolumna po kolumnie
+    const dyn = s.grow < 1 || s.infl > 0.01 || s.melt > 0.01;
+    const key = `${ct}|${s.grow < 1 ? Math.round(s.grow * 12) : 'g'}|${Math.round(s.melt * 10)}|${Math.round(s.infl * 6)}`;
+    if (key !== shownKey.current && job.current?.key !== key) {
+      const hit = SEC_CACHE.get(key);
+      if (hit) {
+        show(hit);
+        shownKey.current = key;
+        job.current = null;
+      } else {
+        const canvas = document.createElement('canvas');
+        canvas.width = TEX_W;
+        canvas.height = TEX_H;
+        const ctx = canvas.getContext('2d')!;
+        job.current = { key, cache: !dyn, ct, pl: plumbingOf(ct), snap: { ...s }, canvas, img: ctx.createImageData(TEX_W, TEX_H), prev: new Float32Array(TEX_H * 3), i: 0 };
+      }
+    }
+    const jb = job.current;
+    if (jb && paintColumns(jb, 9)) {
+      jb.canvas.getContext('2d')!.putImageData(jb.img, 0, 0);
+      if (jb.cache) {
+        SEC_CACHE.set(jb.key, jb.canvas);
+        if (SEC_CACHE.size > 12) SEC_CACHE.delete(SEC_CACHE.keys().next().value as string);
+      }
+      show(jb.canvas);
+      shownKey.current = jb.key;
+      job.current = null;
+    }
     if (seen.current.ver === s.ver) return;
     seen.current.ver = s.ver;
-    const ct = curType(s);
     const pl = plumbingOf(ct);
-    const key = `${ct}|${s.grow < 1 ? Math.round(s.grow * 12) : 'g'}|${Math.round(s.melt * 10)}|${Math.round(s.infl * 6)}`;
     const recolor = key !== seen.current.key;
     seen.current.key = key;
-    // ściana przekroju
-    const fill = (g: THREE.BufferGeometry, nx: number, at: (u: number) => [number, number]) => {
-      const p = g.getAttribute('position') as THREE.BufferAttribute;
-      const c = g.getAttribute('color') as THREE.BufferAttribute;
-      for (let i = 0; i <= nx; i++) {
-        const [x, z] = at(i / nx);
+    // ściana przekroju: wierzchołki do powierzchni terenu, współrzędne tekstury z położenia
+    {
+      const p = cap.getAttribute('position') as THREE.BufferAttribute;
+      const uv = cap.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i <= CAP_NX; i++) {
+        const x = (i / CAP_NX) * 2 * SEC_R - SEC_R;
+        const z = 0.02;
+        const rock = rockS(s, x, z);
+        const ice = iceS(s, x, z);
+        const top = Math.max(rock, Number.isFinite(ice) ? ice : -1e9, waterH(ct, x, z));
+        for (let j = 0; j <= CAP_NY; j++) {
+          const f = j / CAP_NY;
+          const y = DEPTH + (top - DEPTH) * f;
+          const v = i * (CAP_NY + 1) + j;
+          p.setXYZ(v, x, y, z);
+          uv.setXY(v, i / CAP_NX, (y - DEPTH) / (SEC_TOP - DEPTH));
+        }
+      }
+      p.needsUpdate = true;
+      uv.needsUpdate = true;
+    }
+    // półkolista ściana bloku (daleko – wystarczą kolory wierzchołków)
+    {
+      const p = skirt.getAttribute('position') as THREE.BufferAttribute;
+      const c = skirt.getAttribute('color') as THREE.BufferAttribute;
+      for (let i = 0; i <= 160; i++) {
+        const th = Math.PI + (i / 160) * Math.PI;
+        const x = (R_TERRAIN - 0.3) * Math.cos(th);
+        const z = (R_TERRAIN - 0.3) * Math.sin(th);
         const rock = rockS(s, x, z);
         const ice = iceS(s, x, z);
         const water = waterH(ct, x, z);
         const top = Math.max(rock, Number.isFinite(ice) ? ice : -1e9, water);
         for (let j = 0; j <= CAP_NY; j++) {
-          // gęściej przy powierzchni (tam są cienkie warstwy)
-          const f = 1 - Math.pow(1 - j / CAP_NY, 1.5);
-          const y = DEPTH + (top - DEPTH) * f;
+          const y = DEPTH + (top - DEPTH) * (j / CAP_NY);
           const v = i * (CAP_NY + 1) + j;
           p.setXYZ(v, x, y, z);
           if (recolor) {
@@ -278,17 +428,12 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
       }
       p.needsUpdate = true;
       if (recolor) c.needsUpdate = true;
-    };
-    fill(cap, CAP_NX, (u) => [(u * 2 - 1) * (R_TERRAIN - 0.5), 0.02]);
-    fill(skirt, 160, (u) => {
-      const th = Math.PI + u * Math.PI;
-      return [(R_TERRAIN - 0.3) * Math.cos(th), (R_TERRAIN - 0.3) * Math.sin(th)];
-    });
+    }
   });
   return (
     <>
       <mesh geometry={cap}>
-        <meshBasicMaterial vertexColors side={THREE.DoubleSide} />
+        <meshBasicMaterial map={tex} side={THREE.DoubleSide} />
       </mesh>
       <mesh geometry={skirt}>
         <meshStandardMaterial vertexColors side={THREE.DoubleSide} roughness={1} />
@@ -316,6 +461,26 @@ interface MagmaState {
 }
 
 type Bubble = { x: number; y: number; r: number; vy: number; alive: boolean; frag: boolean };
+
+/** Poprzeczny gradient magmy w kominie: żółty środek, czerwone brzegi przy chłodniejszych ścianach. */
+const MAGMA_TEX = (() => {
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 1;
+  const g = c.getContext('2d')!;
+  const gr = g.createLinearGradient(0, 0, 64, 0);
+  gr.addColorStop(0, '#9a2a0a');
+  gr.addColorStop(0.3, '#ff7a1a');
+  gr.addColorStop(0.5, '#ffd25a');
+  gr.addColorStop(0.7, '#ff7a1a');
+  gr.addColorStop(1, '#9a2a0a');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 1);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
 
 /** Magma w kominie, pęcherzyki gazu (rosną przy wznoszeniu), poświata komory i nowa żyła. */
 function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.MutableRefObject<MagmaState>; onBurst?: (n: number) => void; dikePath?: [number, number][] }) {
@@ -405,7 +570,7 @@ function MagmaOverlay({ pl, st, onBurst, dikePath }: { pl: Plumbing; st: React.M
     <>
       <mesh ref={col} renderOrder={3}>
         <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial color="#ff7a1a" toneMapped={false} />
+        <meshBasicMaterial map={MAGMA_TEX} toneMapped={false} />
       </mesh>
       <mesh ref={glow} position={[ch.cx, ch.cy, 0.07]} scale={[ch.ax * 1.25, ch.ay * 1.35, 1]} renderOrder={3}>
         <circleGeometry args={[1, 64]} />
@@ -704,6 +869,77 @@ export function insideParts(): Record<string, PartInfo> {
   };
 }
 
+/** Strona główna modułu „Rodzaje wulkanów”: stratowulkan w przekroju. */
+function typeParts(): Record<string, PartInfo> {
+  const top = rockH('strato', 0, 0);
+  return {
+    crater: { name: 'krater', desc: 'Zagłębienie na szczycie, w którym kończy się komin. Jego kształt i wielkość zmieniają się po każdej erupcji – wybuchy go poszerzają, a zastygła lawa potrafi go wypełnić.', pos: [0, top + 2.5, -1] },
+    snow: { name: 'czapa śnieżna', desc: 'Wysokie stratowulkany sięgają ponad granicę wiecznego śniegu. Śnieg i lodowce na szczycie są groźne: gorąca erupcja topi je w kilka minut, a woda z popiołem spływa jako lahar.', pos: [-9, 17.5, -4] },
+    slopes: { name: 'strome, wklęsłe zbocza', desc: 'Gęsta lawa nie spływa daleko, a popiół i okruchy spadają blisko krateru. Dlatego stratowulkan jest stromy, a jego zbocza są coraz bardziej strome ku szczytowi – to rozpoznawczy kształt Fudżi.', pos: [-15, rockH('strato', -15, -6) + 1.5, -6] },
+    layers: { name: 'warstwy lawy i popiołu', desc: 'W przekroju widać, skąd nazwa „wulkan warstwowy”: ciemne pasy to zastygła lawa, jasne – popiół i okruchy z wybuchów. Każda erupcja dokłada nową warstwę.', pos: [-12, 9, 0.2] },
+    parasite: { name: 'stożek pasożytniczy', desc: 'Mały stożek na zboczu, zasilany boczną żyłą magmy. Inne rodzaje wulkanów w tym module mają zupełnie inny kształt – porównaj je w kolejnych zakładkach.', pos: [PARASITE[0], rockH('strato', PARASITE[0], PARASITE[1]) + 2, PARASITE[1]] },
+    chamber: { name: 'komora magmowa', desc: 'Od magmy w komorze zależy, jaki wulkan powstanie: rzadka magma bazaltowa buduje płaskie wulkany tarczowe, gęsta – strome stratowulkany i kopuły.', pos: [6, -24, 0.3] },
+    foot: { name: 'podnóże', desc: 'Stratowulkan ma u podstawy zwykle 10–30 km średnicy. Na żyznych zboczach i u podnóża leżą pola, sady i wsie.', pos: [-34, rockH('strato', -34, -18) + 2, -18] },
+  };
+}
+
+/** Strona główna modułu „Rodzaje erupcji”: erupcja hawajska na wulkanie tarczowym. */
+function hawaiiParts(): Record<string, PartInfo> {
+  const top = rockH('shield', 0, 0);
+  return {
+    fountain: { name: 'fontanna lawy', desc: 'Gaz uchodzący z rzadkiej lawy wyrzuca ją w górę strumieniem kropli – fontanna ma zwykle od kilkunastu do kilkuset metrów. Krople świecą na żółto, bo mają ok. 1150 °C. Najwyższa zmierzona fontanna na Hawajach miała ok. 580 m.', pos: [0, top + 13, 0] },
+    caldera: { name: 'kaldera szczytowa', desc: 'Płaskie, zapadnięte dno na szczycie wulkanu tarczowego. Powstaje, gdy magma odpływa spod szczytu, np. do erupcji na zboczu. Kaldera Kīlauei zapadła się w 2018 r. o ok. 500 m.', pos: [-7, top + 1.5, 3] },
+    flow: { name: 'jęzor lawy', desc: 'Lawa spływa po zboczu jak gęsty syrop. Z wierzchu szybko ciemnieje i zastyga w skórkę, pod którą wciąż płynie gorąca lawa. Czoło jęzora przesuwa się zwykle wolniej niż idący człowiek.', pos: [6, rockH('shield', 6, -10) + 1.5, -10] },
+    spatter: { name: 'bryzgi lawy', desc: 'Krople z fontanny spadają wokół otworu jeszcze miękkie i sklejają się ze sobą. Z takich bryzgów rosną niskie wały i stożki rozprysku.', pos: [3, top + 1.2, 3] },
+    gas: { name: 'gazy', desc: 'Nad fontanną unosi się niebieskawa mgiełka – para wodna i dwutlenek siarki. Na Hawajach z gazów wulkanicznych powstaje „vog” (wulkaniczny smog), który drażni oczy i płuca.', pos: [5, top + 22, -6] },
+    rift: { name: 'strefa ryftowa', desc: 'Pas szczelin biegnący od szczytu w dół zbocza. Magma wciska się w niego z komory i może wylać się wiele kilometrów od krateru – tak zaczyna się wiele erupcji na Hawajach.', pos: [17, rockH('shield', 17, -10.5) + 1.5, -10.5] },
+  };
+}
+
+/** Strona główna modułu „Skąd się biorą wulkany”: wnętrze Ziemi. */
+function earthParts(): Record<string, PartInfo> {
+  return {
+    crust: { name: 'skorupa', desc: 'Zewnętrzna, twarda warstwa Ziemi: pod oceanami ma ok. 7 km grubości, pod kontynentami do 70 km. W skali Ziemi jest cieńsza niż skórka jabłka. Pęknięta jest na kilkanaście płyt tektonicznych.', pos: [TEC[0] + 6, TEC[1] + 19, TEC[2] + 6] },
+    mantle: { name: 'płaszcz', desc: 'Warstwa gorącej skały grubości ok. 2900 km – ponad 80% objętości Ziemi. Jest stały, ale tak gorący (500–4000 °C), że przez miliony lat powoli płynie i przenosi ciepło z głębi ku powierzchni. To z niego pochodzi magma większości wulkanów.', pos: [TEC[0] + 10, TEC[1] + 11, TEC[2] + 10] },
+    outer: { name: 'jądro zewnętrzne', desc: 'Warstwa ciekłego żelaza i niklu grubości ok. 2200 km. Wirujący w niej metal wytwarza pole magnetyczne Ziemi – to dzięki niemu działa kompas.', pos: [TEC[0] + 5, TEC[1] + 4, TEC[2] + 6] },
+    inner: { name: 'jądro wewnętrzne', desc: 'Kula z żelaza i niklu o promieniu ok. 1220 km. Jest gorąca jak powierzchnia Słońca (ok. 5000 °C), ale stała, bo ściska ją ogromne ciśnienie.', pos: [TEC[0] + 1, TEC[1] - 1.5, TEC[2] + 2] },
+  };
+}
+
+/** Strona główna modułu „Obserwacja wulkanu”: przyrządy na zboczach. */
+function monParts(): Record<string, PartInfo> {
+  const at = (i: number): V3 => [MON_STATIONS[i][0], rockH('strato', MON_STATIONS[i][0], MON_STATIONS[i][1]) + 2.4, MON_STATIONS[i][1]];
+  return {
+    seis: { name: 'sejsmometr', desc: 'Czuje drgania gruntu mniejsze niż tysięczna milimetra. Kilka sejsmometrów razem pozwala wyznaczyć, gdzie i jak głęboko pękła skała. Gdy wstrząsy są coraz częstsze i płytsze, magma idzie w górę.', pos: at(0) },
+    gps: { name: 'odbiornik GPS', desc: 'Jest na stałe przymocowany do skały i co chwilę mierzy swoje położenie z dokładnością do milimetrów. Gdy stacje rozsuwają się i unoszą, wulkan puchnie od napływającej magmy.', pos: at(1) },
+    gas: { name: 'czujnik gazów', desc: 'Mierzy, ile dwutlenku siarki i dwutlenku węgla wydobywa się z krateru. Więcej SO₂ zwykle znaczy, że magma jest płycej.', pos: at(3) },
+    cam: { name: 'kamera termowizyjna', desc: 'Widzi ciepło zamiast światła: pokazuje gorące miejsca w kraterze, świeże pęknięcia i spływającą lawę – także w nocy i we mgle.', pos: at(5) },
+    solar: { name: 'zasilanie i łączność', desc: 'Stacje stoją daleko od dróg i prądu, więc zasilają je panele słoneczne i akumulatory. Dane płyną drogą radiową albo przez satelitę do obserwatorium, gdzie dyżurni śledzą je przez całą dobę.', pos: at(4) },
+  };
+}
+
+/** Strona główna modułu „Życie przy wulkanie”: gejzer. */
+function geyserParts(): Record<string, PartInfo> {
+  const gy = rockH('strato', GEYSER[0], GEYSER[1]);
+  return {
+    geyser: { name: 'gejzer', desc: 'Gorące źródło, które co jakiś czas wybucha słupem wody i pary. Gejzerów jest na świecie ok. 1000, z czego połowa w Yellowstone.', pos: [GEYSER[0], gy + 4, GEYSER[1]] },
+    sinter: { name: 'obwódka z gejzerytu', desc: 'Gorąca woda rozpuszcza w głębi krzemionkę ze skał, a na powierzchni ją wytrąca. Tak wokół gejzeru narasta biała, porowata skała – gejzeryt – po milimetrze na rok.', pos: [GEYSER[0] + 2.4, gy + 1.2, GEYSER[1] + 1.4] },
+    steam: { name: 'para wodna', desc: 'Woda wyrzucona z gejzeru ma prawie 100 °C. Na chłodnym powietrzu para skrapla się w biały obłok, widoczny z daleka zwłaszcza zimą.', pos: [GEYSER[0] - 1, gy + 10, GEYSER[1]] },
+    heat: { name: 'źródło ciepła', desc: 'Wodę w gejzerach, gorących źródłach i elektrowniach geotermalnych grzeje magma z komory pod wulkanem – ta sama, która zasila erupcje.', pos: [4, rockH('strato', 4, -4) + 3, -4] },
+  };
+}
+
+/** Klikalne części na stronie głównej modułu (zakładka „0”). */
+function homeParts(mode: string): Record<string, PartInfo> | null {
+  if (mode === 'in-home') return insideParts();
+  if (mode === 'type-strato') return typeParts();
+  if (mode === 'er-hawaii') return hawaiiParts();
+  if (mode === 'tec-layers') return earthParts();
+  if (mode === 'mon-home') return monParts();
+  if (mode === 'life-geyser') return geyserParts();
+  return null;
+}
+
 /** Podpisy w widoku całości – prowadzą do modułów. */
 export function homeLinks(): Record<string, PartInfo> {
   const top = rockH('strato', 0, 0);
@@ -773,7 +1009,7 @@ export function VolcanoScene({ params }: SceneProps) {
   }, [type]);
   const pl = useMemo(() => plumbingOf(type), [type]);
   // w przekroju odłamki spadające na zdjętą połowę lecą dalej w dół (tam nie ma terenu)
-  const groundRocks = useMemo(() => (cut ? (x: number, z: number) => (z > 0.3 ? DEPTH - 20 : ground(x, z)) : ground), [cut, ground]);
+  const groundRocks = useMemo(() => (cut ? (x: number, z: number) => (z > 0.3 ? NaN : ground(x, z)) : ground), [cut, ground]);
 
   /* stan magmy, czas scenariusza */
   const mag = useRef<MagmaState>({ level: 0.55, speed: 0.2, visc: 0.5, glow: 0.4, dike: 0 });
@@ -908,7 +1144,7 @@ export function VolcanoScene({ params }: SceneProps) {
   // podpisy części
   const [sel, setSel] = useState<string | null>(null);
   useEffect(() => setSel(null), [mode]);
-  const parts = mode === 'in-home' ? insideParts() : null;
+  const parts = home ? homeParts(mode) : null;
   const links = mode === 'home' && home ? homeLinks() : null;
   const veiInfo = VEI_TABLE[Math.max(0, Math.min(8, vei))];
 
@@ -960,7 +1196,6 @@ export function VolcanoScene({ params }: SceneProps) {
       {mode === 'pr-gas' && <GasPool />}
 
       {parts &&
-        home &&
         Object.entries(parts).map(([id, p]) => (
           <Lbl key={id} pos={p.pos} active={sel === id} onClick={() => setSel(sel === id ? null : id)}>
             {p.name}
@@ -972,15 +1207,15 @@ export function VolcanoScene({ params }: SceneProps) {
             {p.name}
           </Lbl>
         ))}
-      {mode === 'in-home' && (
+      {parts && (
         <InfoPortal>
-          {sel && parts ? (
+          {sel && parts[sel] ? (
             <>
               <div style={{ fontWeight: 700, color: '#ffb35c' }}>{parts[sel].name}</div>
               <div>{parts[sel].desc}</div>
             </>
           ) : (
-            <div>Kliknij podpis, żeby przeczytać, czym jest ta część wulkanu.</div>
+            <div>Kliknij podpis na modelu, żeby przeczytać, co to jest.</div>
           )}
         </InfoPortal>
       )}

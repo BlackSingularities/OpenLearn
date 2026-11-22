@@ -260,6 +260,11 @@ export function Rocks({ cap = 700, sys, ground, onLand }: { cap?: number; sys: R
         r.rot[1] += r.spin[1] * dt;
         r.rot[2] += r.spin[2] * dt;
         const gy = ground(r.p[0], r.p[2]);
+        // nad zdjętą połową przekroju odłamek znika
+        if (Number.isNaN(gy)) {
+          r.life = 0;
+          continue;
+        }
         if (r.p[1] < gy + r.size * 0.4) {
           r.p[1] = gy + r.size * (r.shape === 2 ? 0.15 : 0.4);
           r.landed = true;

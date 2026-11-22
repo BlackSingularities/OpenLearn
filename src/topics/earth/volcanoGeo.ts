@@ -341,7 +341,8 @@ const C = {
 export function surfColor(t: VType, x: number, z: number, y: number, slope: number, rock: number, ice: number): RGB {
   const r = Math.hypot(x, z);
   const n = fbm(x * 0.07 + 11, z * 0.07 - 5);
-  const n2 = vnoise(x * 0.9, z * 0.9);
+  // drobny szum łagodny – na siatce terenu ostry szum wygląda jak plamy
+  const n2 = vnoise(x * 0.3, z * 0.3);
   const lawn = mixC(C.grass, C.grass2, sm(-0.3, 0.4, n));
   let c: RGB = lawn;
   const steep = sm(0.55, 1.1, slope);
@@ -486,8 +487,13 @@ function layerColor(t: VType, x: number, y: number, rock: number, n: number): RG
       const frac = f - Math.floor(f);
       return frac < 0.12 ? hex('#5a3b32') : Math.floor(f) % 2 ? hex('#3a3a3f') : hex('#2e2e33');
     }
-    case 'cinder':
-      return mixC(C.scoria, hex('#5a3a30'), sm(0.5, 0.9, vnoise(x * 3, y * 3)));
+    case 'cinder': {
+      // poza stożkiem – cienka warstwa gleby na równinie
+      if (Math.abs(x) > 12.5) return hex('#6b5640');
+      // żużel ułożony warstwami równoległymi do zbocza
+      const band = Math.floor(d / 0.9 + 0.3 * n);
+      return band % 2 ? C.scoria : hex('#5a3a30');
+    }
     case 'dome': {
       const rr = Math.hypot(x, y - 1);
       return Math.floor(rr / 0.8 + 0.3 * n) % 2 ? C.dacite : hex('#7d7570');
