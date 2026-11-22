@@ -1194,6 +1194,72 @@ const elecModule: PartModule = {
     }),
   ],
 };
+/** Sterowanie fly-by-wire – na razie tylko zakładka startowa (szczegóły do dopisania). */
+const fbwModule: PartModule = {
+  id: 'sterowanie',
+  title: 'Sterowanie fly-by-wire',
+  summary: 'Jak ruch drążka trafia do sterów: komputery sterowania lotem, ochrona przed niebezpiecznymi manewrami i co się dzieje, gdy któryś komputer zawiedzie',
+  steps: [
+    plane({
+      title: 'Sterowanie przez komputery',
+      // z tyłu i z góry: skrzydła z lotkami i spojlerami oraz usterzenie
+      camera: [48, 26, 40],
+      target: [4, -1, 0],
+      body: (
+        <>
+          <p>
+            W A350 drążek pilota nie jest połączony ze sterami linkami ani dźwigniami. Ruch drążka zamienia się w sygnał elektryczny, który trafia do <b>komputerów sterowania lotem</b>. To one decydują, jak wychylić lotki, spojlery i stery na ogonie. Taki układ nazywa się <b>fly-by-wire</b> – „sterowanie po przewodzie”.
+          </p>
+          <p>Ten moduł jest w przygotowaniu.</p>
+        </>
+      ),
+    }),
+  ],
+};
+/** Hydraulika – na razie tylko zakładka startowa (szczegóły do dopisania). */
+const hydModule: PartModule = {
+  id: 'hydraulika',
+  title: 'Hydraulika',
+  summary: 'Płyn pod wysokim ciśnieniem, który porusza sterami, podwoziem i hamulcami: dwa układy, zielony i żółty, pompy i zapasowe siłowniki elektryczne',
+  steps: [
+    plane({
+      title: 'Siła z płynu pod ciśnieniem',
+      // z boku i z dołu: podwozie, skrzydło i silniki z pompami
+      camera: [-6, -9, 42],
+      target: [-2, -3, 0],
+      body: (
+        <>
+          <p>
+            Stery, podwozie i hamulce A350 są za ciężkie, żeby poruszać nimi siłą mięśni. Robi to <b>hydraulika</b>: pompy napędzane silnikami tłoczą płyn pod ciśnieniem 5000 psi, czyli ok. 345 atmosfer, a <b>siłowniki</b> zamieniają je na ruch. Samolot ma dwa niezależne układy, <b>zielony</b> i <b>żółty</b>, a w zapasie siłowniki z własnymi małymi pompami na prąd.
+          </p>
+          <p>Ten moduł jest w przygotowaniu.</p>
+        </>
+      ),
+    }),
+  ],
+};
+/** Rejestratory lotu – na razie tylko zakładka startowa (szczegóły do dopisania). */
+const recordersModule: PartModule = {
+  id: 'czarne-skrzynki',
+  title: 'Czarne skrzynki',
+  summary: 'Rejestratory lotu w ogonie: co zapisują, dlaczego są pomarańczowe, jak przetrwają katastrofę i jak się je odnajduje',
+  steps: [
+    plane({
+      title: 'Rejestratory lotu',
+      // z tyłu i z boku: tylna część kadłuba, gdzie zamontowane są rejestratory
+      camera: [52, 8, 26],
+      target: [24, 0.5, 0],
+      body: (
+        <>
+          <p>
+            „Czarne skrzynki” to dwa <b>rejestratory lotu</b>, a wcale nie są czarne – maluje się je na jaskrawy pomarańczowy kolor, żeby łatwo je znaleźć. Jeden zapisuje <b>dane lotu</b>: prędkość, wysokość, położenie sterów i tysiące innych parametrów. Drugi nagrywa <b>dźwięk w kokpicie</b>. Są w tylnej części kadłuba, która przy wypadku zwykle najmniej ucierpi.
+          </p>
+          <p>Ten moduł jest w przygotowaniu.</p>
+        </>
+      ),
+    }),
+  ],
+};
 /** Światła zewnętrzne – nocą, z panelem EXT LT: pozycyjne, antykolizyjne, reflektory, skrzydło, logo i kolejność w locie. */
 const lightsModule: PartModule = {
   id: 'swiatla',
@@ -1371,6 +1437,6 @@ export const airplane: Topic = {
   accent: '#0ea5e9',
   glyph: '✈',
   steps: overview,
-  modules: [cycleModule, engineModule, wingModule, tailModule, fuselageModule, gearModule, apuModule, cockpitModule, radarModule, lightsModule, doorsModule, elecModule],
+  modules: [cycleModule, engineModule, wingModule, tailModule, fuselageModule, gearModule, apuModule, cockpitModule, radarModule, lightsModule, doorsModule, elecModule, fbwModule, hydModule, recordersModule],
 };
 
