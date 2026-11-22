@@ -1,6 +1,6 @@
 /*
- * Elektrownia wiatrowa – modele pomocnicze zakładek: fundament w przekroju gruntu, fundamenty morskie, dźwig
- * do montażu, stacja elektroenergetyczna z linią wysokiego napięcia, magazyn energii, płynąca energia,
+ * Elektrownia wiatrowa – modele pomocnicze zakładek: fundament w przekroju gruntu, fundamenty morskie,
+ * stacja elektroenergetyczna z linią wysokiego napięcia, magazyn energii, płynąca energia,
  * powiększony profil łopaty z siłami, wycinek łopaty z warstwami, maszt pomiarowy, porcja powietrza.
  */
 import { useMemo, useRef } from 'react';
@@ -35,7 +35,7 @@ export function Rod({ a, b, r, m }: { a: V3; b: V3; r: number; m: THREE.Material
 }
 
 /** Wiele prętów w jednej siatce (kratownice). */
-function Rods({ list, r, m }: { list: [V3, V3][]; r: number; m: THREE.Material }) {
+export function Rods({ list, r, m }: { list: [V3, V3][]; r: number; m: THREE.Material }) {
   const mesh = useMemo(() => {
     const g = new THREE.CylinderGeometry(r, r, 1, 6);
     const im = new THREE.InstancedMesh(g, m, list.length);
@@ -372,116 +372,6 @@ export function OffshoreBase({ kind }: { kind: OffKind }) {
         }
         return <Line key={`m${i}`} points={pts} color="#2a2a2a" lineWidth={2.2} />;
       })}
-    </group>
-  );
-}
-
-/* ================= dźwig ================= */
-
-const BOOM_L = 168;
-/** Kratownica wysięgnika (wzdłuż +y, długość 1 – skalowana). */
-function boomLattice() {
-  const list: [V3, V3][] = [];
-  const n = 42;
-  const wAt = (k: number) => mix(1.6, 0.8, k);
-  const corner = (k: number, c: number): V3 => {
-    const w = wAt(k);
-    return [(c & 1 ? 1 : -1) * w, k * BOOM_L, (c & 2 ? 1 : -1) * w];
-  };
-  for (let c = 0; c < 4; c++) list.push([corner(0, c), corner(1, c)]);
-  for (let i = 0; i < n; i++) {
-    const k0 = i / n;
-    const k1 = (i + 1) / n;
-    const order = [0, 1, 3, 2];
-    for (let s = 0; s < 4; s++) {
-      const a = order[s];
-      const b = order[(s + 1) % 4];
-      list.push([corner(k0, a), corner(k1, b)]);
-      list.push([corner(k1, a), corner(k1, b)]);
-    }
-  }
-  return list;
-}
-
-export interface CraneState {
-  /** kąt obrotu nadwozia (rad, wokół y) */
-  slew: number;
-  /** wysięg (m) */
-  reach: number;
-  /** położenie haka */
-  hook: V3;
-}
-
-/** Dźwig gąsienicowy z kratowym wysięgnikiem (położenie podstawy w `at`). */
-export function Crane({ at, cs }: { at: V3; cs: React.MutableRefObject<CraneState> }) {
-  const lattice = useMemo(() => boomLattice(), []);
-  const upper = useRef<THREE.Group>(null);
-  const boom = useRef<THREE.Group>(null);
-  const rope = useRef<THREE.Mesh>(null);
-  const hook = useRef<THREE.Group>(null);
-  const pend = useRef<THREE.Mesh>(null);
-  const PIV: V3 = [3.5, 5, 0];
-  useFrame(() => {
-    const s = cs.current;
-    if (upper.current) upper.current.rotation.y = s.slew;
-    const reach = s.reach - PIV[0];
-    const luff = Math.acos(clamp(reach / BOOM_L, 0, 1));
-    if (boom.current) boom.current.rotation.z = -(Math.PI / 2 - luff);
-    // koniec wysięgnika w układzie świata
-    const tipH = PIV[1] + BOOM_L * Math.sin(luff);
-    const tx = at[0] + Math.cos(s.slew) * s.reach;
-    const tz = at[2] - Math.sin(s.slew) * s.reach;
-    const [hx, hy, hz] = s.hook;
-    if (rope.current) {
-      const len = Math.max(0.5, tipH - hy);
-      rope.current.position.set(tx, hy + len / 2, tz);
-      rope.current.scale.set(1, len, 1);
-    }
-    if (hook.current) hook.current.position.set(hx, hy, hz);
-    if (pend.current) {
-      // odciągi od masztu do końca wysięgnika (w układzie nadwozia)
-      const A = new THREE.Vector3(-6, 32, 0);
-      const B = new THREE.Vector3(PIV[0] + reach, tipH, 0);
-      const d = B.clone().sub(A);
-      pend.current.position.copy(A).add(B).multiplyScalar(0.5);
-      pend.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
-      pend.current.scale.set(1, d.length(), 1);
-    }
-  });
-  return (
-    <group>
-      <group position={at}>
-        {/* gąsienice */}
-        {[-3.6, 3.6].map((z) => (
-          <Box key={z} p={[0, 0.9, z]} s={[11, 1.8, 1.6]} m={MAT.rubber} />
-        ))}
-        <Box p={[0, 2.0, 0]} s={[6, 1.0, 6]} m={MAT.steelDark} />
-        <group ref={upper}>
-          <Box p={[-1, 3.5, 0]} s={[10, 2.4, 4.6]} m={MAT.yellow} />
-          <Box p={[3.8, 4.4, 2.1]} s={[2.0, 2.2, 1.4]} m={MAT.glass} />
-          {/* przeciwwaga */}
-          <Box p={[-7.5, 4.0, 0]} s={[3.4, 3.4, 5.6]} m={MAT.steelDark} />
-          {/* maszt i odciągi */}
-          <mesh position={[-3, 18, 0]} rotation={[0, 0, 0.2]} material={MAT.yellow}>
-            <cylinderGeometry args={[0.5, 0.7, 28, 8]} />
-          </mesh>
-          <mesh ref={pend} material={MAT.cable}>
-            <cylinderGeometry args={[0.06, 0.06, 1, 4]} />
-          </mesh>
-          <group ref={boom} position={PIV}>
-            <Rods list={lattice} r={0.16} m={MAT.yellow} />
-          </group>
-        </group>
-      </group>
-      <mesh ref={rope} material={MAT.cable}>
-        <cylinderGeometry args={[0.06, 0.06, 1, 4]} />
-      </mesh>
-      <group ref={hook}>
-        <Box p={[0, 1.2, 0]} s={[1.2, 2.4, 0.8]} m={MAT.yellow} />
-        <mesh position={[0, -0.2, 0]} material={MAT.steelDark}>
-          <torusGeometry args={[0.45, 0.12, 6, 12, Math.PI * 1.4]} />
-        </mesh>
-      </group>
     </group>
   );
 }

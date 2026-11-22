@@ -38,7 +38,7 @@ import {
   offDepth,
   type OffKind,
 } from './windExtras';
-import { BUILD_T, BuildSite } from './windBuild';
+import { BUILD_STAGES, BuildSite, buildStatus } from './windBuild';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
 const num = (v: unknown, d: number) => (typeof v === 'number' ? v : d);
@@ -813,14 +813,29 @@ export function WindScene({ params }: SceneProps) {
       </>
     );
   } else if (mode === 'to-build') {
-    info = phase || run ? <div style={{ fontWeight: 700, color: PHASE_C }}>{phase || 'Montaż'}</div> : null;
+    const [stg, txt] = phase ? phase.split('|') : ['-1', ''];
+    const n = run ? Number(stg) : -1;
+    info = (
+      <>
+        <div style={{ fontWeight: 700, color: PHASE_C }}>{run ? txt || 'Montaż' : 'Części czekają na placu – naciśnij „Rozpocznij”'}</div>
+        {BUILD_STAGES.map((s, i) => (
+          <div key={i} style={{ opacity: i === n ? 1 : i < n ? 0.75 : 0.45, fontWeight: i === n ? 700 : 400 }}>
+            {i < n ? '✓' : i === n ? '▸' : '·'} {s}
+          </div>
+        ))}
+      </>
+    );
   }
 
   // fazy montażu
   useFrame(() => {
     if (mode !== 'to-build') return;
     const t = tRun.current;
-    const ph = t < 0 ? '' : t < 24 ? 'Dźwig ustawia kolejne segmenty wieży' : t < 30 ? 'Gondola wędruje na szczyt wieży' : t < 35 ? 'Piasta z kołpakiem' : t < BUILD_T - 1 ? 'Łopaty – jedna po drugiej, wirnik obraca się o 120°' : 'Turbina zmontowana – zostało podłączenie i próby';
+    let ph = '';
+    if (t >= 0) {
+      const b = buildStatus(t);
+      ph = `${b.stage}|${b.text}`;
+    }
     if (ph !== phase) setPhase(ph);
   });
 

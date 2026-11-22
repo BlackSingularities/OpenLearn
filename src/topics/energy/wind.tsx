@@ -600,17 +600,20 @@ const towerModule: PartModule = {
     wind({
       title: 'Montaż',
       spot: [4, 112, 4],
-      camera: [150, 110, 190],
-      target: [0, 70, 0],
+      camera: [232, 104, 132],
+      target: [0, 84, -16],
       preset: { mode: 'to-build' },
       controls: [RUN],
       body: (
         <>
           <p>
-            Części turbiny przyjeżdżają nocą na ciężarówkach – łopata ma ponad 70 m, więc taki transport wymaga pilotów i zamykania dróg. Na placu obok fundamentu czeka <b>dźwig gąsienicowy</b> z wysięgnikiem dłuższym niż wieża. Naciśnij „Rozpocznij”.
+            Części turbiny przyjeżdżają nocą na ciężarówkach – łopata ma ponad 70 m, więc taki transport wymaga pilotów i zamykania dróg. Na placu leżą segmenty wieży na drewnianych podkładach, gondola na ramie, piasta na stojaku i trzy łopaty. Obok czeka żółty <b>dźwig gąsienicowy</b> z wysięgnikiem dłuższym niż wieża i przeciwwagą na wózku z tyłu, a przy segmentach – mały, czerwony <b>dźwig pomocniczy</b>. Naciśnij „Rozpocznij”.
           </p>
           <p>
-            Dźwig ustawia kolejne segmenty wieży, gondolę, piastę i łopaty – jedną po drugiej. Między łopatami wirnik obraca się o 120°, żeby następne gniazdo stanęło poziomo. Montaż może się odbywać tylko przy słabym wietrze – zwykle trwa kilka dni, a cała budowa turbiny razem z fundamentem – kilka miesięcy.
+            Segment leży poziomo, więc dźwigi stawiają go razem: duży podnosi górny koniec, mały trzyma dolny, aż rura stanie pionowo. Potem duży dźwig sam przenosi ją na wieżę, a montażyści w środku skręcają kołnierze – ok. 120 śrub na jeden. Gondola wisi na stalowej belce (trawersie), łopata w <b>chwytaku</b> obejmującym ją w środku ciężkości. Montażyści na ziemi trzymają <b>liny prowadzące</b>, żeby wiatr nie obracał ładunku.
+          </p>
+          <p>
+            Między łopatami wirnik obraca się o 120°, żeby następne gniazdo stanęło poziomo. Dźwig może pracować tylko przy słabym wietrze – zwykle do ok. 10 m/s. Sam montaż trwa kilka dni, a cała budowa razem z fundamentem – kilka miesięcy.
           </p>
         </>
       ),
