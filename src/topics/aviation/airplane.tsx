@@ -24,6 +24,7 @@ import { DoorsLab, DoorsScene, useDoorsDriver, type DoorMode } from './doors';
 import { ElecLab, ElecScene, useElecDriver, type ElecMode } from './electrics';
 import { CockpitLab, cockpitOnGround, makeCockpitModule, useCockpitDriver, type CkMode } from './cockpitLab';
 import { cycleModule } from './cycleLab';
+import { REC_SPOTS, RecLab, RecScene, recFlight, useRecDriver, type RecMode } from './recorders';
 import { FUS_DY, FUS_GROUPS, FUS_LIVE, FUS_PART_INFO, cargoDoorOpen, type FusView } from './airliner';
 
 /* ======================= sceny ======================= */
@@ -133,6 +134,10 @@ function PlaneScene({ params }: SceneProps) {
   const elecMode: ElecMode | null = typeof params.elec === 'string' && params.elec ? (params.elec as ElecMode) : null;
   const elecSim = useElecDriver(elecMode, params);
   const [esel, setEsel] = useState<string | null>(null);
+  // moduł czarnych skrzynek: tryb zakładki (strona główna, dane, rozmowy, budowa, próby, poszukiwania)
+  const recMode: RecMode | null = typeof params.rec === 'string' && params.rec ? (params.rec as RecMode) : null;
+  const recSim = useRecDriver(recMode, params);
+  const [rsel, setRsel] = useState<string | null>(null);
   const refuelEngine = refuel && refuelStage >= 5;
   // przekrój pokazuje samolot w locie: podwozie schowane we wnękach, bez płyty lotniska
   const fusFlight = fusView !== null && fusView !== 'cargo';
@@ -153,7 +158,7 @@ function PlaneScene({ params }: SceneProps) {
   // moduł świateł: noc, stan przełączników i własne podwozie (chowanie w czasie „lotu w minutę”)
   const lightsSim = useLightsDriver(lightsMode, params, direct, gearDrv.live);
   const ls = lightsSim.current;
-  const phase: PlanePhase = ckMode ? (ckGround ? 'ground' : 'flight') : elecMode ? (elecMode === 'dist' || elecMode === 'rat' ? 'flight' : 'ground') : doorsMode ? (doorsMode === 'press' ? 'flight' : 'ground') : refuel ? 'ground' : fusFlight ? 'flight' : lightsMode ? (ls.ground ? 'ground' : 'flight') : cs ? (cs.flight ? 'flight' : 'ground') : radarFlight ? 'flight' : gearMode === 'retract' ? 'flight' : gearMode ? 'ground' : lab === 'spoiler' && params.use === 'ground' ? 'ground' : lab || engineOn ? 'flight' : 'ground';
+  const phase: PlanePhase = recMode ? (recFlight(recMode) ? 'flight' : 'ground') : ckMode ? (ckGround ? 'ground' : 'flight') : elecMode ? (elecMode === 'dist' || elecMode === 'rat' ? 'flight' : 'ground') : doorsMode ? (doorsMode === 'press' ? 'flight' : 'ground') : refuel ? 'ground' : fusFlight ? 'flight' : lightsMode ? (ls.ground ? 'ground' : 'flight') : cs ? (cs.flight ? 'flight' : 'ground') : radarFlight ? 'flight' : gearMode === 'retract' ? 'flight' : gearMode ? 'ground' : lab === 'spoiler' && params.use === 'ground' ? 'ground' : lab || engineOn ? 'flight' : 'ground';
   // strona główna usterzenia: lotki skrzydeł też biorą udział w sterowaniu – wyróżnione kolorem osi przechylania
   const tailHome = focus === 'tail' && !ctl;
   const hilite = cs ? cs.hilite : tailHome ? { aileron: C_ROLL, spoiler: C_ROLL } : null;
@@ -206,11 +211,11 @@ function PlaneScene({ params }: SceneProps) {
           fusPick={fusHome ? { selected: fsel, onSelect: setFsel } : undefined}
           // dobieg po lądowaniu: klapy i sloty w konfiguracji do lądowania
           mech={landTab ? { flap: 32, fowler: 1, slat: 1 } : tgt.mech}
-          interactive={moduleHome && !doorsMode && !elecMode}
+          interactive={moduleHome && !doorsMode && !elecMode && !recMode}
           // odnośniki do innych modułów tylko na stronie głównej modułu – w zakładkach podwozia (i innych) ich nie ma
-          links={moduleHome && !doorsMode && !elecMode}
-          partLabels={moduleHome && !doorsMode && !elecMode}
-          moduleLabels={moduleHome && !doorsMode && !elecMode}
+          links={moduleHome && !doorsMode && !elecMode && !recMode}
+          partLabels={moduleHome && !doorsMode && !elecMode && !recMode}
+          moduleLabels={moduleHome && !doorsMode && !elecMode && !recMode}
           // na wycinkach skrzydła bez owiewek prowadnic klap – czysty przekrój profilu
           wingPick={wingHome ? { selected: wsel, onSelect: setWsel } : tailHome ? { selected: tsel, onSelect: setTsel } : undefined}
           // zakładki aerodynamiki to lot: podwozie schowane, silniki pracują
@@ -218,12 +223,12 @@ function PlaneScene({ params }: SceneProps) {
           surfaces={landTab ? gearDrv.surf : lab || ctl ? pose.surf : undefined}
           // na wycinkach skrzydła: bez owiewek klap i usterzenia (statecznik poziomy wpadałby w zakres wycinka)
           // moduł kokpitu: za oknami niebo i ziemia ze scenariusza kokpitu (zamiast lotniska)
-          layers={ckMode ? { ground: false } : lightsMode ? { ground: false, env: false } : lab ? { ground: false, canoes: !isSliceMode(lab) || Boolean(params.wide), tail: !isSliceMode(lab) } : gearMode === 'retract' || landTab || radarFlight || fusFlight || (cs && cs.flight) || elecMode === 'dist' || elecMode === 'rat' ? { ground: false } : undefined}
+          layers={ckMode || (recMode && recFlight(recMode)) ? { ground: false } : lightsMode ? { ground: false, env: false } : lab ? { ground: false, canoes: !isSliceMode(lab) || Boolean(params.wide), tail: !isSliceMode(lab) } : gearMode === 'retract' || landTab || radarFlight || fusFlight || (cs && cs.flight) || elecMode === 'dist' || elecMode === 'rat' ? { ground: false } : undefined}
           gear={gearMode ? gearDrv.drive : lightsMode ? ls.gear : undefined}
           extLights={lightsMode ? ls.ext : null}
           // reflektory lądowania tylko w czasie animacji lądowania (nie na postoju ustawianym suwakiem)
           landingLights={landTab && (gearMode0 === 'shock' ? params.land !== false : gearMode0 === 'brakes' ? params.run !== false : true)}
-          enginePower={gearMode ? gearDrv.power : lightsMode ? { n1: ls.n1, rev: 0 } : refuel ? { n1: refuelEngine ? 21 : 0, rev: 0 } : elecMode ? elecSim.power : undefined}
+          enginePower={recMode ? recSim.power : gearMode ? gearDrv.power : lightsMode ? { n1: ls.n1, rev: 0 } : refuel ? { n1: refuelEngine ? 21 : 0, rev: 0 } : elecMode ? elecSim.power : undefined}
           gearPick={gearHome ? { selected: gsel, onSelect: setGsel } : undefined}
           // podzespoły wbudowane (kokpit, radar, APU) – w swoich modułach z ich symulacją, poza nimi w spoczynku
           systems={{
@@ -240,6 +245,7 @@ function PlaneScene({ params }: SceneProps) {
         {refuel && <RefuelScene sim={refuelSim} />}
         {doorsMode && <DoorsScene sim={doorsSim} sel={dsel} onSelect={setDsel} />}
         {elecMode && <ElecScene sim={elecSim} sel={esel} onSelect={setEsel} />}
+        {recMode && <RecScene sim={recSim} sel={rsel} onSelect={setRsel} />}
         {lightsMode && <LightsModel sim={lightsSim} mode={lightsMode} params={params} />}
       </FollowPlane>
       {lab && <WingLab mode={lab} params={params} pose={pose} />}
@@ -256,6 +262,7 @@ function PlaneScene({ params }: SceneProps) {
       {refuel && <RefuelLab sim={refuelSim} />}
       {doorsMode && <DoorsLab sim={doorsSim} sel={dsel} />}
       {elecMode && <ElecLab sim={elecSim} sel={esel} />}
+      {recMode && <RecLab sim={recSim} sel={rsel} />}
       {lightsMode && <LightsLab mode={lightsMode} sim={lightsSim} params={params} gear={gearDrv.live} />}
       {engineOn && eng.info}
     </NightCtx.Provider>
@@ -1238,23 +1245,95 @@ const hydModule: PartModule = {
     }),
   ],
 };
-/** Rejestratory lotu – na razie tylko zakładka startowa (szczegóły do dopisania). */
+/** Czarne skrzynki – rejestratory danych i rozmów, budowa, próby wytrzymałości i poszukiwania (symulacja w recorders). */
 const recordersModule: PartModule = {
   id: 'czarne-skrzynki',
   title: 'Czarne skrzynki',
-  summary: 'Rejestratory lotu w ogonie: co zapisują, dlaczego są pomarańczowe, jak przetrwają katastrofę i jak się je odnajduje',
+  summary: 'Rejestratory lotu w ogonie: co zapisują, z czego są zbudowane, jak przetrwają katastrofę i jak się je odnajduje',
   steps: [
     plane({
       title: 'Rejestratory lotu',
-      // z tyłu i z boku: tylna część kadłuba, gdzie zamontowane są rejestratory
-      camera: [52, 8, 26],
-      target: [24, 0.5, 0],
+      spot: REC_SPOTS[0],
+      // z tyłu i z lewej: tylna część kadłuba z prześwietlonymi rejestratorami, nadajnikiem ELT i przewodami
+      camera: [26.6, 2.9, 6.0],
+      target: [22.4, 1.1, 0.2],
+      preset: { rec: 'home' },
       body: (
         <>
           <p>
-            „Czarne skrzynki” to dwa <b>rejestratory lotu</b>, a wcale nie są czarne – maluje się je na jaskrawy pomarańczowy kolor, żeby łatwo je znaleźć. Jeden zapisuje <b>dane lotu</b>: prędkość, wysokość, położenie sterów i tysiące innych parametrów. Drugi nagrywa <b>dźwięk w kokpicie</b>. Są w tylnej części kadłuba, która przy wypadku zwykle najmniej ucierpi.
+            „Czarne skrzynki” to dwa <b>rejestratory lotu</b>. Wcale nie są czarne – maluje się je na jaskrawy pomarańczowy kolor, żeby łatwo je znaleźć. <b>Rejestrator danych</b> zapisuje, co robi samolot: prędkość, wysokość, położenie sterów, pracę silników i tysiące innych wartości. <b>Rejestrator rozmów</b> nagrywa dźwięk w kokpicie.
           </p>
-          <p>Ten moduł jest w przygotowaniu.</p>
+          <p>
+            W A350 oba stoją w tylnej części kadłuba, nad sufitem kabiny, tuż przed tylną grodzią. Ta część samolotu przy wypadku zwykle najmniej ucierpi. Dane płyną do nich przewodami z przedziału awioniki pod kokpitem, a dźwięk – z mikrofonów w kokpicie. Rejestratory, przewody i inne części w środku są pokazane prześwietlone przez poszycie.
+          </p>
+          <p>Kliknij podpisy części. Numery na modelu prowadzą do zakładek: co zapisuje rejestrator danych, co nagrywa rejestrator rozmów, co jest w środku, jakie próby przechodzi i jak się go odnajduje po wypadku.</p>
+        </>
+      ),
+    }),
+    plane({
+      title: 'Rejestrator danych lotu',
+      spot: REC_SPOTS[1],
+      camera: [-30, 12, 44],
+      target: [-4, -1, 5],
+      preset: { rec: 'data' },
+      controls: [RUN_BTN],
+      body: (
+        <>
+          <p>Skąd rejestrator wie, co robi samolot? Naciśnij „Rozpocznij”. Zobaczysz, jak wyniki pomiarów z czujników na nosie, silnikach, skrzydłach i ogonie płyną do jednostki zbierającej dane pod kokpitem, a stamtąd jednym przewodem do ogona. Ekran w rogu pokazuje kilka zapisywanych wartości.</p>
+        </>
+      ),
+    }),
+    plane({
+      title: 'Rejestrator rozmów',
+      spot: REC_SPOTS[2],
+      camera: [-21.5, 4.6, 12.5],
+      target: [-31.4, 0.2, 0],
+      preset: { rec: 'voice' },
+      controls: [RUN_BTN],
+      body: (
+        <>
+          <p>Drugi rejestrator nagrywa dźwięk w kokpicie. Naciśnij „Rozpocznij”: zobaczysz, skąd biorą się cztery ścieżki nagrania, ile godzin się mieści i kiedy można je skasować. Ekran w rogu pokazuje ścieżki tak, jak nagrywa je rejestrator.</p>
+        </>
+      ),
+    }),
+    plane({
+      title: 'Co jest w środku',
+      spot: REC_SPOTS[3],
+      camera: [22.65 + 3.4, -6.13 + 0.86 + 1.5, 5.4 + 5.0],
+      target: [22.05, -6.13 + 0.86 + 1.3, 3.2],
+      cameraInside: true,
+      preset: { rec: 'build' },
+      controls: [RUN_BTN],
+      body: (
+        <>
+          <p>Mechanik wyjmuje rejestrator danych z samolotu i kładzie go na stole obok ogona. Naciśnij „Rozpocznij”: zdejmiemy pokrywę, rozłożymy moduł pamięci warstwa po warstwie i pokażemy nadajnik, który pomaga znaleźć rejestrator pod wodą.</p>
+        </>
+      ),
+    }),
+    plane({
+      title: 'Próby wytrzymałości',
+      spot: REC_SPOTS[4],
+      camera: [22.85 - 0.42, -6.13 + 0.86 + 0.53, 5.4 + 1.28],
+      target: [22.8, -6.13 + 0.96, 5.4],
+      cameraInside: true,
+      preset: { rec: 'tests' },
+      controls: [RUN_BTN],
+      body: (
+        <>
+          <p>Zanim nowy typ rejestratora trafi do samolotów, jego moduł pamięci musi przejść ciężkie próby: uderzenie, przebicie, zgniatanie, pożar i ciśnienie głębin oceanu. Naciśnij „Rozpocznij” i zobacz je po kolei. Po każdej z nich zapis musi dać się odczytać.</p>
+        </>
+      ),
+    }),
+    plane({
+      title: 'Odnajdywanie po wypadku',
+      spot: REC_SPOTS[5],
+      camera: [4, 16, 42],
+      target: [8, 0, 0],
+      preset: { rec: 'search' },
+      controls: [RUN_BTN],
+      body: (
+        <>
+          <p>Rejestrator na nic się nie przyda, jeśli nikt go nie znajdzie. Naciśnij „Rozpocznij”: zobaczysz, jak samolot sam informuje o swoim położeniu, jak nadajniki pomagają odnaleźć szczątki na lądzie i pod wodą i co dzieje się z rejestratorem w laboratorium.</p>
         </>
       ),
     }),
