@@ -1,0 +1,52 @@
+name: Wdrożenie OpenLearn
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openlearn-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Klucz SSH
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Wdrożenie na redzikowski.com/openlearn
+        run: |
+          # Klucz jest na serwerze ograniczony do bramki /opt/apps/bin/ci-gate openlearn: "deploy" przyjmuje
+          # archiwum (dist/ + deploy/) i uruchamia stały skrypt /opt/apps/bin/ci.d/openlearn.sh.
+          tar czf - dist deploy | ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" deploy "$GITHUB_SHA"
+
+      - name: Sprawdzenie
+        run: |
+          sleep 3
+          curl -fsS https://redzikowski.com/openlearn/ | grep -q '<div id="root"'
