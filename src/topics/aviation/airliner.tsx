@@ -1031,6 +1031,8 @@ const CK_MASK_A = Math.max(...CK_MASK.map((q) => q[1]));
 const DOORS = PAX_DOOR.xs;
 /** Podłoga kabiny: próg drzwi 1 (AC A350-900, rys. 2-3-0: D1 ≈ 5,05 m nad ziemią). */
 export const FLOOR = -1.08;
+/** Odpoczynek załogi nad tylną częścią kabiny (x od–do). */
+const CREW_REST_AFT: [number, number] = [14.0, 18.7];
 /**
  * Kokpit w nosie kadłuba (układ samolotu): podłoga stanowiska pilotów równo z podłogą kabiny (pod nią – przedział
  * awioniki) i tylna ściana z drzwiami. Wnętrze rysuje model kokpitu (cockpitLab), wbudowany w samolot.
@@ -1870,7 +1872,7 @@ export const FUS_PART_INFO: Record<string, { name: string; group: string; pos: V
   fwdHold: { name: 'ładownia przednia', group: 'cargo', pos: [-17.0, -2.3, 0.3], desc: 'Kontenery z bagażem wjeżdżają przez drzwi w prawym boku i jadą po rolkach w podłodze. Ładownia jest szczelna i ogrzewana, więc można w niej przewozić np. zwierzęta. Ma czujniki dymu i instalację gaśniczą.' },
   water: { name: 'woda pitna', group: 'cargo', pos: [-25.3, -1.55, 0.3], sub: true, desc: 'Zbiorniki wody do kuchni i umywalek. Przed lotem napełnia się je z cysterny przez zawór w spodzie kadłuba, a do kranów wodę wypycha sprężone powietrze.' },
   centre: { name: 'centropłat (zbiornik centralny)', group: 'struct', pos: [-4.6, -0.55, 0.3], desc: 'Środkowa część skrzydła – mocna skrzynia, która przechodzi przez kadłub pod podłogą kabiny i łączy oba skrzydła. Przenosi na kadłub siłę, z jaką skrzydła niosą samolot, a w środku mieści centralny zbiornik paliwa. Więcej – w module skrzydła i w zakładce o tankowaniu w module silnika.' },
-  bay: { name: 'wnęka podwozia i belka kilowa', group: 'struct', pos: [2.4, -3.6, 0.3], desc: 'Za środkową częścią skrzydła chowają się koła podwozia głównego. Wnęka to wielki otwór w spodzie kadłuba, więc obciążenia przejmuje mocna belka biegnąca pod nią (belka kilowa), a nad kołami jest szczelna płyta. Więcej – w module podwozia.' },
+  bay: { name: 'wnęka podwozia i belka kilowa', group: 'struct', pos: [2.4, -3.6, 0.3], desc: 'Za tylnym dźwigarem centropłatu chowają się oba podwozia główne. Goleń obraca się w bok, do środka kadłuba, więc wózek leży płasko, a koła każdej osi – jedno nad drugim. Lewy i prawy wózek leżą obok siebie, a między nimi, dołem w osi kadłuba, biegnie belka kilowa: wnęka to wielki otwór w spodzie, więc obciążenia kadłuba przejmuje ta belka (na niej są też zawiasy i siłowniki drzwi). Nad kołami jest szczelna płyta oddzielająca kabinę. Wnęka nie ma ciśnienia ani ogrzewania – biegną tędy przewody hydrauliczne dwóch niezależnych układów (zielonego i żółtego), wiązki kabli i przewody hamulców, a na tylnej ścianie są zamki trzymające schowane wózki. Więcej – w module podwozia.' },
   aftHold: { name: 'ładownia tylna', group: 'cargo', pos: [7.0, -2.3, 0.3], desc: 'Druga ładownia na kontenery, za wnęką podwozia, z własnymi drzwiami w prawym boku. Od tego, jak rozłoży się ładunek między ładowniami, zależy położenie środka ciężkości samolotu.' },
   bulkHold: { name: 'bagaż luzem · zbiorniki ścieków', group: 'cargo', pos: [11.6 + PA, -1.15 + FUS_DY, 0.3], sub: true, desc: 'Za tylną ładownią jest miejsce na bagaż bez kontenerów: spóźnione walizki, wózki dziecięce, sprzęt sportowy. Obok stoją zbiorniki ścieków z toalet, opróżniane na ziemi przez zawór w spodzie kadłuba.' },
   rearBulk: { name: 'gródź ciśnieniowa', group: 'struct', pos: [20.8 + PA, 0.55 + FUS_DY, 0.3], desc: 'Kopuła, która z tyłu zamyka szczelną część kadłuba. Jest wypukła jak dno puszki z napojem – taki kształt najlepiej znosi ciśnienie. Za nią, w zwężającym się ogonie, nie ma już ciśnienia kabiny.' },
@@ -2075,18 +2077,18 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
     // a w środku znaki „zapiąć pasy” i „zakaz palenia” oraz klapka masek tlenowych
     for (const sg of [1, -1]) {
       const pz = 1.95 * sg * k;
-      B('#e5e7eb', [x, 0.97 + FUS_DY, pz], [0.6, 0.05, 1.2]);
-      B('#d6d1c4', [x + 0.12, 0.945 + FUS_DY, pz], [0.3, 0.01, 1.05]); // klapka masek
+      B('#e5e7eb', [x, 1.24 + FUS_DY, pz], [0.6, 0.05, 1.2]);
+      B('#d6d1c4', [x + 0.12, 1.215 + FUS_DY, pz], [0.3, 0.01, 1.05]); // klapka masek
       for (const dz of [-0.47, 0, 0.47]) {
-        add('cylV', '#fff7e0', box([x - 0.16, 0.94 + FUS_DY, pz + dz * k - 0.08], [0.07, 0.02, 0.07]), '#fff2cc'); // lampka
-        add('cylV', '#9ca3af', box([x - 0.16, 0.94 + FUS_DY, pz + dz * k + 0.08], [0.06, 0.03, 0.06])); // nawiew
-        B('#60a5fa', [x - 0.22, 0.943 + FUS_DY, pz + dz * k], [0.03, 0.01, 0.03], undefined, '#3b82f6'); // wezwanie personelu
+        add('cylV', '#fff7e0', box([x - 0.16, 1.21 + FUS_DY, pz + dz * k - 0.08], [0.07, 0.02, 0.07]), '#fff2cc'); // lampka
+        add('cylV', '#9ca3af', box([x - 0.16, 1.21 + FUS_DY, pz + dz * k + 0.08], [0.06, 0.03, 0.06])); // nawiew
+        B('#60a5fa', [x - 0.22, 1.213 + FUS_DY, pz + dz * k], [0.03, 0.01, 0.03], undefined, '#3b82f6'); // wezwanie personelu
       }
-      B('#fde68a', [x + 0.2, 0.943 + FUS_DY, pz - 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zapiąć pasy”
-      B('#fde68a', [x + 0.2, 0.943 + FUS_DY, pz + 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zakaz palenia”
+      B('#fde68a', [x + 0.2, 1.213 + FUS_DY, pz - 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zapiąć pasy”
+      B('#fde68a', [x + 0.2, 1.213 + FUS_DY, pz + 0.15], [0.08, 0.008, 0.12], undefined, '#f59e0b'); // „zakaz palenia”
     }
     // schowki nad głowami: uchwyt klapy i zatrzask (boczne – od strony przejścia, środkowe – z obu stron)
-    for (const sg of [1, -1]) B('#475569', [x, 1.02 + FUS_DY, 1.93 * sg * k], [0.28, 0.035, 0.04]);
+    for (const sg of [1, -1]) B('#475569', [x, 1.29 + FUS_DY, 1.88 * sg * k], [0.28, 0.035, 0.04]);
     for (const sg of [1, -1]) B('#475569', [x, 1.54 + FUS_DY, 0.56 * sg], [0.28, 0.035, 0.04]);
   }
   // listwa pod oknami (półka przy burcie, na wysokości podłokietników) wzdłuż całej kabiny
@@ -2239,7 +2241,7 @@ function interiorDetail(half: (y: number, x?: number) => number, cutaway = true)
   // pilotów: nad wejściem do kabiny za kokpitem; wchodzi się stromymi schodami z przestrzeni przy drzwiach 1
   crewRest(-30.2, -27.4, 1.72 + FUS_DY, 2.52 + FUS_DY, [-28.8]);
   // personelu pokładowego: nad tylną częścią kabiny, cztery koje
-  crewRest(14.0, 18.7, 1.6 + FUS_DY, 2.38 + FUS_DY, [15.2, 17.4]);
+  crewRest(CREW_REST_AFT[0], CREW_REST_AFT[1], 1.6 + FUS_DY, 2.38 + FUS_DY, [15.2, 17.4]);
   {
     const xb = -31.9;
     const xt = -30.3;
@@ -2557,7 +2559,9 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
       if (zs < 1.0) continue;
       for (const sg of [1, -1]) struts.push(box([x, -1.85, zs * sg], [0.05, 0.9, 0.05]));
     }
-    const keel = [box([1.8, -2.84, 0], [6.4, 0.3, 0.36])];
+    // belka kilowa: dołem, w osi kadłuba, między wnękami lewej i prawej goleni (na niej zawiasy drzwi wnęk)
+    const keelY = fusBottom(1.3, 0) + 0.16;
+    const keel = [box([1.4, keelY, 0], [6.2, 0.3, 0.3]), box([1.4, keelY + 0.32, 0], [6.2, 0.34, 0.06])];
     // grodzie: przednia (za owiewką radaru), tylna kopuła i gródź ogniowa APU w stożku ogonowym
     const bulk = new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2.6);
     bulk.rotateZ(-Math.PI / 2);
@@ -2621,10 +2625,36 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
     const bins: THREE.Matrix4[] = [];
     for (let x = -24.4 - PF; x <= 17 + PA; x += 1.72) {
       // schowki boczne przy burcie – w zwężającym się ogonie bliżej osi
-      const zb = Math.min(2.2, Math.min(hw(1.45 + FUS_DY, x - 0.82), hw(1.45 + FUS_DY, x + 0.82)) - 0.36);
-      bins.push(box([x, 1.2 + FUS_DY, zb], [1.64, 0.42, 0.62], [0.35, 0, 0]));
-      bins.push(box([x, 1.2 + FUS_DY, -zb], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
-      if (x > -16) bins.push(box([x, 1.72 + FUS_DY, 0], [1.64, 0.4, 1.1]));
+      // dolna krawędź schowka bocznego ok. 1,65 m nad podłogą (wyżej niż głowa siedzącego i stojącego w przejściu)
+      const zb = Math.min(2.2, Math.min(hw(1.72 + FUS_DY, x - 0.82), hw(1.72 + FUS_DY, x + 0.82)) - 0.36);
+      bins.push(box([x, 1.47 + FUS_DY, zb], [1.64, 0.42, 0.62], [0.35, 0, 0]));
+      bins.push(box([x, 1.47 + FUS_DY, -zb], [1.64, 0.42, 0.62], [-0.35, 0, 0]));
+      // schowki środkowe nad rzędem foteli pośrodku – na całej długości kabiny (też w klasie biznes)
+      // (pod odpoczynkiem załogi nad tylną częścią kabiny ich nie ma – tam nad głową jest podłoga odpoczynku)
+      if (!(x > CREW_REST_AFT[0] - 0.85 && x < CREW_REST_AFT[1] + 0.85)) bins.push(box([x, 1.72 + FUS_DY, 0], [1.64, 0.4, 1.1]));
+    }
+    // sufit kabiny: panel nad schowkami środkowymi, sufit nad przejściami i skośne panele schodzące do schowków
+    // bocznych (pod nimi kanały klimatyzacji i wiązki kabli – widać je tylko w przekroju)
+    const ceil: THREE.Matrix4[] = [];
+    const ceilLight: THREE.Matrix4[] = [];
+    const CY = FLOOR + 2.4;
+    for (let x = -25.2 - PF; x <= 17.8 + PA; x += 0.86) {
+      const k = Math.min(1, half(FLOOR + 0.6, x) / 2.75);
+      if (k < 0.8 || hw(CY + 0.05, x) < 1.9 || (x > CREW_REST_AFT[0] - 0.45 && x < CREW_REST_AFT[1] + 0.45)) continue;
+      ceil.push(box([x, 1.94 + FUS_DY, 0], [0.86, 0.03, 1.2]));
+      for (const sg of [1, -1]) {
+        ceil.push(box([x, CY, 1.17 * sg * k], [0.86, 0.03, 1.15 * k]));
+        // skos: od krawędzi sufitu nad przejściem do górnej krawędzi schowka bocznego
+        const z0 = 1.74 * k;
+        const y0 = CY - 0.02;
+        const z1 = Math.min(2.38 * k, hw(1.75 + FUS_DY, x) - 0.1);
+        const y1 = 1.73 + FUS_DY;
+        const len = Math.hypot(z1 - z0, y1 - y0);
+        const a = Math.atan2(y1 - y0, z1 - z0);
+        ceil.push(box([x, (y0 + y1) / 2, ((z0 + z1) / 2) * sg], [0.86, 0.03, len], [-sg * a, 0, 0]));
+        // pas światła wzdłuż krawędzi sufitu nad przejściem
+        ceilLight.push(box([x, CY - 0.025, 1.72 * sg * k], [0.86, 0.015, 0.05]));
+      }
     }
     // kuchnie, toalety, zbiorniki wody i ścieków, oświetlenie, awionika i drobiazgi kokpitu – interiorDetail
     const detail = interiorDetail(half);
@@ -2738,7 +2768,7 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
         ...Object.fromEntries(detail.map((g, i) => [`detail ${g.k}${g.e ? ' (świeci)' : ''} #${i}`, { geo: g.g === 'capsule' ? capsule : g.g === 'cylX' ? cylX : g.g === 'cylV' ? cylV : g.g === 'cone' ? cone : g.g === 'ringH' ? ringH : g.g === 'sphere' ? sphere : unit, mats: g.m }])),
       });
     }
-    return { unit, liner, linerDoors, ring, ringThick, frames, cutFrames, cargoSurround, doorFrames, doorSills, stringers, beams, floor, struts, keel, bulk, bulkM, disc, fwdPlate, fireWall, centre, spars, bay, seatJ, seatY, heads, legs, bins, detail, winSurround, winReveal, winPane, winShade, winHandle, grilles, winSurroundGeo, winRevealGeo, winPaneGeo, winShadeGeo, winHandleGeo, grilleGeo, capsule, cylX, cylV, cone, ringH, sphere, ld3, cargoFloor, rollers, bulkBags, jack };
+    return { unit, liner, linerDoors, ring, ringThick, frames, cutFrames, cargoSurround, doorFrames, doorSills, stringers, beams, floor, struts, keel, bulk, bulkM, disc, fwdPlate, fireWall, centre, spars, bay, seatJ, seatY, heads, legs, bins, ceil, ceilLight, detail, winSurround, winReveal, winPane, winShade, winHandle, grilles, winSurroundGeo, winRevealGeo, winPaneGeo, winShadeGeo, winHandleGeo, grilleGeo, capsule, cylX, cylV, cone, ringH, sphere, ld3, cargoFloor, rollers, bulkBags, jack };
   }), []);
   // kontenery: w zakładce ładowni wjeżdżają po kolei przez drzwi ładowni (prawa burta) i jadą po rolkach na miejsce
   const cans = useRef<THREE.InstancedMesh>(null);
@@ -2799,6 +2829,7 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
       <Inst geo={d.unit} mats={d.centre} k="primer" />
       <Inst geo={d.unit} mats={d.spars} k={S ? '#bef264' : '#7f9a63'} />
       <Inst geo={d.unit} mats={d.bay} k="#565d66" />
+      <GearBayFit />
       <Inst geo={d.unit} mats={d.cargoFloor} k="#6b7280" />
       <Inst geo={d.unit} mats={d.rollers} k="#9ca3af" />
       <Inst geo={d.unit} mats={d.jack} k="#8b939c" />
@@ -2816,6 +2847,8 @@ function Interior({ view = 'home', labels = true, pick, doorHoles = false }: { v
           <Inst geo={d.unit} mats={d.heads} k="#e5e7eb" />
           <Inst geo={d.unit} mats={d.legs} k="#9ca3af" />
           <Inst geo={d.unit} mats={d.bins} k="bin" />
+          <Inst geo={d.unit} mats={d.ceil} k="#eceae4" side={THREE.DoubleSide} />
+          <Inst geo={d.unit} mats={d.ceilLight} k="#fff4d6" emit="#ffe8b0" />
           <Inst geo={d.unit} mats={d.bulkBags} k="#3f4a5a" />
           <Inst geo={d.grilleGeo} mats={d.grilles} k="#5b6470" />
           {d.detail.map((gr, i) => (
@@ -3996,6 +4029,85 @@ function Pin({ p, r, len, k = 'steel' }: { p: V3; r: number; len: number; k?: st
 }
 
 /**
+ * Wyposażenie wnęki podwozia głównego (widoczne w przekroju kadłuba). Wnęka jest nieszczelna: od kabiny oddziela ją
+ * płyta stropu, z przodu – tylny dźwigar centropłatu, z tyłu – własna ściana. Biegną tędy przewody hydrauliczne
+ * dwóch niezależnych układów (zielonego i żółtego), wiązki kabli w osłonach i przewody hamulców; na tylnej ścianie są
+ * zamki trzymające schowane wózki, a na belce kilowej – siłowniki drzwi wnęk.
+ */
+function GearBayFit() {
+  const x0 = -1.38;
+  const x1 = BAY_MAIN.x1 + 0.08;
+  const roof = -1.42;
+  const hy = fairBottom(1.3, 0);
+  const wallZ = BAY_MAIN.z1 - 0.12;
+  const HYD = { green: '#3f9d4a', yellow: '#d9b22a' };
+  return (
+    <group>
+      {/* tylna ściana wnęki */}
+      <mesh position={[x1 + 0.03, (roof + hy) / 2 + 0.05, 0]}>
+        <boxGeometry args={[0.05, roof - hy - 0.1, 2 * wallZ + 0.1]} />
+        <M k="primer" />
+      </mesh>
+      {/* usztywnienia tylnej ściany */}
+      {[-1.6, -0.8, 0.8, 1.6].map((z) => (
+        <mesh key={z} position={[x1, (roof + hy) / 2 + 0.05, z]}>
+          <boxGeometry args={[0.1, roof - hy - 0.15, 0.05]} />
+          <M k="primer" />
+        </mesh>
+      ))}
+      {[1, -1].map((sg) => (
+        <group key={sg} scale={[1, 1, sg]}>
+          {/* przewody hydrauliczne: pod stropem przy burcie, w dół po tylnej ścianie i w poprzek po dźwigarze */}
+          {(['green', 'yellow'] as const).map((sys, i) => {
+            const y = roof - 0.06 - i * 0.08;
+            const z = wallZ - 0.05 - i * 0.08;
+            return (
+              <group key={sys}>
+                <Pipe pts={[[x0, y, 0.35], [x0, y, z], [x1 - 0.06, y, z], [x1 - 0.06, -2.4 - i * 0.1, z], [x1 - 0.06, -2.4 - i * 0.1, 1.9]]} r={0.022} k={HYD[sys]} />
+                <Pipe pts={[[x0 + 0.1, y - 0.25, z], [x1 - 0.2, y - 0.25, z]]} r={0.016} k={HYD[sys]} />
+              </group>
+            );
+          })}
+          {/* rozdzielacz hydrauliczny na dźwigarze */}
+          <mesh position={[x0 + 0.08, -1.95, wallZ - 0.35]}>
+            <boxGeometry args={[0.16, 0.34, 0.42]} />
+            <M k="#8b939c" />
+          </mesh>
+          {/* wiązki kabli w osłonach, przypięte obejmami do burty */}
+          {[-1.85, -2.25].map((y) => (
+            <group key={y}>
+              <Pipe pts={[[x0, y, wallZ + 0.02], [x1 - 0.1, y, wallZ + 0.02], [x1 - 0.1, y - 0.5, wallZ + 0.02]]} r={0.038} k="#2b2f35" />
+              {Array.from({ length: 8 }, (_, i) => (
+                <mesh key={i} position={[x0 + 0.3 + i * 0.6, y, wallZ + 0.02]}>
+                  <boxGeometry args={[0.04, 0.1, 0.1]} />
+                  <M k="steel" />
+                </mesh>
+              ))}
+            </group>
+          ))}
+          {/* zamek wózka na tylnej ścianie: hak łapie ucho na końcu belki wózka */}
+          <mesh position={[x1 - 0.12, -2.32, 1.13]}>
+            <boxGeometry args={[0.22, 0.3, 0.26]} />
+            <M k={GEAR_GREY} />
+          </mesh>
+          <mesh position={[x1 - 0.26, -2.38, 1.13]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.07, 0.025, 6, 12, Math.PI]} />
+            <M k="steel" />
+          </mesh>
+          {/* siłowniki drzwi wnęki na belce kilowej */}
+          {[0.1, 2.5].map((x) => (
+            <group key={x}>
+              <Strut a={[x, fusBottom(1.3, 0) + 0.2, 0.18]} b={[x + 0.15, hy + 0.2, 0.9]} r={0.045} k={GEAR_GREY} />
+              <Strut a={[x + 0.15, hy + 0.2, 0.9]} b={[x + 0.2, hy + 0.08, 1.25]} r={0.025} k="chrome" />
+            </group>
+          ))}
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/**
  * Stan podwozia zmieniany co klatkę przez scenę (bez przerysowywania Reacta):
  * retract – chowanie 0 (wypuszczone) … 1 (schowane), z otwieraniem i zamykaniem drzwi wnęk;
  * extend – wysunięcie tłoczyska amortyzatora głównego względem postoju (m; w powietrzu ok. GEAR_STROKE);
@@ -4042,7 +4154,7 @@ const GEAR_STOWED: GearDrive = { retract: 1, extend: 0.46, lift: 0, steer: 0, re
  * nad wnęką (zmierzone w przekroju kadłuba – przy 85° górny rząd kół wchodził ok. 10 cm nad podłogę kabiny, a przy
  * 75° goleń przy nasadzie skrzydła wystawała z owiewki).
  */
-const MAIN_SWING = (80 * Math.PI) / 180;
+const MAIN_SWING = (79 * Math.PI) / 180;
 const smooth01 = (v: number) => {
   const t = Math.max(0, Math.min(1, v));
   return t * t * (3 - 2 * t);
@@ -4187,7 +4299,9 @@ function Gear() {
     const door = Math.min(smooth01(r / 0.12), smooth01((1 - r) / 0.12));
     // tylne drzwi wnęki przedniej: otwarte przy wypuszczonej goleni (przechodzi przez nie), zamykają się na końcu chowania
     const aftDoor = 1 - smooth01((r - 0.86) / 0.12);
-    const stroke = d.extend;
+    // amortyzator wsuwa się w czasie obrotu goleni – schowany wózek leży wtedy płasko w swojej połowie wnęki, nad belką
+    // kilową, a nie na osi kadłuba (oba wózki obok siebie, każdy po swojej stronie belki)
+    const stroke = d.extend * (1 - smooth01(sw / 0.7));
     swing.current.forEach((g) => g && (g.rotation.x = sw * MAIN_SWING));
     {
       // punkt na goleni obraca się z nią wokół przegubu; kolano – przecięcie okręgów o promieniach ramion (bliższe poprzedniemu)
@@ -7154,7 +7268,7 @@ function DecompFx() {
   const fogMat = useRef<THREE.PointsMaterial>(null);
   const o = useMemo(() => new THREE.Object3D(), []);
   // punkt zawieszenia maski: panel nad rzędem z boku albo spód środkowego schowka; maska kończy się przed twarzą
-  const tops = useMemo(() => seats.map((s) => new THREE.Vector3(s.x - 0.12, s.centre ? 1.5 : 0.93, s.z)), [seats]);
+  const tops = useMemo(() => seats.map((s) => new THREE.Vector3(s.x - 0.12, s.centre ? 0.84 : 1.2, s.z)), [seats]);
   const lens = useMemo(() => tops.map((p) => p.y - 0.08), [tops]);
   const fogGeo = useMemo(() => {
     const pts: number[] = [];
