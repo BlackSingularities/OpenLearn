@@ -2,13 +2,15 @@ import { useEffect, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { catalog, type CatalogModel } from '../lib/catalog';
+import { allSteps } from '../lib/types';
+import { topics } from '../topics';
 import { BrandMark } from './Cover';
 import { Icon, ThemeToggle } from './ui';
 
 /** Okładka samolotu: szkic A350 z boku. */
 function AirlinerSketch() {
   return (
-    <svg className="cover-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
+    <svg className="row-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
       <g className="cover-motif">
         <path d="M40 98 C 44 84, 60 80, 78 80 H246 C 262 80, 272 70, 280 52 H292 L286 84 C 284 96, 270 104, 250 104 H70 C 56 104, 42 104, 40 98 Z" className="cv-ink" />
         <path d="M54 86 C 58 83, 64 82, 70 82 L66 88 Z" className="cv-solid" />
@@ -27,7 +29,7 @@ function AirlinerSketch() {
 /** Okładka wulkanu: stożek w przekroju z kominem i komorą magmową. */
 function VolcanoSketch() {
   return (
-    <svg className="cover-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
+    <svg className="row-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
       <g className="cover-motif">
         <path d="M30 150 L134 58 H186 L290 150" className="cv-ink" />
         <path d="M156 58 V128" className="cv-ink" stroke="var(--accent)" />
@@ -42,23 +44,37 @@ function VolcanoSketch() {
   );
 }
 
-function ModelCard({ m, i }: { m: CatalogModel; i: number }) {
+function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
+  const topic = topics.find((t) => t.id === m.topic);
+  const modules = topic?.modules ?? [];
+  const steps = topic ? allSteps(topic).length : 0;
   return (
     <motion.li
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.2, 0.7, 0.2, 1], delay: i * 0.05 }}
+      transition={{ duration: 0.45, ease: [0.2, 0.7, 0.2, 1], delay: 0.08 + i * 0.08 }}
     >
-      <Link to={`/temat/${m.topic}/1`} className="card is-ready" style={{ '--accent': m.color } as CSSProperties}>
-        <div className="card-cover">
-          {m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}
-          <h3>{m.title}</h3>
-        </div>
-        <div className="card-body">
+      <Link to={`/temat/${m.topic}/1`} className="model-row" style={{ '--accent': m.color } as CSSProperties}>
+        <div className="row-cover">{m.cover === 'samolot' ? <AirlinerSketch /> : <VolcanoSketch />}</div>
+        <div className="row-body">
+          <span className="row-index">{String(i + 1).padStart(2, '0')}</span>
+          <h2>{m.title}</h2>
           <p>{m.summary}</p>
-          <span className="card-cta">
-            otwórz model <Icon name="arrow-up-right" size={14} />
-          </span>
+          {modules.length > 0 && (
+            <ul className="row-modules" aria-label="Rozdziały">
+              {modules.map((pm) => (
+                <li key={pm.id}>{pm.title}</li>
+              ))}
+            </ul>
+          )}
+          <div className="row-foot">
+            <span className="row-meta">
+              {modules.length} rozdziałów · {steps} kroków
+            </span>
+            <span className="row-cta">
+              Otwórz model <Icon name="arrow-up-right" size={16} />
+            </span>
+          </div>
         </div>
       </Link>
     </motion.li>
@@ -71,7 +87,7 @@ export function Home() {
   }, []);
 
   return (
-    <div className="site">
+    <div className="site home">
       <header className="topnav">
         <Link to="/" className="brand">
           <BrandMark />
@@ -83,16 +99,16 @@ export function Home() {
       </header>
 
       <main>
-        <section className="hero">
+        <section className="home-hero">
           <h1>
             Zobacz, <em>jak to</em> działa.
           </h1>
           <p>Prawdziwe rzeczy w 3D, rozbierane na części krok po kroku – od środka, z podpisami i krótkim wyjaśnieniem obok.</p>
         </section>
 
-        <ul className="grid">
+        <ul className="model-list">
           {catalog.map((m, i) => (
-            <ModelCard key={m.id} m={m} i={i} />
+            <ModelRow key={m.id} m={m} i={i} />
           ))}
         </ul>
       </main>
