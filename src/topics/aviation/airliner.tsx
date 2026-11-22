@@ -950,23 +950,20 @@ const inFairSlot = (x: number, a: number) => {
 };
 /** Wyrwa w poszyciu w trybie „kadłub”: górna część lewej burty od drzwi 2 do drzwi 3, poszarpane brzegi. */
 const FUS_CUT = (x: number, th: number) => th > -0.35 + jag(x / 40 + 0.5, 5, 0.18) && th < 1.32 - jag(x / 40 + 0.5, 9, 0.16) && x > -22.5 + jag(th / 2, 13, 1.2) && x < 15 - jag(th / 2, 19, 1.2);
-/** Czarna „maska” okien kokpitu (charakterystyczna dla tego typu samolotu). */
-/**
- * Szyby kokpitu (lewa burta): obrysy [odległość od czubka nosa, odsunięcie od osi w bok] w metrach – szyba przednia,
- * boczna (otwierana) i mała tylna. Obrysy zmierzone na modelu A350XWB-900 z repozytorium github.com/Sbyx13/A350XWB
- * (licencja MIT; autorzy: Sbyx, Christopher Andrews) – szczegóły w CREDITS.md.
- */
-const CK_PANES_REF: [number, number][][] = [[[1.942,0.091],[2.05,0.085],[2.157,0.079],[2.264,0.086],[2.353,0.154],[2.402,0.302],[2.47,0.446],[2.537,0.589],[2.633,0.715],[2.696,0.833],[2.599,0.893],[2.514,0.947],[2.446,0.992],[2.352,0.977],[2.236,0.884],[2.134,0.762],[2.048,0.628],[1.965,0.492],[1.906,0.344],[1.884,0.188]],[[3.027,1.067],[3.124,1.162],[3.141,1.25],[3.135,1.323],[3.13,1.394],[3.125,1.466],[3.13,1.524],[3.136,1.58],[3.034,1.544],[2.916,1.479],[2.802,1.407],[2.694,1.331],[2.591,1.245],[2.525,1.158],[2.549,1.104],[2.604,1.051],[2.668,0.998],[2.732,0.945],[2.816,0.918],[2.919,0.985]],[[3.224,1.504],[3.227,1.549],[3.23,1.594],[3.251,1.644],[3.342,1.69],[3.449,1.725],[3.549,1.742],[3.642,1.75],[3.689,1.727],[3.695,1.684],[3.669,1.632],[3.637,1.57],[3.594,1.5],[3.528,1.431],[3.446,1.365],[3.355,1.303],[3.266,1.27],[3.236,1.323],[3.232,1.383],[3.227,1.443]]];
 const CK_TIP = -33.4 - PF;
 /**
- * Szyby kokpitu (sześć: po dwie przednie, boczne i małe tylne) wyznaczone z dokumentacji Airbusa (AC A350-900,
- * rys. 2-2-0 i 4-4-0): pas szyb ok. 0,75 m wysoki na wysokości oczu pilota (od ok. 0,32 m pod oczami do 0,4 m nad
- * nimi – stąd widoczność ok. 20° w dół i 27° w górę), szyby przednie od słupka środkowego do 0,9 m w bok od osi,
- * cały pas od ok. 1,6 do 3,4 m za czubkiem nosa; słupki między szybami ok. 10 cm. Obrysy [odległość od czubka nosa,
- * odsunięcie od osi w bok] liczone na poszyciu nosa (skrypt dopasowania) – obrysy z modelu referencyjnego zostały
- * w CK_PANES_REF.
+ * Czarna „maska” szyb kokpitu (lewa połowa, z osią): obrys [odległość od czubka nosa, odsunięcie od osi w bok]
+ * w metrach. Zmierzony na modelach A350-900 z 3D Warehouse dostarczonych przez właściciela projektu – szczegóły
+ * w CREDITS.md. Kształt półksiężyca: z przodu od 1,53 m za czubkiem (na osi) do 3,7 m przy burcie, z tyłu od 2,38 m;
+ * pas ok. 0,9 m wysoki, z garbem dolnego brzegu przy słupkach między szybą przednią a boczną.
  */
-const CK_PANES: [number, number][][] = [[[1.592,0.07],[1.597,0.12],[1.608,0.2],[1.629,0.3],[1.657,0.4],[1.694,0.5],[1.741,0.6],[1.797,0.7],[1.865,0.8],[1.944,0.9],[2.674,0.9],[2.616,0.8],[2.569,0.7],[2.534,0.6],[2.507,0.5],[2.49,0.4],[2.482,0.3],[2.481,0.2],[2.485,0.12],[2.49,0.07]],[[2.064,1.012],[2.318,1.238],[2.572,1.412],[2.826,1.555],[3.08,1.679],[3.09,1.663],[3.1,1.645],[3.11,1.625],[3.12,1.605],[3.12,1.563],[3.12,1.516],[3.12,1.465],[3.12,1.407],[3.11,1.386],[3.1,1.365],[3.09,1.342],[3.08,1.319],[3.008,1.258],[2.937,1.192],[2.865,1.119],[2.794,1.038],[2.611,1.046],[2.429,1.044],[2.246,1.032]],[[3.2,1.709],[3.225,1.718],[3.25,1.727],[3.275,1.735],[3.3,1.744],[3.317,1.74],[3.335,1.735],[3.353,1.729],[3.37,1.724],[3.373,1.706],[3.375,1.688],[3.377,1.668],[3.38,1.648],[3.37,1.629],[3.36,1.609],[3.35,1.588],[3.34,1.567],[3.315,1.546],[3.29,1.526],[3.265,1.504],[3.24,1.482],[3.23,1.494],[3.22,1.506],[3.21,1.518],[3.2,1.529],[3.2,1.582],[3.2,1.629],[3.2,1.671]]];
+const CK_MASK_REF: [number, number][] = [[1.529,0],[1.551,0.118],[1.611,0.344],[1.709,0.498],[1.875,0.715],[2.172,0.987],[2.273,1.118],[2.696,1.493],[2.846,1.578],[3.002,1.649],[3.426,1.783],[3.54,1.809],[3.655,1.821],[3.712,1.809],[3.739,1.782],[3.721,1.741],[3.692,1.61],[3.594,1.521],[3.373,1.354],[3.25,1.226],[3.01,1.041],[2.851,0.886],[2.518,0.43],[2.391,0.077],[2.378,0]];
+/**
+ * Szyby kokpitu (lewa burta; prawa – odbicie): przednia, boczna (otwierana) i mała tylna. Wyznaczone wewnątrz
+ * maski: ok. 7 cm od jej brzegu, słupki ok. 10 cm – środkowy, między szybą przednią a boczną (ok. 1,0–1,1 m od osi)
+ * i między boczną a tylną (ok. 1,5–1,6 m). Obrysy [odległość od czubka nosa, odsunięcie od osi w bok].
+ */
+const CK_PANES: [number, number][][] = [[[1.606,0.037],[1.679,0.342],[1.773,0.494],[1.937,0.711],[2.257,1.013],[2.963,1.063],[2.79,0.897],[2.454,0.443],[2.314,0.044]],[[2.296,1.065],[2.335,1.119],[2.562,1.318],[2.752,1.493],[2.871,1.563],[2.958,1.604],[3.536,1.528],[3.319,1.366],[3.195,1.239],[3.051,1.124]],[[3.19,1.691],[3.425,1.761],[3.524,1.783],[3.605,1.792],[3.648,1.783],[3.667,1.764],[3.625,1.608],[3.593,1.579],[3.055,1.645]]];
 /**
  * Punkt oczu kapitana (AC A350-900, rys. 4-4-0): 3,04 m za czubkiem nosa, 0,53 m w bok od osi; wysokość 0,71 m nad
  * osią kadłuba (6,27 m nad ziemią na rysunku, ok. 1,1 m nad podłogą kabiny i kokpitu). Pierwszy oficer – symetrycznie.
@@ -1025,45 +1022,11 @@ const inPoly = (q: P2, poly: P2[]) => {
 const CK_POLYS = CK_PANES.map((p) => ckPoly(p, 0));
 /** Czy punkt poszycia (x, θ) leży w otworze szyby kokpitu (obie burty). */
 const COCKPIT = (x: number, th: number) => CK_POLYS.some((poly) => inPoly([x, Math.abs(th) * CK_R], poly));
-/** Otoczka wypukła punktów (x, łuk) – łańcuch monotoniczny. */
-function hull2(pts: P2[]): P2[] {
-  const p = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cr = (o: P2, a: P2, b: P2) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lo: P2[] = [];
-  for (const q of p) {
-    while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop();
-    lo.push(q);
-  }
-  const up: P2[] = [];
-  for (const q of [...p].reverse()) {
-    while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop();
-    up.push(q);
-  }
-  return [...lo.slice(0, -1), ...up.slice(0, -1)];
-}
-/**
- * Czarna „maska” wokół szyb kokpitu – znak rozpoznawczy A350: jedna plama obejmująca szyby przednie (także nad
- * słupkiem środkowym) i boczne, ok. 12 cm poza ich krawędziami, zakończona ku tyłowi ostrzem na wysokości okien bocznych.
- * Obrys w płaszczyźnie (x, θ·R), jak obrysy szyb.
- */
-const CK_MASK: P2[] = (() => {
-  const pts: P2[] = [];
-  const r = 0.12;
-  CK_POLYS.forEach((poly) =>
-    poly.forEach(([x, a]) => {
-      for (let k = 0; k < 12; k++) {
-        const t = (k / 12) * Math.PI * 2;
-        pts.push([x + r * Math.cos(t), Math.max(0, a + r * Math.sin(t))]);
-      }
-    }),
-  );
-  const front = CK_POLYS[0];
-  pts.push([Math.min(...front.map((q) => q[0])) + 0.12, 0], [Math.max(...front.map((q) => q[0])), 0]);
-  const rear = CK_POLYS[2];
-  const amid = rear.reduce((sum, q) => sum + q[1], 0) / rear.length;
-  pts.push([Math.max(...rear.map((q) => q[0])) + 0.55, amid]);
-  return hull2(pts);
-})();
+/** Czarna „maska” wokół szyb kokpitu w płaszczyźnie (x, θ·R), jak obrysy szyb – z obrysu zmierzonego na modelu. */
+const CK_MASK: P2[] = CK_MASK_REF.map(([d, z]) => {
+  const x = CK_TIP + d;
+  return [x, z <= 0.002 ? 0 : fusThetaZ(x, z) * CK_R];
+});
 const CK_MASK_A = Math.max(...CK_MASK.map((q) => q[1]));
 const DOORS = PAX_DOOR.xs;
 /** Podłoga kabiny: próg drzwi 1 (AC A350-900, rys. 2-3-0: D1 ≈ 5,05 m nad ziemią). */
@@ -1600,24 +1563,48 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
       const s = fusSec(x);
       ant.push(box([x, s.yc - s.h - 0.11, 0], [0.38, 0.26, 0.035], [0, 0, 0.35]));
     }
-    // sondy Pitota i czujniki kąta natarcia pod kokpitem (po obu stronach)
-    const probes: { a: V3; b: V3; c: V3 }[] = [];
-    for (const side of [1, -1])
-      for (const [x, y] of [
-        [-30.55 - PF, -0.55],
-        [-30.15 - PF, -1.05],
-      ]) {
-        const th = fusTheta(x, y + FUS_DY) * side;
-        const p = fusPt(x, th);
-        const n = fusNormal(x, th);
-        const b: V3 = [p[0] + n.x * 0.16, p[1] + n.y * 0.16, p[2] + n.z * 0.16];
-        probes.push({ a: p, b, c: [b[0] - 0.2, b[1] + 0.01, b[2]] });
-      }
     /** Płaski element na poszyciu: położenie (x, θ), oś y wzdłuż normalnej kadłuba, rozmiar sz. */
     const flat = (x: number, th: number, sz: V3, lift = 0.004) => {
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), fusNormal(x, th));
       return new THREE.Matrix4().compose(new THREE.Vector3(...fusPt(x, th, -lift)), q, new THREE.Vector3(...sz));
     };
+    // czujniki na nosie (położenia zmierzone na modelach referencyjnych, d – odległość od czubka nosa, y – wysokość
+    // względem osi kadłuba): po każdej burcie dwie rurki Pitota ok. 1,95 m za czubkiem, pod nimi łopatka kąta natarcia
+    const probes: { a: V3; b: V3; c: V3 }[] = [];
+    const sensors: THREE.Matrix4[] = [];
+    const vanes: THREE.Matrix4[] = [];
+    const plates: THREE.Matrix4[] = [];
+    for (const side of [1, -1]) {
+      for (const y of [-0.59, -0.84]) {
+        const x = CK_TIP + 1.95;
+        const th = fusTheta(x, y + FUS_DY) * side;
+        const p = fusPt(x, th);
+        const n = fusNormal(x, th);
+        const b: V3 = [p[0] + n.x * 0.11, p[1] + n.y * 0.11, p[2] + n.z * 0.11];
+        probes.push({ a: p, b, c: [b[0] - 0.16, b[1] + 0.005, b[2]] });
+        sensors.push(flat(x, th, [0.09, 0.006, 0.09]));
+      }
+      // łopatka kąta natarcia: okrągła podstawa i płetwa skierowana do tyłu (lewa burta niżej, prawa wyżej)
+      const xv = CK_TIP + 1.9;
+      const thv = fusTheta(xv, (side > 0 ? -1.55 : -1.17) + FUS_DY) * side;
+      sensors.push(flat(xv, thv, [0.13, 0.006, 0.13]));
+      vanes.push(flat(xv + 0.03, thv, [0.12, 0.09, 0.012], 0.045));
+      // kwadratowe panele z małym czujnikiem obok dolnego brzegu szyb bocznych
+      const xs = CK_TIP + 2.37;
+      const ths = fusTheta(xs, -0.01 + FUS_DY) * side;
+      plates.push(flat(xs, ths, [0.32, 0.006, 0.28], 0.002));
+      vanes.push(flat(xs + 0.02, ths, [0.08, 0.06, 0.01], 0.03));
+    }
+    // trzy małe czujniki na grzbiecie nosa nad owiewką radaru
+    for (const z of [-0.2, 0, 0.2]) {
+      const x = CK_TIP + 1.1;
+      sensors.push(flat(x, fusThetaZ(x, Math.abs(z) + 0.001) * Math.sign(z || 1), [0.08, 0.025, 0.08], 0.012));
+    }
+    // wycieraczki: dwie, zaparkowane pionowo przy słupku środkowym (od dolnego brzegu szyb ku górze)
+    const wipers = [1, -1].map((side) => {
+      const at = (d: number, z: number, lift: number): V3 => fusPt(CK_TIP + d, fusThetaZ(CK_TIP + d, z) * side, -lift);
+      return { a: at(1.5, 0.15, 0.03), b: at(1.62, 0.13, 0.035), c: at(2.15, 0.1, 0.03) };
+    });
     // porty ciśnienia statycznego: po trzy płaskie otworki na każdej burcie za kokpitem (dla prędkościomierza i wysokościomierza)
     const statics: THREE.Matrix4[] = [];
     for (const side of [1, -1])
@@ -1643,7 +1630,7 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
     }
     // zawór wylotowy ciśnienia w kabinie: prostokątna klapka na spodzie tylnej części kadłuba (prawa strona)
     const outflow = [flat(15.2 + PA, -(Math.PI - 0.5), [0.55, 0.012, 0.4])];
-    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTrim, ckLining, ckMask, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
+    return { shell, full, cut, apuCut, radarCut, cargoCut, doorCut, cockpit, ckWall, ckFrame, ckTrim, ckLining, ckMask, fairing, bellySeams, bays, legBays, wins, doorWins, doors, joints, ant, probes, sensors, vanes, plates, wipers, statics, masts, ramAir, outflow, win: winShape(1, 0), winDepth: winShape(0.86, 0), frame: winShape(1.12, 1.0), lip: winShape(1.2, 1.12) };
   }), []);
   // moduł kadłuba: poszycie całe – samolot przecina płaszczyzna symetrii (przycinanie w shaderze), nie wyrwa w burcie
   const shell = useShared(g.shell, apu ? g.apuCut : radar ? g.radarCut : open && view === 'cargo' ? g.cargoCut : doorsOpen ? g.doorCut : g.full);
@@ -1720,6 +1707,16 @@ function Fuselage({ open, apu = false, radar = false, view = 'home', labels = tr
         <group key={i}>
           <Strut a={pr.a} b={pr.b} r={0.022} />
           <Strut a={pr.b} b={pr.c} r={0.018} />
+        </group>
+      ))}
+      {/* czujniki na nosie: podstawy, łopatki kąta natarcia; wycieraczki przy słupku środkowym */}
+      <Inst geo={cached('disc', () => new THREE.CylinderGeometry(0.5, 0.5, 1, 28))} mats={g.sensors} k="#aab2bb" />
+      <Inst geo={unit} mats={g.plates} k="#b4bcc5" />
+      <Inst geo={unit} mats={g.vanes} k="#3b4048" />
+      {g.wipers.map((w, i) => (
+        <group key={i}>
+          <Strut a={w.a} b={w.b} r={0.014} k="#1d2126" />
+          <Strut a={w.b} b={w.c} r={0.01} k="#1d2126" />
         </group>
       ))}
       {/* światła antykolizyjne (czerwone, migające) na grzbiecie i pod owiewką oraz białe strobo w stożku ogonowym */}
@@ -1876,7 +1873,7 @@ export const FUS_PART_INFO: Record<string, { name: string; group: string; pos: V
   apu: { name: 'APU', group: 'sys', pos: [33.6, 1.35 + FUS_DY, 0.3], desc: 'Mały silnik turbinowy w samym końcu kadłuba, za ścianą ogniową (APU – pomocniczy zespół napędowy). Na ziemi daje prąd i sprężone powietrze do klimatyzacji i uruchamiania silników, w locie może być zapasowym źródłem prądu. Powietrze wpada przez klapkę w boku kadłuba, a spaliny wylatują na samym końcu ogona. Więcej – w module APU.' },
   fireWall: { name: 'gródź ogniowa APU', group: 'struct', pos: [APU_HATCH.x0 - 0.5, 1.15 + FUS_DY, 0.3], sub: true, desc: 'Tytanowa ściana oddziela przedział APU od reszty ogona, żeby ewentualny pożar nie przeszedł dalej. W przedziale są czujniki ognia i dysze, przez które butla wypuszcza środek gaśniczy. Więcej – w module APU.' },
   statics: { name: 'porty ciśnienia statycznego', group: 'skin', pos: fusPt(CK_TIP + 5.7, fusTheta(CK_TIP + 5.7, -0.4 + FUS_DY), -0.6), sub: true, desc: 'Małe otworki w poszyciu, równo z powierzchnią. Mierzą ciśnienie powietrza wokół samolotu – na tej podstawie komputery liczą wysokość lotu i to, jak szybko samolot się wznosi albo zniża.' },
-  pitot: { name: 'rurki Pitota i czujniki kąta natarcia', group: 'skin', pos: [-30.4 - PF, -1.6 + FUS_DY, 3.0], sub: true, desc: 'Rurki Pitota to rurki skierowane do przodu, w które wpada pęd powietrza – z jego nacisku komputery liczą prędkość samolotu. Obracające się łopatki obok mierzą, pod jakim kątem powietrze napływa na samolot (kąt natarcia). Wszystkie są podgrzewane, żeby nie oblodziły się w chmurach.' },
+  pitot: { name: 'rurki Pitota i czujniki kąta natarcia', group: 'skin', pos: [CK_TIP + 1.95, -0.9 + FUS_DY, 1.75], sub: true, desc: 'Rurki Pitota to rurki skierowane do przodu, w które wpada pęd powietrza – z jego nacisku komputery liczą prędkość samolotu. Obracające się łopatki obok mierzą, pod jakim kątem powietrze napływa na samolot (kąt natarcia). Wszystkie są podgrzewane, żeby nie oblodziły się w chmurach.' },
   mast: { name: 'maszt odpływowy', group: 'skin', pos: [-19.5 - PF, -3.6 + FUS_DY, 0.6], sub: true, desc: 'Wystający, podgrzewany maszt pod kadłubem. Wyrzuca na zewnątrz wodę z umywalek i kuchni (nie ścieki z toalet) – daleko od poszycia, żeby nie zamarzała na kadłubie.' },
   ram: { name: 'wloty powietrza klimatyzacji', group: 'skin', pos: [-6.6, -4.7, 1.6], sub: true, desc: 'Wloty w osłonie pod kadłubem. Doprowadzają zimne powietrze z zewnątrz do chłodnic klimatyzacji. W locie ich klapki się przymykają, żeby zmniejszyć opór.' },
   outflow: { name: 'zawór wylotowy kabiny', group: 'skin', pos: [15.2 + PA, -2.9 + FUS_DY, 0.3], sub: true, desc: 'Klapka w prawym boku kadłuba za skrzydłem (w przekroju zdjęta razem z prawą połową samolotu). Wypuszcza powietrze z kabiny – to, jak bardzo jest otwarta, decyduje o ciśnieniu w środku. Zobacz zakładkę „Ciśnienie i klimatyzacja”.' },
