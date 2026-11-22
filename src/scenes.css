@@ -839,9 +839,7 @@
   cursor: pointer;
   transition: background 0.2s;
 }
-.gantt-row:hover {
-  background: var(--surface-2);
-}
+
 .gantt-row.on {
   background: color-mix(in srgb, var(--ep) 14%, transparent);
 }
@@ -953,9 +951,7 @@
   line-height: 1;
   cursor: pointer;
 }
-.epoch-nav:hover {
-  background: color-mix(in srgb, var(--ep) 18%, var(--surface));
-}
+
 .epoch-keys {
   display: flex;
   flex-wrap: wrap;

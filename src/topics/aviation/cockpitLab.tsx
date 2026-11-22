@@ -2004,8 +2004,6 @@ function CockpitEquipment({ sim, tex }: { sim: MutableRefObject<Sim>; tex?: CkTe
           {unit(du.oR, <Screen w={0.372} h={0.214} tex={tex?.oit} p={[0, 0, 0]} on={on(0.6)} glow={hl('oit')} bare />)}
           {/* dolny, wspólny ekran: mapa trasy z obrazem pogody */}
           {unit(du.low, <Screen w={0.372} h={0.214} tex={tex?.map} p={[0, 0, 0]} on={on(0.6)} glow={() => hl('map')() || hl('sd')()} bare />)}
-          {/* panel górny: lico z przełącznikami (to samo co w doku) tuż pod płytą panelu z modelu, pochylone jak ona */}
-          {tex && <Face w={1.1} h={1.0} tex={tex.oh} p={[0, 1.618, 0.216]} r={[1.052, 0, 0]} />}
           {/* lampki MASTER WARN / MASTER CAUT na czole osłony przeciwsłonecznej */}
           {warnT &&
             cautT &&
