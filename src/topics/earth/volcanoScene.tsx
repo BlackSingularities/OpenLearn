@@ -32,6 +32,8 @@ import {
   rockH,
   sm,
   surfColor,
+  texDetail,
+  TX,
   waterH,
   type Plumbing,
   type VType,
@@ -87,25 +89,112 @@ const lin = (c: number) => Math.pow(c, 2.2);
 
 /* ================= niebo i podstawa ================= */
 
+const SKY_VS = /* glsl */ `
+varying vec3 vDir;
+void main() {
+  vDir = normalize(position);
+  vec4 p = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * p;
+}`;
+const SKY_FS = /* glsl */ `
+uniform vec3 top;
+uniform vec3 hor;
+uniform vec3 sun;
+uniform float night;
+varying vec3 vDir;
+float h31(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+void main() {
+  vec3 d = normalize(vDir);
+  float y = d.y;
+  vec3 c = mix(hor, top, pow(clamp(y * 1.5, 0.0, 1.0), 0.75));
+  // mgiełka tuż nad horyzontem i pod nim
+  c = mix(c, hor * 1.04, (1.0 - smoothstep(0.0, 0.12, y)) * 0.6);
+  float s = max(dot(d, sun), 0.0);
+  c += (1.0 - night) * (vec3(1.0, 0.93, 0.78) * pow(s, 900.0) * 2.0 + vec3(1.0, 0.85, 0.6) * pow(s, 12.0) * 0.18);
+  // gwiazdy nocą
+  if (night > 0.5 && y > 0.05) {
+    vec3 g = floor(d * 260.0);
+    float st = step(0.997, h31(g));
+    c += vec3(st) * 0.8 * smoothstep(0.05, 0.3, y);
+  }
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
+/** Kierunek do słońca (zgodny z głównym światłem sceny). */
+const SUN_DIR = new THREE.Vector3(-60, 90, 70).normalize();
+
 function Sky({ night = false }: { night?: boolean }) {
-  const geo = useMemo(() => {
-    const g = new THREE.SphereGeometry(430, 32, 16);
-    const p = g.getAttribute('position');
-    const col: number[] = [];
-    const top = new THREE.Color(night ? '#0b1020' : '#5f8fc4');
-    const hor = new THREE.Color(night ? '#2a2236' : '#d8e4ee');
-    const c = new THREE.Color();
-    for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i) / 430;
-      c.copy(hor).lerp(top, clamp(y * 1.6));
-      col.push(c.r, c.g, c.b);
-    }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    return g;
-  }, [night]);
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          top: { value: new THREE.Color(night ? '#070b18' : '#4f82bd') },
+          hor: { value: new THREE.Color(night ? '#2a2236' : '#dbe6ef') },
+          sun: { value: SUN_DIR },
+          night: { value: night ? 1 : 0 },
+        },
+        vertexShader: SKY_VS,
+        fragmentShader: SKY_FS,
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+      }),
+    [night],
+  );
+  useEffect(() => () => mat.dispose(), [mat]);
   return (
-    <mesh geometry={geo} renderOrder={-10}>
-      <meshBasicMaterial vertexColors side={THREE.BackSide} fog={false} depthWrite={false} />
+    <mesh renderOrder={-10} material={mat}>
+      <sphereGeometry args={[430, 48, 24]} />
+    </mesh>
+  );
+}
+
+/** Pasmo gór na horyzoncie (za mgłą, tylko w widokach bez przekroju). */
+function Mountains() {
+  const geo = useMemo(() => {
+    const N = 260;
+    const pos: number[] = [];
+    const col: number[] = [];
+    const idx: number[] = [];
+    const base = new THREE.Color('#8a9c8a');
+    const mid = new THREE.Color('#9fb0bf');
+    const snow = new THREE.Color('#eef2f6');
+    const c = new THREE.Color();
+    for (let i = 0; i <= N; i++) {
+      const th = (i / N) * Math.PI * 2;
+      const ridge = 1 - Math.abs(fbm(Math.cos(th) * 3 + 11, Math.sin(th) * 3 - 4) * 2);
+      const h = 7 + 26 * Math.pow(Math.max(0, ridge), 1.8) + 5 * fbm(Math.cos(th) * 9, Math.sin(th) * 9);
+      const rows: [number, number][] = [
+        [370, -2],
+        [400, h * 0.55],
+        [425, h],
+        [450, h * 0.35],
+      ];
+      rows.forEach(([r, y], k) => {
+        pos.push(r * Math.cos(th), y, r * Math.sin(th));
+        if (k === 0) c.copy(base);
+        else if (k === 1) c.copy(base).lerp(mid, 0.6);
+        else if (k === 2) c.copy(mid).lerp(snow, y > 25 ? 0.8 : 0.15);
+        else c.copy(mid);
+        col.push(c.r, c.g, c.b);
+      });
+    }
+    for (let i = 0; i < N; i++)
+      for (let k = 0; k < 3; k++) {
+        const a = i * 4 + k;
+        const b = (i + 1) * 4 + k;
+        idx.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  return (
+    <mesh geometry={geo}>
+      <meshStandardMaterial vertexColors flatShading roughness={1} side={THREE.DoubleSide} transparent opacity={0.85} depthWrite={false} />
     </mesh>
   );
 }
@@ -292,8 +381,8 @@ function Water({ from, to, cut, shape }: { from: VType; to: VType; cut: boolean;
 const CAP_NX = 380;
 const CAP_NY = 120;
 /** Tekstura przekroju: szerokość pokrywa x ∈ [−R, R], wysokość y ∈ [DEPTH, SEC_TOP]. */
-const TEX_W = 1400;
-const TEX_H = 400;
+const TEX_W = 1800;
+const TEX_H = 520;
 const SEC_TOP = 31;
 const SEC_R = R_TERRAIN - 0.5;
 /** Gotowe tekstury przekroju (kształty, które się nie zmieniają). */
@@ -361,6 +450,8 @@ function paintColumns(job: SecJob, budgetMs: number) {
     for (let j = 0; j < TEX_H; j++) {
       const y = SEC_TOP - ((j + 0.5) / TEX_H) * (SEC_TOP - DEPTH);
       const c = y > top ? topCol : geoColor(ct, x, y, pl, rock, ice, water);
+      const tk = y > top ? 0 : TX.k;
+      const tp = TX.p;
       let r = c[0];
       let g = c[1];
       let b = c[2];
@@ -370,8 +461,15 @@ function paintColumns(job: SecJob, budgetMs: number) {
       cur[j * 3 + 1] = g;
       cur[j * 3 + 2] = b;
       if (y <= top) {
+        // faktura skały (okruchy, pęcherzyki, spękania) – po wykryciu granic, żeby nie obrysowywać każdego ziarna
+        if (tk) {
+          const dc = texDetail(tk, tp, x, y, c);
+          r = dc[0];
+          g = dc[1];
+          b = dc[2];
+        }
         // cienka, ciemniejsza linia na granicy warstw (jak na rysunku w podręczniku) i delikatne ziarno skały
-        const k = (Math.max(up, left) > 0.1 ? 0.8 : 1) * (0.965 + 0.05 * grain(i, j));
+        const k = (Math.max(up, left) > 0.1 ? 0.78 : 1) * (0.965 + 0.05 * grain(i, j));
         r *= k;
         g *= k;
         b *= k;
@@ -399,9 +497,41 @@ const SEC_FS = /* glsl */ `
 uniform sampler2D mapA;
 uniform sampler2D mapB;
 uniform float k;
+uniform float time;
+uniform vec4 ch;
+uniform vec4 cd;
+uniform vec2 texel;
 varying vec2 vUv;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+vec3 samp(vec2 uv) { return mix(texture2D(mapA, uv).rgb, texture2D(mapB, uv).rgb, k); }
+float lum(vec3 c) { return dot(c, vec3(0.3, 0.59, 0.11)); }
 void main() {
-  gl_FragColor = mix(texture2D(mapA, vUv), texture2D(mapB, vUv), k);
+  vec3 c = samp(vUv);
+  // światłocień z jasności sąsiednich tekseli – granice warstw i okruchy wyglądają jak wyrzeźbione w skale
+  float lx = lum(samp(vUv + vec2(texel.x, 0.0))) - lum(samp(vUv - vec2(texel.x, 0.0)));
+  float ly = lum(samp(vUv + vec2(0.0, texel.y))) - lum(samp(vUv - vec2(0.0, texel.y)));
+  float relief = clamp(1.0 + (-lx * 0.8 + ly * 1.0) * 1.6, 0.72, 1.28);
+  vec2 w = vec2(mix(-${SEC_R.toFixed(2)}, ${SEC_R.toFixed(2)}, vUv.x), ${DEPTH.toFixed(1)} + vUv.y * ${(SEC_TOP - DEPTH).toFixed(1)});
+  // drobne ziarno niezależne od rozdzielczości tekstury
+  float gr = vn(w * 14.0) * 0.5 + vn(w * 37.0) * 0.5;
+  float mid = vn(w * 1.3 + 4.0);
+  c *= relief * (0.93 + 0.1 * gr) * (0.95 + 0.08 * mid);
+  // głębiej – ciemniej
+  c *= mix(0.78, 1.0, smoothstep(${DEPTH.toFixed(1)}, -4.0, w.y));
+  // żar wokół komory i komina, lekko migoczący
+  float q = pow((w.x - ch.x) / ch.z, 2.0) + pow((w.y - ch.y) / ch.w, 2.0);
+  float hq = q > 1.0 ? exp(-(sqrt(q) - 1.0) * 3.0) : 0.0;
+  float dx = abs(w.x - cd.x) - cd.y;
+  float hc = (cd.y > 0.0 && w.y > cd.z - 1.0 && w.y < cd.w && dx > 0.0) ? exp(-dx * 1.5) : 0.0;
+  float fl = 0.72 + 0.28 * vn(vec2(w.x * 0.45 + time * 0.5, w.y * 0.45 - time * 0.8));
+  vec3 glow = vec3(1.0, 0.34, 0.07) * (hq * 0.55 + hc * 0.42) * fl;
+  gl_FragColor = vec4(c + glow, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
@@ -433,7 +563,24 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
     };
     return { cap: mk(CAP_NX, true), skirt: mk(160, false), floor: new THREE.CircleGeometry(R_TERRAIN, 80, Math.PI, Math.PI) };
   }, []);
-  const mat = useMemo(() => new THREE.ShaderMaterial({ uniforms: { mapA: { value: BLANK_SEC }, mapB: { value: BLANK_SEC }, k: { value: 1 } }, vertexShader: SEC_VS, fragmentShader: SEC_FS, side: THREE.DoubleSide }), []);
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          mapA: { value: BLANK_SEC },
+          mapB: { value: BLANK_SEC },
+          k: { value: 1 },
+          time: { value: 0 },
+          ch: { value: new THREE.Vector4(0, -24, 9.5, 5) },
+          cd: { value: new THREE.Vector4(0, 0.85, -19.5, 20) },
+          texel: { value: new THREE.Vector2(1.2 / TEX_W, 1.2 / TEX_H) },
+        },
+        vertexShader: SEC_VS,
+        fragmentShader: SEC_FS,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  );
   useEffect(() => () => mat.dispose(), [mat]);
   const st = useRef({ shown: '', fade: 1, speed: 1, job: null as SecJob | null, bg: null as SecJob | null, old: null as THREE.Texture | null });
   const seen = useRef({ ver: -1, key: '' });
@@ -442,6 +589,13 @@ function Section({ shape }: { shape: React.MutableRefObject<Shape> }) {
     const s = shape.current;
     const S = st.current;
     const dyn = s.grow < 1 || s.infl > 0.01 || s.melt > 0.01;
+    {
+      const U = mat.uniforms;
+      U.time.value += dt;
+      const pl = plumbingNow(s);
+      (U.ch.value as THREE.Vector4).set(pl.chamber.cx, pl.chamber.cy, pl.chamber.ax, pl.chamber.ay);
+      (U.cd.value as THREE.Vector4).set(pl.conduit.x, pl.conduit.w, pl.conduit.y0, pl.conduit.y1);
+    }
     // przekrój docelowego wulkanu: z pamięci albo malowany w tle; potem płynne przenikanie ze starego
     const want = secKey(s.b, s);
     const startFade = (tex: THREE.Texture, key: string, speed: number) => {
@@ -587,25 +741,66 @@ interface MagmaState {
 
 type Bubble = { x: number; y: number; r: number; vy: number; alive: boolean; frag: boolean };
 
-/** Poprzeczny gradient magmy w kominie: żółty środek, czerwone brzegi przy chłodniejszych ścianach. */
-const MAGMA_TEX = (() => {
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 1;
-  const g = c.getContext('2d')!;
-  const gr = g.createLinearGradient(0, 0, 64, 0);
-  gr.addColorStop(0, '#9a2a0a');
-  gr.addColorStop(0.3, '#ff7a1a');
-  gr.addColorStop(0.5, '#ffd25a');
-  gr.addColorStop(0.7, '#ff7a1a');
-  gr.addColorStop(1, '#9a2a0a');
-  g.fillStyle = gr;
-  g.fillRect(0, 0, 64, 1);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-})();
+/** Komora magmowa: powolne krążenie gorącej magmy (jaśniejsze prądy wznoszące, ciemniejsze opadające) i poświata wokół. */
+const CHAMBER_FS = /* glsl */ `
+uniform float time;
+uniform float glow;
+varying vec2 vP;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) { return vn(p) * 0.5 + vn(p * 2.1 + 3.0) * 0.3 + vn(p * 4.3 - 1.0) * 0.2; }
+void main() {
+  // vP: okrąg jednostkowy; komora kończy się w r = 0.78 (poświata sięga dalej)
+  vec2 e = vec2(vP.x / 0.8, vP.y / 0.74);
+  float r = length(e);
+  // krążenie: pole przesuwane po okręgu wokół środka
+  float a = time * 0.12;
+  vec2 q = mat2(cos(a * (1.0 - r)), -sin(a * (1.0 - r)), sin(a * (1.0 - r)), cos(a * (1.0 - r))) * e;
+  float n = fbm(q * vec2(3.0, 5.0) + vec2(0.0, -time * 0.15));
+  vec3 hot = mix(vec3(1.0, 0.42, 0.06), vec3(1.0, 0.86, 0.35), smoothstep(0.35, 0.75, n));
+  float inside = 1.0 - smoothstep(0.92, 1.0, r);
+  float halo = exp(-max(0.0, r - 1.0) * 4.0) * (1.0 - inside);
+  float a1 = inside * (0.35 + 0.45 * n) * (1.0 - 0.5 * smoothstep(0.5, 1.0, r)) + halo * 0.35;
+  gl_FragColor = vec4(hot * a1 * (0.75 + 0.5 * glow), 1.0);
+}`;
+const PLANE_VS = /* glsl */ `
+varying vec2 vP;
+varying vec2 vUv;
+void main() {
+  vP = position.xy;
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+/** Magma w kominie: żółty środek, czerwone brzegi, smugi płynące w górę. */
+const CONDUIT_FS = /* glsl */ `
+uniform float time;
+uniform float len;
+uniform float speed;
+varying vec2 vUv;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+void main() {
+  float u = abs(vUv.x - 0.5) * 2.0;
+  float y = vUv.y * len;
+  float n = vn(vec2(vUv.x * 4.0, y * 0.7 - time * (0.8 + 2.5 * speed))) * 0.6 + vn(vec2(vUv.x * 9.0, y * 1.8 - time * (1.4 + 4.0 * speed))) * 0.4;
+  vec3 core = mix(vec3(1.0, 0.5, 0.1), vec3(1.0, 0.88, 0.42), smoothstep(0.4, 0.8, n));
+  vec3 edge = vec3(0.6, 0.14, 0.03);
+  vec3 c = mix(core, edge, smoothstep(0.45, 1.0, u + 0.15 * (n - 0.5)));
+  // u góry kolumny magma stygnie
+  c *= mix(0.7, 1.0, smoothstep(len - 0.2, len - 1.6, y));
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
 
 /** Magma w kominie, pęcherzyki gazu (rosną przy wznoszeniu), poświata komory i nowa żyła. */
 function MagmaOverlay({ getPl, st, onBurst, dikePath }: { getPl: () => Plumbing; st: React.MutableRefObject<MagmaState>; onBurst?: (n: number) => void; dikePath?: [number, number][] }) {
@@ -616,6 +811,18 @@ function MagmaOverlay({ getPl, st, onBurst, dikePath }: { getPl: () => Plumbing;
   const bubbles = useMemo<Bubble[]>(() => [], []);
   const m4 = useMemo(() => new THREE.Matrix4(), []);
   const acc = useRef(0);
+  const chMat = useMemo(
+    () => new THREE.ShaderMaterial({ uniforms: { time: { value: 0 }, glow: { value: 0 } }, vertexShader: PLANE_VS, fragmentShader: CHAMBER_FS, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    [],
+  );
+  const cdMat = useMemo(() => new THREE.ShaderMaterial({ uniforms: { time: { value: 0 }, len: { value: 10 }, speed: { value: 0 } }, vertexShader: PLANE_VS, fragmentShader: CONDUIT_FS, toneMapped: false }), []);
+  useEffect(
+    () => () => {
+      chMat.dispose();
+      cdMat.dispose();
+    },
+    [chMat, cdMat],
+  );
   const dikeGeo = useMemo(() => {
     if (!dikePath) return null;
     const pos: number[] = [];
@@ -640,10 +847,13 @@ function MagmaOverlay({ getPl, st, onBurst, dikePath }: { getPl: () => Plumbing;
       col.current.visible = cd.w > 0 && s.level > 0.01;
       col.current.position.set(cd.x, (cd.y0 + top) / 2, 0.05);
       col.current.scale.set(cd.w * 2, Math.max(0.01, top - cd.y0), 1);
+      cdMat.uniforms.len.value = Math.max(0.01, top - cd.y0);
     }
+    cdMat.uniforms.time.value += dt;
+    cdMat.uniforms.speed.value = s.speed;
+    chMat.uniforms.time.value += dt;
+    chMat.uniforms.glow.value = s.glow * (0.6 + 0.4 * Math.sin(state.clock.elapsedTime * 2.2));
     if (glow.current) {
-      const t = state.clock.elapsedTime;
-      (glow.current.material as THREE.MeshBasicMaterial).opacity = 0.18 + 0.14 * s.glow * (0.6 + 0.4 * Math.sin(t * 2.2));
       glow.current.position.set(ch.cx, ch.cy, 0.07);
       glow.current.scale.set(ch.ax * 1.25, ch.ay * 1.35, 1);
     }
@@ -696,13 +906,11 @@ function MagmaOverlay({ getPl, st, onBurst, dikePath }: { getPl: () => Plumbing;
   });
   return (
     <>
-      <mesh ref={col} renderOrder={3}>
+      <mesh ref={col} renderOrder={3} material={cdMat}>
         <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial map={MAGMA_TEX} toneMapped={false} />
       </mesh>
-      <mesh ref={glow} renderOrder={3}>
+      <mesh ref={glow} renderOrder={3} material={chMat}>
         <circleGeometry args={[1, 64]} />
-        <meshBasicMaterial color="#ffb347" transparent opacity={0.25} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
       </mesh>
       {dikeGeo && (
         <mesh ref={dike} geometry={dikeGeo} renderOrder={3}>
@@ -1289,6 +1497,7 @@ export function VolcanoScene({ params }: SceneProps) {
   return (
     <>
       <Sky night={night} />
+      {!cut && !night && <Mountains />}
       <fog attach="fog" args={[night ? '#1a1826' : '#cdd9e4', cut ? 260 : 170, 560]} />
       {night ? (
         <>
