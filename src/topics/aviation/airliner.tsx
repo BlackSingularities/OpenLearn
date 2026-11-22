@@ -5335,7 +5335,29 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
     if (side > 0 && sideV.z < -1.5) setSide(-1);
     else if (side < 0 && sideV.z > 1.5) setSide(1);
   });
-  const anchorAt = (p: PlanePart): V3 => [ANCHOR[p][0], ANCHOR[p][1], ANCHOR[p][2] * side];
+  /**
+   * Strona samolotu, po której stoją podpisy-odnośniki. Zwykle ta bliższa kamerze, ale gdy połowa samolotu jest
+   * odcięta (przekrój) albo schowana, podpis zawsze trafia na widoczną połowę – nie wisi w pustym miejscu.
+   */
+  const keepZ = (z: number) => !clip || (z > clip.z0 && z < clip.z1);
+  const sideFor = (p: PlanePart): number | null => {
+    const z = ANCHOR[p][2];
+    if (Math.abs(z) < 0.01) return keepZ(0) ? side : null;
+    // ±z: +z – lewa strona (z lewym silnikiem), −z – prawa (warstwa rightSide)
+    const ok = (sz: number) => keepZ(z * sz) && (sz > 0 || show('rightSide')) && !(p === 'engine' && sz > 0 && !show('leftEngine'));
+    if (ok(side)) return side;
+    if (ok(-side)) return -side;
+    return null;
+  };
+  /** Czy element, do którego prowadzi podpis, jest w ogóle na scenie. */
+  const partShown = (p: PlanePart) => {
+    if (p === 'tail' || p === 'apu') return show('tail');
+    if (p === 'gear') return show('gear') && !(clip && (clip.z0 > -6 || clip.z1 < 6) && focus !== 'fuselage') && !inFlight;
+    if (p === 'fuselage' || p === 'cockpit' || p === 'radar' || p === 'doors') return show('fuselage');
+    return true;
+  };
+  const anchorAt = (p: PlanePart): V3 => [ANCHOR[p][0], ANCHOR[p][1], ANCHOR[p][2] * (sideFor(p) ?? side)];
+  const labelShown = (p: PlanePart) => partShown(p) && sideFor(p) !== null;
   const [tip, setTip] = useState<PlanePart | null>(null);
   const [pickHover, setPickHover] = useState<string | null>(null);
   // kliknięcia tylko w widocznej (nieprzyciętej) części skrzydła – niewidoczne fragmenty nie łapią myszy
@@ -5504,7 +5526,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
       {/* widok ogólny: tylko nazwy podzespołów (klikalne); szczegółowe podpisy dopiero w module podzespołu */}
       <group ref={sideRef}>
       {interactive && partLabels && !focus &&
-        (Object.keys(ANCHOR) as PlanePart[]).map((p) => (
+        (Object.keys(ANCHOR) as PlanePart[]).filter(labelShown).map((p) => (
           <Lbl
             key={p}
             occlude
@@ -5524,7 +5546,7 @@ function AirlinerBodyInner({ focus = null, highlight = null, throttle = 0.6, flo
       {/* w module jednego podzespołu pozostałe mają podpisy-odnośniki (inną czcionką), żeby było widać, że można w nie kliknąć */}
       {interactive && links && (focus ?? linksFrom) &&
         (Object.keys(ANCHOR) as PlanePart[])
-          .filter((p) => p !== (focus ?? linksFrom))
+          .filter((p) => p !== (focus ?? linksFrom) && labelShown(p))
           .map((p) => (
             <Lbl
               key={`link-${p}`}
