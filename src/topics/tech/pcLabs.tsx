@@ -323,6 +323,41 @@ export function PcbLab({ p }: { p: V3 }) {
 /* ================= przekrój procesora ================= */
 
 /**
+ * Przekrój warstw połączeń w rdzeniu: na dole najcieńsze ścieżki tuż nad tranzystorami, wyżej coraz grubsze,
+ * połączone pionowymi przelotkami – jak wielopiętrowe skrzyżowanie dróg.
+ */
+let BEOL: THREE.MeshBasicMaterial | null = null;
+function beolMat() {
+  if (BEOL) return BEOL;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#2a2433';
+  g.fillRect(0, 0, 1024, 64);
+  const r = rng(53);
+  const levels = [
+    [58, 2, 6],
+    [52, 2, 7],
+    [46, 3, 9],
+    [39, 3, 11],
+    [31, 4, 15],
+    [22, 5, 22],
+    [11, 7, 40],
+  ];
+  g.fillStyle = '#e39a5a';
+  for (const [y, h, pitch] of levels) for (let x = r() * pitch; x < 1024; x += pitch) if (r() < 0.75) g.fillRect(x, y, pitch * 0.55, h);
+  g.fillStyle = '#f0b27a';
+  for (let k = 0; k < 260; k++) g.fillRect(r() * 1024, 8 + r() * 50, 1.5, 6);
+  g.fillStyle = '#b8c0ff';
+  for (let x = 2; x < 1024; x += 4) g.fillRect(x, 61, 2, 3);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  BEOL = new THREE.MeshBasicMaterial({ map: t, toneMapped: false });
+  return BEOL;
+}
+
+/**
  * Procesor przecięty na pół, powiększony 12×: styki LGA, wielowarstwowy laminat, mikrokulki lutu, krzemowy rdzeń,
  * lut indowy (pasta termiczna wewnątrz), osłona IHS z niklowanej miedzi, klej. Nad nim pasta i podstawa chłodzenia.
  * `lift` (0…1) – osłona i chłodzenie podnoszą się, odsłaniając rdzeń.
@@ -340,7 +375,7 @@ export function CpuCutLab({ p, lift }: { p: V3; lift: () => number }) {
   const D = 30;
   return (
     <LabStage p={p}>
-      <group position={[0, -18, 0]}>
+      <group position={[0, -25, 0]} scale={1.45}>
         {/* styki LGA na spodzie */}
         {Array.from({ length: 22 }, (_, i) => (
           <Box key={i} p={[-W / 2 + 1.5 + i * 2, -0.3, -D / 2]} s={[1, 0.6, D - 2]} m={n.gold} />
@@ -361,9 +396,13 @@ export function CpuCutLab({ p, lift }: { p: V3; lift: () => number }) {
         ))}
         <Slab x0={-11.5} x1={11.5} y0={6.3} y1={7.2} d={D * 0.5} m={n.chipGrey} />
         {/* rdzeń krzemowy */}
-        <Slab x0={-11} x1={11} y0={7.2} y1={9.6} d={D * 0.45} m={n.die} cut={n.cutSilicon} />
-        <mesh position={[0, 7.45, 0.03]} material={n.dieShine}>
-          <planeGeometry args={[22, 0.5]} />
+        <Slab x0={-11} x1={11} y0={7.2} y1={8.1} d={D * 0.45} m={n.copper} />
+        <mesh position={[0, 7.65, 0.03]} material={beolMat()}>
+          <planeGeometry args={[22, 0.9]} />
+        </mesh>
+        <Slab x0={-11} x1={11} y0={8.1} y1={9.6} d={D * 0.45} m={n.die} cut={n.cutSilicon} />
+        <mesh position={[0, 8.16, 0.035]} material={n.dieShine}>
+          <planeGeometry args={[22, 0.12]} />
         </mesh>
         <group ref={up}>
           {/* lut indowy i osłona IHS */}
@@ -398,13 +437,19 @@ export function CpuCutLab({ p, lift }: { p: V3; lift: () => number }) {
         <Lbl pos={[W / 2 + 8, 3, 0]} sub color={LC.green}>
           laminat ze ścieżkami
         </Lbl>
-        <Lbl pos={[14, 6.6, 1]} sub color={LC.part}>
+        <Lbl pos={[7, 5.4, 1]} sub color={LC.part}>
           mikrokulki lutu
         </Lbl>
-        <Lbl pos={[-14, 8.4, 1]} sub color={LC.violet}>
+        <Lbl pos={[-27, 9.4, 1]} sub color={LC.violet}>
           rdzeń krzemowy
         </Lbl>
-        <Lbl pos={[0, 9.9, 1]} sub color={LC.part}>
+        <Lbl pos={[31, 7.9, 1]} sub color={LC.gold}>
+          kilkanaście poziomów miedzianych połączeń
+        </Lbl>
+        <Lbl pos={[-31, 7.2, 1]} sub color={LC.part}>
+          tranzystory (od spodu rdzenia)
+        </Lbl>
+        <Lbl pos={[5, 10.9, 1]} sub color={LC.part}>
           lut indowy
         </Lbl>
         <Lbl pos={[W / 2 + 8, 12, 0]} sub color={LC.gold}>
@@ -674,6 +719,19 @@ export function FinLab({ p, gate }: { p: V3; gate: () => number }) {
         <instancedMesh ref={e} args={[undefined, undefined, N]} material={n.glowBlue}>
           <sphereGeometry args={[1.1, 10, 8]} />
         </instancedMesh>
+        {/* w tle: rzędy takich samych tranzystorów – żeberka i bramki jak w prawdziwym układzie */}
+        <group position={[0, 0, -70]} scale={0.45}>
+          <Box p={[0, 3, 0]} s={[260, 6, 120]} m={n.silicon} />
+          {[-40, -20, 0, 20, 40].map((z) => (
+            <Box key={z} p={[0, 12, z]} s={[250, 12, 5]} m={n.silicon} />
+          ))}
+          {Array.from({ length: 9 }, (_, i) => (
+            <Box key={i} p={[-112 + i * 28, 15, 0]} s={[8, 20, 110]} m={n.gold} />
+          ))}
+        </group>
+        <Lbl pos={[0, 22, -70]} sub color={LC.part}>
+          w procesorze miliardy takich tranzystorów stoją w rzędach
+        </Lbl>
         <Lbl pos={[-33, 40, -3]} sub color="#fdba74">
           źródło
         </Lbl>
@@ -698,6 +756,8 @@ export function FinLab({ p, gate }: { p: V3; gate: () => number }) {
 
 export const STAGES = ['pobierz', 'odczytaj', 'wykonaj', 'pamięć', 'zapisz'];
 const INSTR_C = ['#60a5fa', '#f472b6', '#facc15', '#4ade80', '#fb923c', '#a78bfa'];
+/** Rozkazy na klockach: dodaj, wczytaj z pamięci, pomnóż, zapisz do pamięci, porównaj, skocz. */
+const INSTR_N = ['ADD', 'LOAD', 'MUL', 'STORE', 'CMP', 'JUMP'];
 
 /**
  * Potok: pięć stanowisk w rzędzie. Co takt zegara każdy rozkaz przesuwa się o jedno stanowisko, więc naraz
@@ -705,7 +765,27 @@ const INSTR_C = ['#60a5fa', '#f472b6', '#facc15', '#4ade80', '#fb923c', '#a78bfa
  */
 export function PipeLab({ p, tick }: { p: V3; tick: () => number }) {
   const n = MAT();
-  const mats = useMemo(() => INSTR_C.map((c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.25, roughness: 0.4 })), []);
+  const mats = useMemo(
+    () =>
+      INSTR_C.map((c, i) => {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 128;
+        const g = cv.getContext('2d')!;
+        g.fillStyle = c;
+        g.fillRect(0, 0, 128, 128);
+        g.strokeStyle = 'rgba(0,0,0,0.35)';
+        g.lineWidth = 6;
+        g.strokeRect(3, 3, 122, 122);
+        g.fillStyle = '#111318';
+        g.font = 'bold 34px monospace';
+        g.textAlign = 'center';
+        g.fillText(INSTR_N[i], 64, 76);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        return new THREE.MeshStandardMaterial({ map: t, emissive: '#ffffff', emissiveMap: t, emissiveIntensity: 0.25, roughness: 0.4 });
+      }),
+    [],
+  );
   const refs = useRef<(THREE.Group | null)[]>([]);
   const clk = useRef<THREE.Mesh>(null);
   const M = 8;

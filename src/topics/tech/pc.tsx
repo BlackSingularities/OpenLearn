@@ -255,13 +255,13 @@ const cpuModule: PartModule = {
     pcs({
       title: 'Procesor w przekroju',
       spot: pc(SOCKET.x - 1.5, SOCKET.y, MBZ + 1),
-      ...labCam('cpuCut', 95, 100, 86),
+      ...labCam('cpuCut', 130, 108, 84),
       preset: { mode: 'cpu-cut' },
       controls: [{ type: 'button', key: 'lift', label: 'Zdejmij osłonę', labelOn: 'Załóż osłonę', default: false }],
       body: (
         <>
           <p>
-            Procesor przecięty na pół i powiększony 12 razy. Na dole złote pola stykowe, nad nimi zielony laminat z kilkunastoma warstwami ścieżek. Na nim, na malutkich kulkach lutu, leży <b>krzemowy rdzeń</b> – właściwy procesor, grubości ok. 0,8 mm.
+            Procesor przecięty na pół i powiększony 12 razy. Na dole złote pola stykowe, nad nimi zielony laminat z kilkunastoma warstwami ścieżek. Na nim, na malutkich kulkach lutu, leży <b>krzemowy rdzeń</b> – właściwy procesor, grubości ok. 0,8 mm. Leży „do góry nogami”: tranzystory są na jego spodzie, a pod nimi kilkanaście poziomów miedzianych połączeń – od najcieńszych ścieżek przy tranzystorach do grubych, które rozprowadzają prąd.
           </p>
           <p>
             Nad rdzeniem jest warstwa lutu z indu i miedziana <b>osłona IHS</b>. Ciepło przechodzi przez nie do pasty termoprzewodzącej i chłodzenia. Naciśnij przycisk, żeby zdjąć osłonę i zobaczyć rdzeń.
@@ -314,7 +314,7 @@ const cpuModule: PartModule = {
             Procesor pracuje w rytmie <b>zegara</b>. Przy każdym takcie każdy rozkaz robi jeden krok: pobranie z pamięci, odczytanie, co ma zrobić, wykonanie, dostęp do pamięci, zapis wyniku. Procesor 5,5 GHz ma 5,5 miliarda taktów na sekundę.
           </p>
           <p>
-            Sztuczka nazywa się <b>potok</b>: gdy jeden rozkaz jest wykonywany, następny jest już odczytywany, a kolejny pobierany – jak na taśmie w fabryce. Dzięki temu co takt kończy się jeden rozkaz, choć każdy trwa pięć taktów. Prawdziwe rdzenie mają kilkanaście stanowisk i kilka taśm naraz.
+            Sztuczka nazywa się <b>potok</b>: gdy jeden rozkaz jest wykonywany, następny jest już odczytywany, a kolejny pobierany – jak na taśmie w fabryce. Dzięki temu co takt kończy się jeden rozkaz, choć każdy trwa pięć taktów. Na klockach są nazwy rozkazów: ADD (dodaj), LOAD (wczytaj z pamięci), MUL (pomnóż), STORE (zapisz), CMP (porównaj), JUMP (skocz w inne miejsce programu). Prawdziwe rdzenie mają kilkanaście stanowisk i kilka taśm naraz.
           </p>
         </>
       ),
@@ -424,7 +424,7 @@ const memModule: PartModule = {
     pcs({
       title: 'Piramida pamięci',
       spot: at('mem', 0, -80, 34),
-      ...labCam('pyr', 210, 140, 45),
+      ...labCam('pyr', 235, 165, 48),
       preset: { mode: 'mem-pyr' },
       body: (
         <>
@@ -561,7 +561,7 @@ const ioModule: PartModule = {
     pcs({
       title: 'Złącza',
       spot: pc(-24, 34, 3),
-      ...labCam('ports', 165, 120, 65),
+      ...labCam('ports', 210, 125, 60),
       preset: { mode: 'io-ports' },
       body: (
         <>

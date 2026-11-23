@@ -499,31 +499,64 @@ export function HddLab({ p, spin }: { p: V3; spin: () => number }) {
 /* ================= piramida pamięci ================= */
 
 const PYR_C = ['#f43f5e', '#fb923c', '#facc15', '#a3e635', '#22d3ee', '#818cf8', '#c084fc'];
-/** Piramida: im wyżej, tym szybciej i mniej; im niżej, tym więcej i wolniej. */
+/**
+ * Piramida pamięci jako schody: im wyżej, tym szybciej i mniej; im niżej, tym więcej i wolniej. Na każdym
+ * stopniu leży to, co go tworzy: rejestry, kawałki krzemu pamięci podręcznej, moduł RAM, dysk SSD i dysk twardy.
+ */
 export function PyrLab({ p }: { p: V3 }) {
-  const mats = useMemo(() => PYR_C.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 })), []);
+  const n = MAT();
+  const mats = useMemo(() => PYR_C.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, transparent: true, opacity: 0.85 })), []);
   const N = MEM_LEVELS.length;
+  const H = 9;
+  const lv = MEM_LEVELS.map((_, i) => {
+    const w = 26 + i * 22;
+    const d = 16 + i * 14;
+    const top = (N - i) * H;
+    return { w, d, top, zc: -36 + d / 2, zItem: -36 + d - 7 };
+  });
   return (
-    <LabStage p={p} r={85}>
+    <LabStage p={p} r={90}>
       <group position={[0, -86, 0]}>
         {MEM_LEVELS.map(([name, , , cap], i) => {
-          // rejestry na górze (najwęższe), dyski na dole (najszersze)
-          const w = 22 + i * 20;
+          const L = lv[i];
           return (
-            <group key={name} position={[0, (N - 1 - i) * 11 + 5, 0]}>
-              <mesh material={mats[i]}>
-                <boxGeometry args={[w, 10, 40]} />
+            <group key={name}>
+              <mesh position={[0, L.top - H / 2, L.zc]} material={mats[i]}>
+                <boxGeometry args={[L.w, H - 0.4, L.d]} />
               </mesh>
-              <Lbl pos={[w / 2 + 4, 0, 20]} sub color={PYR_C[i]}>
+              <Lbl pos={[L.w / 2 + 3, L.top - 2, -36 + L.d]} sub color={PYR_C[i]}>
                 {`${name}: ${cap}`}
               </Lbl>
             </group>
           );
         })}
-        <Lbl pos={[-85, 75, 0]} sub color={LC.hot}>
+        {/* rejestry: kilka komórek tuż przy jednostkach liczących */}
+        {Array.from({ length: 9 }, (_, k) => (
+          <Box key={k} p={[-4 + (k % 3) * 4, lv[0].top + 1, lv[0].zc - 4 + Math.floor(k / 3) * 4]} s={[3, 2, 3]} m={n.gold} />
+        ))}
+        {/* pamięć podręczna L1, L2, L3 – coraz większe kawałki krzemu */}
+        {[1, 2, 3].map((i) => (
+          <group key={i} position={[0, lv[i].top, lv[i].zItem]}>
+            <Box p={[0, 0.6, 0]} s={[3 + i * 3, 1.2, 3 + i * 3]} m={n.die} />
+            <Box p={[0, 1.22, 0]} s={[2.7 + i * 3, 0.04, 2.7 + i * 3]} m={n.dieShine} />
+          </group>
+        ))}
+        {/* RAM, SSD, HDD */}
+        <group position={[0, lv[4].top, lv[4].zItem]} scale={2.3} quaternion={RAM_Q}>
+          <RamStick />
+        </group>
+        <group position={[0, lv[5].top + 0.2, lv[5].zItem]} rotation={[-Math.PI / 2, 0, 0]} scale={3}>
+          <M2Ssd />
+        </group>
+        <group position={[0, lv[6].top, lv[6].zItem]} scale={1.3}>
+          <group position={[-(HDD.x0 + HDD.x1) / 2, -HDD.y0, -(HDD.z0 + HDD.z1) / 2]}>
+            <Hdd />
+          </group>
+        </group>
+        <Lbl pos={[-80, lv[0].top + 4, 0]} sub color={LC.hot}>
           szybciej, drożej, mniej
         </Lbl>
-        <Lbl pos={[-85, 8, 0]} sub color={LC.cold}>
+        <Lbl pos={[-90, 6, 20]} sub color={LC.cold}>
           wolniej, taniej, więcej
         </Lbl>
       </group>
@@ -993,85 +1026,139 @@ export function MouseLab({ p }: { p: V3 }) {
 
 /* ================= złącza ================= */
 
-/** Złącza komputera powiększone 6×, każde z prędkością. */
+/** Kształt złącza (otwór w metalowej osłonie) w płaszczyźnie x–y, środek w 0,0. */
+type PortShape = 'usba' | 'usbc' | 'hdmi' | 'dp' | 'rj45' | 'jack';
+function portOutline(k: PortShape, grow = 0): THREE.Shape {
+  const s = new THREE.Shape();
+  const g = grow;
+  if (k === 'usbc') {
+    const w = 0.84 / 2 + g;
+    const r = 0.13 + g;
+    s.moveTo(-w + r, -r);
+    s.lineTo(w - r, -r);
+    s.absarc(w - r, 0, r, -Math.PI / 2, Math.PI / 2, false);
+    s.lineTo(-w + r, r);
+    s.absarc(-w + r, 0, r, Math.PI / 2, (Math.PI * 3) / 2, false);
+    return s;
+  }
+  if (k === 'jack') {
+    s.absarc(0, 0, 0.18 + g, 0, Math.PI * 2, false);
+    return s;
+  }
+  const dims: Record<string, [number, number]> = { usba: [1.2, 0.45], hdmi: [1.4, 0.45], dp: [1.6, 0.48], rj45: [1.2, 1.05] };
+  const [W, Hh] = dims[k];
+  const x = W / 2 + g;
+  const y = Hh / 2 + g;
+  if (k === 'hdmi') {
+    // dolne rogi ścięte – trapez
+    s.moveTo(-x + 0.2, -y);
+    s.lineTo(x - 0.2, -y);
+    s.lineTo(x, -y + 0.2);
+    s.lineTo(x, y);
+    s.lineTo(-x, y);
+    s.lineTo(-x, -y + 0.2);
+    return s;
+  }
+  if (k === 'dp') {
+    // jeden róg ścięty
+    s.moveTo(-x, -y);
+    s.lineTo(x - 0.28, -y);
+    s.lineTo(x, -y + 0.28);
+    s.lineTo(x, y);
+    s.lineTo(-x, y);
+    return s;
+  }
+  if (k === 'rj45') {
+    // prostokąt z wycięciem na zatrzask u dołu
+    s.moveTo(-x, -y);
+    s.lineTo(-0.25 - g, -y);
+    s.lineTo(-0.25 - g, -y - 0.18);
+    s.lineTo(0.25 + g, -y - 0.18);
+    s.lineTo(0.25 + g, -y);
+    s.lineTo(x, -y);
+    s.lineTo(x, y);
+    s.lineTo(-x, y);
+    return s;
+  }
+  s.moveTo(-x, -y);
+  s.lineTo(x, -y);
+  s.lineTo(x, y);
+  s.lineTo(-x, y);
+  return s;
+}
+/** Złącze: płytka panelu z otworem, metalowa osłona (kołnierz) i wnętrze z językiem stykowym. */
+function Port({ k, inner }: { k: PortShape; inner: THREE.Material }) {
+  const n = MAT();
+  const geo = useMemo(() => {
+    const plate = new THREE.Shape();
+    plate.moveTo(-1.3, -1.1);
+    plate.lineTo(1.3, -1.1);
+    plate.lineTo(1.3, 1.1);
+    plate.lineTo(-1.3, 1.1);
+    plate.holes.push(new THREE.Path(portOutline(k, 0.06).getPoints(24)));
+    const shell = portOutline(k, 0.06);
+    shell.holes.push(new THREE.Path(portOutline(k, 0).getPoints(24)));
+    return {
+      plate: new THREE.ExtrudeGeometry(plate, { depth: 0.08, bevelEnabled: false }),
+      shell: new THREE.ExtrudeGeometry(shell, { depth: 1.0, bevelEnabled: false, curveSegments: 16 }),
+      back: new THREE.ShapeGeometry(portOutline(k, 0), 16),
+    };
+  }, [k]);
+  return (
+    <group>
+      <mesh geometry={geo.plate} position={[0, 0, 0]} material={n.steelDark} />
+      <mesh geometry={geo.shell} position={[0, 0, -0.95]} material={k === 'jack' ? inner : n.steel} />
+      <mesh geometry={geo.back} position={[0, 0, -0.9]} material={n.slot} />
+      {/* język stykowy ze złoconymi pasami */}
+      {k !== 'jack' && k !== 'rj45' && (
+        <group>
+          <Box p={[0, k === 'usba' ? -0.06 : 0, -0.45]} s={[k === 'usbc' ? 0.56 : k === 'usba' ? 1.0 : 1.05, 0.1, 0.9]} m={inner} />
+          {Array.from({ length: k === 'usba' ? 4 : 10 }, (_, i) => (
+            <Box key={i} p={[((i + 0.5) / (k === 'usba' ? 4 : 10) - 0.5) * (k === 'usbc' ? 0.5 : 0.95), k === 'usba' ? 0 : 0.055, -0.4]} s={[0.035, 0.012, 0.7]} m={n.gold} />
+          ))}
+        </group>
+      )}
+      {k === 'rj45' &&
+        Array.from({ length: 8 }, (_, i) => <Box key={i} p={[-0.42 + i * 0.12, 0.4, -0.55]} s={[0.05, 0.05, 0.6]} m={n.gold} />)}
+      {k === 'rj45' && (
+        <>
+          <Box p={[-0.85, 0.75, 0.05]} s={[0.22, 0.12, 0.02]} m={n.ledGreen} />
+          <Box p={[0.85, 0.75, 0.05]} s={[0.22, 0.12, 0.02]} m={n.yellow} />
+        </>
+      )}
+      {k === 'jack' && (
+        <mesh position={[0, 0, 0.09]} material={inner}>
+          <ringGeometry args={[0.24, 0.5, 32]} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+/** Złącza komputera powiększone 14×, każde w kawałku panelu, z prędkością. */
 export function PortsLab({ p }: { p: V3 }) {
   const n = MAT();
   const S = 14;
-  const items: { name: string; sub: string; draw: () => ReactNode }[] = [
-    {
-      name: 'USB-A',
-      sub: 'do 10 Gb/s',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[1.2, 0.45, 1.4]} m={n.steel} />
-          <Box p={[0, 0.06, 0.05]} s={[1.0, 0.12, 1.4]} m={n.blue} />
-        </group>
-      ),
-    },
-    {
-      name: 'USB-C',
-      sub: 'do 40 Gb/s, prąd do 240 W',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[0.9, 0.32, 1]} m={n.steel} />
-          <Box p={[0, 0, 0.05]} s={[0.66, 0.1, 1]} m={n.slot} />
-        </group>
-      ),
-    },
-    {
-      name: 'HDMI',
-      sub: 'obraz i dźwięk, 48 Gb/s',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[1.5, 0.55, 1.2]} m={n.steel} />
-          <Box p={[0, 0.03, 0.05]} s={[1.3, 0.3, 1.2]} m={n.slot} />
-        </group>
-      ),
-    },
-    {
-      name: 'DisplayPort',
-      sub: 'obraz, do 80 Gb/s',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[1.65, 0.55, 1.2]} m={n.steel} />
-          <Box p={[0.1, 0.03, 0.05]} s={[1.3, 0.3, 1.2]} m={n.slot} />
-        </group>
-      ),
-    },
-    {
-      name: 'RJ-45 (sieć)',
-      sub: 'Ethernet, 2,5 Gb/s',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[1.6, 1.35, 1.6]} m={n.steel} />
-          <Box p={[0, -0.05, 0.1]} s={[1.2, 0.9, 1.6]} m={n.slot} />
-          {Array.from({ length: 8 }, (_, i) => (
-            <Box key={i} p={[-0.5 + i * 0.14, 0.32, 0.4]} s={[0.05, 0.05, 0.6]} m={n.gold} />
-          ))}
-        </group>
-      ),
-    },
-    {
-      name: 'jack 3,5 mm',
-      sub: 'słuchawki, sygnał analogowy',
-      draw: () => (
-        <group>
-          <Box p={[0, 0, 0]} s={[1, 1, 1.2]} m={n.green} />
-          <Cyl p={[0, 0, 0.61]} r={0.2} h={0.02} m={n.slot} axis="z" seg={16} />
-        </group>
-      ),
-    },
+  const items: { k: PortShape; name: string; sub: string; inner: THREE.Material }[] = [
+    { k: 'usba', name: 'USB-A', sub: 'do 10 Gb/s', inner: n.blue },
+    { k: 'usbc', name: 'USB-C', sub: 'do 40 Gb/s, prąd do 240 W', inner: n.plastic },
+    { k: 'hdmi', name: 'HDMI', sub: 'obraz i dźwięk, 48 Gb/s', inner: n.plastic },
+    { k: 'dp', name: 'DisplayPort', sub: 'obraz, do 80 Gb/s', inner: n.plastic },
+    { k: 'rj45', name: 'RJ-45 (sieć)', sub: 'Ethernet, 2,5 Gb/s', inner: n.plastic },
+    { k: 'jack', name: 'jack 3,5 mm', sub: 'słuchawki, sygnał analogowy', inner: n.green },
   ];
   return (
     <LabStage p={p} r={100}>
       <group position={[0, -60, 0]}>
         {items.map((it, i) => (
           <group key={it.name} position={[((i % 3) - 1) * 48, Math.floor(i / 3) ? -4 : 38, 0]}>
-            <group scale={S}>{it.draw()}</group>
-            <Lbl pos={[0, 15, 0]} sub color={LC.gold}>
+            <group scale={S}>
+              <Port k={it.k} inner={it.inner} />
+            </group>
+            <Lbl pos={[0, 19, 0]} sub color={LC.gold}>
               {it.name}
             </Lbl>
-            <Lbl pos={[0, -13, 8]} sub color={LC.part}>
+            <Lbl pos={[0, -18, 4]} sub color={LC.part}>
               {it.sub}
             </Lbl>
           </group>
