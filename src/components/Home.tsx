@@ -133,6 +133,23 @@ function PcSketch() {
   );
 }
 
+/** Okładka routera: skrzynka z antenami i rozchodzące się fale. */
+function RouterSketch() {
+  return (
+    <svg className="row-svg" viewBox="0 0 320 180" aria-hidden focusable="false">
+      <g className="cover-motif">
+        <path d="M110 120 H210 V140 H110 Z" className="cv-ink" />
+        <path d="M118 120 V64 M134 120 V72 M186 120 V72 M202 120 V64" className="cv-ink" />
+        <path d="M126 130 H132 M140 130 H146 M154 130 H160" className="cv-thin" stroke="var(--accent)" />
+        <path d="M136 52 A34 34 0 0 1 184 52" className="cv-thin" stroke="var(--accent)" />
+        <path d="M120 38 A56 56 0 0 1 200 38" className="cv-thin" stroke="var(--accent)" />
+        <path d="M104 24 A78 78 0 0 1 216 24" className="cv-dash" stroke="var(--accent)" />
+        <path d="M24 152 H296" className="cv-dash" />
+      </g>
+    </svg>
+  );
+}
+
 function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
   return (
     <motion.li
@@ -142,10 +159,10 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
     >
       <Link to={`/temat/${m.topic}/1`} className="tile" style={{ '--accent': m.color } as CSSProperties}>
         <span className="tile-cover">
-          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : m.cover === 'atom' ? <NuclearSketch /> : m.cover === 'woda' ? <HydroSketch /> : m.cover === 'komputer' ? <PcSketch /> : <VolcanoSketch />}
+          {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : m.cover === 'atom' ? <NuclearSketch /> : m.cover === 'woda' ? <HydroSketch /> : m.cover === 'komputer' ? <PcSketch /> : m.cover === 'router' ? <RouterSketch /> : <VolcanoSketch />}
+          <span className="tile-title">{m.title}</span>
         </span>
         <span className="tile-body">
-          <span className="tile-title">{m.title}</span>
           <span className="tile-sum">{m.summary}</span>
         </span>
       </Link>

@@ -6,6 +6,7 @@ import { coalPlant } from './energy/coal';
 import { nuclearPlant } from './energy/nuclear';
 import { hydroPlant } from './energy/hydro';
 import { personalComputer } from './tech/pc';
+import { wifiRouter } from './tech/router';
 
 /**
  * Rejestr gotowych modeli. Aby dodać nowy model:
@@ -13,7 +14,7 @@ import { personalComputer } from './tech/pc';
  * 2. dopisz go do tej tablicy,
  * 3. w katalogu (src/lib/catalog.ts) uzupełnij pole `topic` wpisu tego modelu.
  */
-export const topics: Topic[] = [airplane, volcano, windFarm, coalPlant, nuclearPlant, hydroPlant, personalComputer];
+export const topics: Topic[] = [airplane, volcano, windFarm, coalPlant, nuclearPlant, hydroPlant, personalComputer, wifiRouter];
 
 /**
  * Dawne osobne tematy lotnicze są teraz zakładkami modułów samolotu – stare adresy przekierowują

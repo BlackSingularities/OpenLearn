@@ -14,7 +14,7 @@ export interface CatalogModel {
   /** Kolor akcentu karty. */
   color: string;
   /** Rysunek na okładce karty. */
-  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom' | 'woda' | 'komputer';
+  cover: 'samolot' | 'wulkan' | 'wiatrak' | 'wegiel' | 'atom' | 'woda' | 'komputer' | 'router';
 }
 
 export const catalog: CatalogModel[] = [
@@ -73,5 +73,13 @@ export const catalog: CatalogModel[] = [
     topic: 'komputer-osobisty',
     color: '#7c3aed',
     cover: 'komputer',
+  },
+  {
+    id: 'router-wifi',
+    title: 'Router Wi-Fi',
+    summary: 'Router w mieszkaniu w 3D: wnętrze routera, fale radiowe i przeszkody na mapie zasięgu, jak fala niesie bity, droga pakietu światłowodem do serwera, szyfrowanie i sieć mesh.',
+    topic: 'router-wifi',
+    color: '#0d9488',
+    cover: 'router',
   },
 ];
