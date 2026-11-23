@@ -21,26 +21,36 @@ const VRAM_AT: [number, number][] = [
   [-1.4, -3.7],
   [1.4, -3.7],
 ];
-import { Gpu, Hdd, M2Ssd, RamStick } from './pcParts';
+import { Gpu, Hdd, M2Ssd, RamStick, SSD_PARTS } from './pcParts';
 import { LC, LabStage, Slab } from './pcLabs';
 
 /* ================= wystawa pamięci ================= */
 
-/** Moduł RAM, dysk M.2 i dysk twardy bez pokrywy obok siebie, powiększone. */
+/** Obrót: lokalne osie modułu RAM (długość y, wysokość z, grubość x) → świat (długość x, wysokość y, grubość z). */
+const RAM_Q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
+
+/**
+ * Wystawa pamięci: dwa moduły RAM (z radiatorem i goły – widać kości), dysk SSD M.2 na podstawce i dysk twardy
+ * bez pokrywy z wirującym talerzem i ramieniem przeskakującym między ścieżkami.
+ */
 export function MemLab({ p, spin }: { p: V3; spin: () => number }) {
+  const n = MAT();
   return (
     <LabStage p={p} r={90}>
-      <group position={[-46, -40, 0]} rotation={[0, 0.45, 0]} scale={4}>
-        <group rotation={[0, -Math.PI / 2, 0]}>
-          <group rotation={[-Math.PI / 2, 0, 0]}>
-            <RamStick />
-          </group>
+      <group position={[-30, -86, -20]} scale={3.6}>
+        <group quaternion={RAM_Q}>
+          <RamStick />
+        </group>
+        <group position={[0, 0, 4.2]} quaternion={RAM_Q}>
+          <RamStick heatspreader={false} />
         </group>
       </group>
-      <group position={[0, -60, 18]} rotation={[-1.1, 0, 0]} scale={5}>
+      {/* podstawka z dyskiem M.2 */}
+      <Box p={[-26, -84.5, 24]} s={[44, 3, 14]} m={n.pedestalTop} />
+      <group position={[-26, -82.5, 24]} rotation={[-Math.PI / 2 + 0.25, 0, 0]} scale={5}>
         <M2Ssd />
       </group>
-      <group position={[44, -70, -4]} rotation={[0, -0.5, 0]} scale={3.2}>
+      <group position={[30, -86.2, 2]} rotation={[0, -0.35, 0]} scale={2.9}>
         <group position={[-(HDD.x0 + HDD.x1) / 2, -HDD.y0, -(HDD.z0 + HDD.z1) / 2]}>
           <Hdd lid={false} />
         </group>
@@ -50,9 +60,34 @@ export function MemLab({ p, spin }: { p: V3; spin: () => number }) {
   );
 }
 
+/** Ramię głowic: zwężający się kształt z otworami odciążającymi (płaszczyzna x–z, oś obrotu w 0,0). */
+let ARM: THREE.BufferGeometry | null = null;
+function armGeo() {
+  if (ARM) return ARM;
+  const s = new THREE.Shape();
+  s.moveTo(0.6, -0.75);
+  s.lineTo(-5.4, -0.22);
+  s.lineTo(-5.4, 0.22);
+  s.lineTo(0.6, 0.75);
+  s.lineTo(0.6, -0.75);
+  for (const [x, r] of [
+    [-1.6, 0.35],
+    [-3.1, 0.25],
+  ] as [number, number][]) {
+    const h = new THREE.Path();
+    h.absarc(x, 0, r, 0, Math.PI * 2, true);
+    s.holes.push(h);
+  }
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.14, bevelEnabled: false, curveSegments: 16 });
+  g.rotateX(Math.PI / 2);
+  ARM = g;
+  return g;
+}
+
 /**
- * Wnętrze dysku twardego (na wierzchu obudowy, bez pokrywy): talerz z połyskiem, oś, ramię z głowicą i silnik
- * cewki. Układ: środek dysku (x, z) = (0, 0), wierzch obudowy y = `y`.
+ * Wnętrze dysku twardego (w wannie obudowy): dwa talerze z dociskiem na śrubach, ramię głowic z zawieszeniem
+ * i głowicą, cewka z magnesem, rampa parkingowa, filtr powietrza i taśma sygnałowa. Środek dysku (x, z) =
+ * (0, 0), dno wnętrza na wysokości `y`. `arm()` 0…1 – położenie ramienia (od brzegu do środka talerza).
  */
 export function HddInside({ spin, arm, y }: { spin: () => number; arm: () => number; y: number }) {
   const n = MAT();
@@ -60,58 +95,162 @@ export function HddInside({ spin, arm, y }: { spin: () => number; arm: () => num
   const ar = useRef<THREE.Group>(null);
   const tex = useMemo(() => {
     const c = document.createElement('canvas');
-    c.width = c.height = 256;
+    c.width = c.height = 512;
     const g = c.getContext('2d')!;
-    const gr = g.createConicGradient(0, 128, 128);
-    gr.addColorStop(0, '#f1f4f8');
-    gr.addColorStop(0.25, '#9aa3ad');
-    gr.addColorStop(0.5, '#eef1f5');
-    gr.addColorStop(0.75, '#8d96a0');
-    gr.addColorStop(1, '#f1f4f8');
+    const gr = g.createConicGradient(0, 256, 256);
+    gr.addColorStop(0, '#f3f6fa');
+    gr.addColorStop(0.25, '#97a0aa');
+    gr.addColorStop(0.5, '#eef2f6');
+    gr.addColorStop(0.75, '#8b949e');
+    gr.addColorStop(1, '#f3f6fa');
     g.fillStyle = gr;
-    g.fillRect(0, 0, 256, 256);
+    g.fillRect(0, 0, 512, 512);
+    // ścieżki zapisu: drobne koncentryczne pierścienie
+    g.strokeStyle = 'rgba(60,70,90,0.12)';
+    for (let r = 70; r < 255; r += 3) {
+      g.beginPath();
+      g.arc(256, 256, r, 0, Math.PI * 2);
+      g.stroke();
+    }
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }, []);
-  const platter = useMemo(() => new THREE.MeshStandardMaterial({ map: tex, metalness: 0.95, roughness: 0.12 }), [tex]);
+  const platter = useMemo(() => new THREE.MeshStandardMaterial({ map: tex, metalness: 0.95, roughness: 0.1 }), [tex]);
   useFrame((_, dt) => {
     if (pl.current) pl.current.rotation.y += Math.min(dt, 0.05) * spin();
-    if (ar.current) ar.current.rotation.y = 0.15 + arm() * 0.45;
+    // kąt ramienia: −1,09 rad – głowica nad zewnętrzną ścieżką, −0,65 – nad wewnętrzną
+    if (ar.current) ar.current.rotation.y = -1.09 + arm() * 0.44;
   });
   const cx = -1.6;
+  const piv: V3 = [4.9, 0, 2.9];
   return (
     <group position={[0, y, 0]}>
       <Box p={[0, -0.25, 0]} s={[14.2, 0.1, 9.8]} m={n.aluDark} />
+      {/* talerze: dolny i górny z przekładką, docisk na sześciu śrubach */}
       <group ref={pl} position={[cx, 0, 0]}>
-        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} material={platter}>
-          <ringGeometry args={[1.2, 4.75, 64]} />
-        </mesh>
-        <Cyl p={[0, 0.15, 0]} r={1.2} h={0.3} m={n.steel} seg={24} />
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <Cyl key={i} p={[Math.cos(i) * 0.8, 0.32, Math.sin(i) * 0.8]} r={0.1} h={0.06} m={n.steelDark} seg={8} />
+        {[-0.55, 0.02].map((yy) => (
+          <mesh key={yy} position={[0, yy, 0]} rotation={[-Math.PI / 2, 0, 0]} material={platter}>
+            <ringGeometry args={[1.25, 4.75, 72]} />
+          </mesh>
         ))}
+        <Cyl p={[0, -0.27, 0]} r={1.25} h={0.55} m={n.steelDark} seg={28} />
+        <Cyl p={[0, 0.12, 0]} r={1.35} h={0.2} m={n.steel} seg={28} />
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <Cyl key={i} p={[Math.cos((i * Math.PI) / 3) * 0.95, 0.25, Math.sin((i * Math.PI) / 3) * 0.95]} r={0.13} h={0.08} m={n.steelDark} seg={8} />
+        ))}
+        <Cyl p={[0, 0.27, 0]} r={0.3} h={0.05} m={n.steelDark} seg={12} />
       </group>
-      {/* ramię głowic z osią i cewką */}
-      <group position={[4.6, 0.25, 3.4]}>
-        <Cyl p={[0, 0, 0]} r={0.55} h={0.6} m={n.steel} seg={20} />
-        <group ref={ar}>
-          <Box p={[-3.2, 0.25, -1.6]} s={[7, 0.14, 0.7]} r={[0, -0.45, 0]} m={n.steelDark} />
-          <Box p={[-6.35, 0.2, -3.1]} s={[0.5, 0.16, 0.35]} r={[0, -0.45, 0]} m={n.gold} />
-          <Box p={[1.4, 0.05, 0.7]} s={[1.8, 0.2, 1.6]} r={[0, -0.45, 0]} m={n.copper} />
+      {/* ramię głowic: oś, ramię, zawieszenie, głowica; po drugiej stronie osi cewka */}
+      <group position={piv}>
+        <Cyl p={[0, 0.2, 0]} r={0.6} h={0.8} m={n.steel} seg={24} />
+        <Cyl p={[0, 0.62, 0]} r={0.35} h={0.06} m={n.steelDark} seg={16} />
+        <group ref={ar} rotation={[0, -1.09, 0]}>
+          <group>
+            <mesh geometry={armGeo()} position={[0, 0.35, 0]} material={n.steelDark} />
+            <Box p={[-6.1, 0.27, 0]} s={[1.5, 0.03, 0.3]} m={n.steel} />
+            <Box p={[-6.85, 0.2, 0]} s={[0.22, 0.1, 0.16]} m={n.gold} />
+            <Box p={[1.15, 0.3, 0]} s={[1.2, 0.3, 1.4]} m={n.copper} />
+            <Box p={[1.15, 0.31, 0]} s={[0.6, 0.31, 0.7]} m={n.steelDark} />
+          </group>
         </group>
       </group>
-      <Box p={[6.2, 0.25, 3.2]} s={[1.4, 0.5, 2.8]} m={n.steelDark} />
+      {/* magnes cewki (górna płytka) */}
+      <Box p={[5.7, 0.75, 3.7]} s={[2.2, 0.25, 1.4]} r={[0, 0.2, 0]} m={n.steel} />
+      {/* rampa parkingowa przy brzegu talerza */}
+      <Box p={[2.4, 0.15, -3.4]} s={[0.9, 0.5, 0.5]} r={[0, -0.4, 0]} m={n.plastic} />
+      {/* filtr powietrza w rogu i taśma sygnałowa do złącza */}
+      <Box p={[-6.2, 0.1, -3.8]} s={[1.2, 0.6, 0.9]} m={n.white} />
       <Tube
         pts={[
-          [4.4, 0.1, 2.4],
-          [3, 0.1, 4.2],
-          [0, 0.1, 4.4],
+          [piv[0] + 0.3, 0.3, piv[2] - 0.6],
+          [5.8, 0.15, 0.5],
+          [6.3, 0.15, -2.5],
+          [6.6, 0.15, -3.8],
         ]}
-        r={0.08}
+        r={0.06}
         m={n.orange}
+        seg={6}
       />
+      <Box p={[6.5, 0.2, -3.9]} s={[0.5, 0.4, 1]} m={n.chip} />
+      {/* śruby pokrywy na brzegach wanny */}
+      {[
+        [-6.9, -4.6],
+        [0, -4.6],
+        [6.9, -4.6],
+        [-6.9, 4.6],
+        [0, 4.6],
+        [6.9, 4.6],
+      ].map(([x, z], i) => (
+        <Cyl key={i} p={[x, 1.86, z]} r={0.13} h={0.04} m={n.steelDark} seg={8} />
+      ))}
     </group>
+  );
+}
+
+/* ================= dysk SSD od środka ================= */
+
+/**
+ * Dysk M.2 powiększony 11×: dane przychodzą stykami złącza (4 tory PCIe) do kontrolera, ten rozsyła je
+ * równolegle czterema kanałami do każdej kości NAND i zagląda do pamięci DRAM, gdzie trzyma mapę: który
+ * blok danych leży w której komórce.
+ */
+export function SsdLab({ p }: { p: V3 }) {
+  const S = 11;
+  const z = 0.32;
+  const toCtrl: V3[][] = [-0.45, -0.15, 0.15, 0.45].map((yy) => [
+    [-3.9, yy, z],
+    [-3.3, yy * 0.8, z],
+    [SSD_PARTS.ctrl, yy * 0.5, z + 0.1],
+  ]);
+  const toNand: V3[][] = SSD_PARTS.nand.flatMap((x) =>
+    [-0.5, -0.17, 0.17, 0.5].map(
+      (yy) =>
+        [
+          [SSD_PARTS.ctrl + 0.6, yy * 0.6, z + 0.1],
+          [x - 0.9, yy, z],
+          [x, yy, z + 0.1],
+        ] as V3[],
+    ),
+  );
+  return (
+    <LabStage p={p} r={85}>
+      <group position={[0, -58, 4]} rotation={[-Math.PI / 2 + 0.75, 0, 0]} scale={S}>
+        <M2Ssd />
+        {toCtrl.map((pp, i) => (
+          <EnergyFlow key={`c${i}`} path={pp} count={6} speed={1.6} size={0.05} color="#86efac" />
+        ))}
+        {toNand.map((pp, i) => (
+          <EnergyFlow key={`n${i}`} path={pp} count={6} speed={1.4} size={0.045} color={i < 4 ? '#fdba74' : '#f9a8d4'} />
+        ))}
+        <EnergyFlow
+          path={[
+            [SSD_PARTS.ctrl + 0.2, 0.7, z + 0.1],
+            [SSD_PARTS.dram, 0.4, z + 0.05],
+            [SSD_PARTS.ctrl + 0.2, 0.1, z + 0.1],
+          ]}
+          count={5}
+          speed={1}
+          size={0.045}
+          color="#7dd3fc"
+        />
+        <Lbl pos={[-4.1, -1.5, 0.4]} sub color={LC.gold}>
+          złącze M.2: 4 tory PCIe
+        </Lbl>
+        <Lbl pos={[SSD_PARTS.ctrl, 1.3, 0.6]} sub color={LC.green}>
+          kontroler
+        </Lbl>
+        <Lbl pos={[SSD_PARTS.dram, -1.35, 0.5]} sub color={LC.cold}>
+          DRAM: mapa danych
+        </Lbl>
+        <Lbl pos={[(SSD_PARTS.nand[0] + SSD_PARTS.nand[1]) / 2, 1.35, 0.5]} sub color="#fdba74">
+          kości 3D NAND – po 4 kanały
+        </Lbl>
+        <Lbl pos={[SSD_PARTS.pmic - 0.3, -1.35, 0.4]} sub color={LC.part}>
+          zasilanie
+        </Lbl>
+      </group>
+    </LabStage>
   );
 }
 
@@ -143,6 +282,7 @@ export function DramLab({ p, t }: { p: V3; t: () => number }) {
   const lv = useRef(new Float32Array(G * G).fill(0));
   const lastRow = useRef(-1);
   const wordOn = useMemo(() => new THREE.MeshBasicMaterial({ color: '#facc15', toneMapped: false }), []);
+  const sense = useMemo(() => new THREE.MeshStandardMaterial({ color: '#1f3b2c', emissive: '#4ade80', emissiveIntensity: 0 }), []);
   useFrame((_, dt0) => {
     const dt = Math.min(dt0, 0.05);
     const time = t();
@@ -163,6 +303,7 @@ export function DramLab({ p, t }: { p: V3; t: () => number }) {
         }
         caps[i].emissiveIntensity = lv.current[i] * 0.9;
       }
+    sense.emissiveIntensity = refresh && time % 0.35 < 0.14 ? 1.2 : time < 2.5 ? 0.5 : 0.05;
     lastRow.current = refresh ? row : -1;
     word.current.forEach((m, r) => m && (m.material = (refresh ? row === r : Math.floor(time / 0.3) === r) ? wordOn : n.aluDark));
   });
@@ -177,6 +318,15 @@ export function DramLab({ p, t }: { p: V3; t: () => number }) {
         {Array.from({ length: G }, (_, c) => (
           <Box key={c} p={[-38.5 + c * step - 4, 1.4, 0]} s={[1, 0.6, G * step]} m={n.copper} />
         ))}
+        {/* wzmacniacze odczytu: na końcu każdej linii bitu – błyskają, gdy odczytują rząd */}
+        {Array.from({ length: G }, (_, c) => (
+          <mesh key={`s${c}`} position={[-38.5 + c * step - 4, 2, 49]} material={sense}>
+            <boxGeometry args={[6, 4, 4]} />
+          </mesh>
+        ))}
+        <Lbl pos={[0, 9, 54]} sub color={LC.green}>
+          wzmacniacze odczytu
+        </Lbl>
         {Array.from({ length: G * G }, (_, i) => {
           const r = Math.floor(i / G);
           const c = i % G;
@@ -228,7 +378,7 @@ export function NandLab({ p }: { p: V3 }) {
   }, []);
   return (
     <LabStage p={p}>
-      <group position={[0, -50, 0]}>
+      <group position={[8, -55, 10]} scale={0.72}>
         <Slab x0={-50} x1={50} y0={-6} y1={0} d={40} m={n.silicon} cut={n.cutSilicon} />
         {Array.from({ length: L }, (_, k) => (
           <Slab key={k} x0={-50} x1={50} y0={k * h} y1={k * h + h * 0.5} d={40} m={n.aluDark} cut={n.cutAlu} />
@@ -263,6 +413,30 @@ export function NandLab({ p }: { p: V3 }) {
             ))}
           </group>
         ))}
+        {/* schodki: każda linia słowa wystaje dalej, żeby dało się do niej doprowadzić kontakt z góry */}
+        {Array.from({ length: L }, (_, k) => {
+          const x0 = -50 - (L - k) * 1.6;
+          return (
+            <group key={`st${k}`}>
+              <Slab x0={x0} x1={-50} y0={k * h} y1={k * h + h * 0.5} d={40} m={n.aluDark} cut={n.cutAlu} />
+              <Slab x0={x0} x1={-50} y0={k * h + h * 0.5} y1={(k + 1) * h} d={40} m={n.white} cut={n.cutPlastic} />
+              <Cyl p={[x0 + 0.8, ((k + 1) * h + L * h + 4) / 2, -20]} r={0.45} h={L * h + 4 - (k + 1) * h} m={n.copper} seg={8} />
+            </group>
+          );
+        })}
+        {/* kanały w głębi stosu: widać ich miedziane zakończenia na wierzchu i linie bitu nad nimi */}
+        {holes.map((x) =>
+          [-12, -26].map((zz) => <Cyl key={`${x}${zz}`} p={[x, L * h + 0.6, zz]} r={2.2} h={1.2} m={n.copper} />),
+        )}
+        {holes.map((x) => (
+          <Box key={`bl${x}`} p={[x, L * h + 3.4, -18]} s={[1.6, 0.8, 40]} m={n.gold} />
+        ))}
+        <Lbl pos={[-75, L * h + 6, -20]} sub color={LC.gold}>
+          schodki z kontaktami linii słowa
+        </Lbl>
+        <Lbl pos={[36, L * h + 8, -30]} sub color={LC.gold}>
+          linie bitu
+        </Lbl>
         <Lbl pos={[-62, 30, 0]} sub color={LC.part}>
           {`${L} warstw (w nowych układach ponad 200)`}
         </Lbl>

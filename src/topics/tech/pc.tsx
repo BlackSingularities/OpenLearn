@@ -346,26 +346,26 @@ const memModule: PartModule = {
   steps: [
     pcs({
       title: 'Pamięć i dyski',
-      ...labCam('mem', 200, 150, 65),
+      ...labCam('mem', 145, 100, 22),
       preset: { mode: 'mem-home' },
       body: (
         <>
           <p>
             Komputer ma dwa rodzaje pamięci. <b>RAM</b> to pamięć robocza: szybka, ale zapomina wszystko po wyłączeniu prądu. <b>Dyski</b> pamiętają na stałe: SSD na kościach flash, a dysk twardy (HDD) na wirujących talerzach z magnetykiem.
           </p>
-          <p>Kliknij podpis części. Numery prowadzą do zakładek: komórki RAM, pamięć flash, dysk twardy i piramida pamięci.</p>
+          <p>Kliknij podpis części. Numery prowadzą do zakładek: komórki RAM, dysk SSD od środka, pamięć flash, dysk twardy i piramida pamięci.</p>
         </>
       ),
     }),
     pcs({
       title: 'Komórki pamięci RAM',
-      spot: at('mem', -48, 12, 6),
+      spot: at('mem', -38, -62, -10),
       ...labCam('dram', 115, 235, 25),
       preset: { mode: 'mem-dram' },
       body: (
         <>
           <p>
-            Każdy bit pamięci RAM to maleńki <b>kondensator</b> i <b>tranzystor</b>. Naładowany kondensator (świeci) oznacza 1, pusty – 0. Linia słowa włącza tranzystory całego rzędu, a linie bitu odczytują lub zapisują ładunek. Na siatce 8 × 8 zapisaliśmy literę „A”.
+            Każdy bit pamięci RAM to maleńki <b>kondensator</b> i <b>tranzystor</b>. Naładowany kondensator (świeci) oznacza 1, pusty – 0. Linia słowa włącza tranzystory całego rzędu, a linie bitu odczytują lub zapisują ładunek. Na końcu każdej linii bitu jest <b>wzmacniacz odczytu</b>: wyczuwa maleńki ładunek i rozpoznaje, czy to 0, czy 1. Na siatce 8 × 8 zapisaliśmy literę „A”.
           </p>
           <p>
             Kondensator jest tak mały, że ładunek z niego ucieka w ułamku sekundy. Dlatego pamięć jest <b>odświeżana</b>: co 32 ms każdy rząd jest odczytywany i ładowany od nowa. Moduł 32 GB ma ok. 275 miliardów takich komórek.
@@ -374,9 +374,25 @@ const memModule: PartModule = {
       ),
     }),
     pcs({
+      title: 'Dysk SSD od środka',
+      spot: at('mem', -26, -64, 30),
+      ...labCam('ssd', 115, 118, 42),
+      preset: { mode: 'mem-ssd' },
+      body: (
+        <>
+          <p>
+            Dysk M.2 powiększony 11 razy. Dane przychodzą złotymi stykami – czterema torami PCI Express – do <b>kontrolera</b>. To mały procesor, który zarządza całym dyskiem. Rozdziela dane i zapisuje je naraz w obu kościach <b>NAND</b>, każdą czterema kanałami. Dlatego SSD jest tak szybki: pracuje kilkadziesiąt komórek jednocześnie.
+          </p>
+          <p>
+            Kość <b>DRAM</b> trzyma mapę – który kawałek pliku leży w której komórce. Kontroler pilnuje też, żeby wszystkie komórki zużywały się po równo, bo każdą da się zapisać tylko kilka tysięcy razy. Mimo to dysk wytrzyma ponad tysiąc terabajtów zapisu – dziesiątki lat zwykłej pracy.
+          </p>
+        </>
+      ),
+    }),
+    pcs({
       title: 'Pamięć flash w dysku SSD',
-      spot: at('mem', 0, -22, 20),
-      ...labCam('nand', 240, 120, 82),
+      spot: at('mem', -14, -70, 26),
+      ...labCam('nand', 190, 175, 62, -30),
       preset: { mode: 'mem-nand' },
       body: (
         <>
@@ -384,14 +400,14 @@ const memModule: PartModule = {
             Dysk SSD zapisuje dane w pamięci <b>NAND flash</b>. W nowoczesnych kościach komórki ułożone są w wysokie stosy – ponad 200 warstw jedna na drugiej, jak wieżowiec. Przez cały stos przewiercone są pionowe kanały.
           </p>
           <p>
-            W każdej warstwie wokół kanału jest <b>warstwa pułapkująca</b>. Gdy wtłoczy się do niej elektrony (niebieskie kropki), zostają tam latami – także bez prądu. Ilość ładunku zapisuje 1 do 4 bitów. Kontroler rozkłada zapis po całym dysku, żeby komórki zużywały się równo.
+            W każdej warstwie wokół kanału jest <b>warstwa pułapkująca</b>. Gdy wtłoczy się do niej elektrony (niebieskie kropki), zostają tam latami – także bez prądu. Ilość ładunku zapisuje 1 do 4 bitów. Każda warstwa to linia słowa – z lewej strony stos jest ścięty w schodki, żeby do każdej warstwy dało się z góry doprowadzić kontakt. Na wierzchu biegną linie bitu, połączone z kanałami.
           </p>
         </>
       ),
     }),
     pcs({
       title: 'Dysk twardy',
-      spot: at('mem', 44, -40, 10),
+      spot: at('mem', 34, -74, 10),
       ...labCam('hdd', 150, 195, 55),
       preset: { mode: 'mem-hdd' },
       body: (
@@ -407,7 +423,7 @@ const memModule: PartModule = {
     }),
     pcs({
       title: 'Piramida pamięci',
-      spot: at('mem', 0, -48, 20),
+      spot: at('mem', 0, -80, 34),
       ...labCam('pyr', 210, 140, 45),
       preset: { mode: 'mem-pyr' },
       body: (

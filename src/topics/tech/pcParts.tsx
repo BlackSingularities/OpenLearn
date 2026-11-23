@@ -172,6 +172,18 @@ export function Hdd({ lid = true }: { lid?: boolean }) {
         <>
           <Box p={[(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]} s={[x1 - x0, y1 - y0, z1 - z0]} m={n.hdd} />
           <Box p={[(x0 + x1) / 2 + 1, y1 + 0.01, (z0 + z1) / 2]} s={[9, 0.02, 7]} m={sticker} />
+          {/* śruby pokrywy i otwór wyrównujący ciśnienie */}
+          {[
+            [x0 + 0.5, z0 + 0.5],
+            [x1 - 0.5, z0 + 0.5],
+            [x0 + 0.5, z1 - 0.5],
+            [x1 - 0.5, z1 - 0.5],
+            [(x0 + x1) / 2 - 3, z0 + 0.5],
+            [(x0 + x1) / 2 - 3, z1 - 0.5],
+          ].map(([x, z], i) => (
+            <Cyl key={i} p={[x, y1 + 0.03, z]} r={0.18} h={0.05} m={n.steelDark} seg={8} />
+          ))}
+          <Cyl p={[x0 + 3, y1 + 0.02, (z0 + z1) / 2]} r={0.35} h={0.03} m={n.chip} seg={16} />
         </>
       ) : (
         <>
@@ -219,54 +231,259 @@ export function tickRgb(dt: number) {
 }
 
 /**
- * Moduł RAM DDR5: laminat z kośćmi pamięci po obu stronach, złocone styki, radiator. Układ lokalny: długość wzdłuż
- * y (13,3 cm), wysokość wzdłuż z, grubość wzdłuż x. Punkt (0,0,0) – środek dolnej krawędzi styków.
+ * Płaska ściana w płaszczyźnie y–z (szerokość wzdłuż y, wysokość wzdłuż z), zwrócona w +x albo −x – do tekstur
+ * na bokach modułu RAM (napis czyta się poprawnie z obu stron).
+ */
+function SidePlane({ p, w, h, m, dir }: { p: V3; w: number; h: number; m: THREE.Material; dir: 1 | -1 }) {
+  const q = useMemo(() => {
+    const mtx = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, dir, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(dir, 0, 0));
+    return new THREE.Quaternion().setFromRotationMatrix(mtx);
+  }, [dir]);
+  return (
+    <mesh position={p} quaternion={q} material={m}>
+      <planeGeometry args={[w, h]} />
+    </mesh>
+  );
+}
+
+/** Laminat modułu RAM: zielony, ze ścieżkami, nadrukiem i 144 złoconymi stykami z wycięciem (klucz). */
+const ramPcbMat = () =>
+  texMat(
+    'rampcb',
+    1330,
+    310,
+    (g, W, H) => {
+      g.fillStyle = '#1b5a37';
+      g.fillRect(0, 0, W, H);
+      const r = rng(61);
+      g.strokeStyle = 'rgba(140,210,150,0.35)';
+      g.lineWidth = 1.5;
+      for (let k = 0; k < 120; k++) {
+        const x = r() * W;
+        const y = 60 + r() * 170;
+        g.beginPath();
+        g.moveTo(x, y);
+        g.lineTo(x, y + 20 + r() * 40);
+        g.lineTo(x + (r() - 0.5) * 40, 262);
+        g.stroke();
+      }
+      g.fillStyle = 'rgba(240,240,230,0.85)';
+      g.font = 'bold 18px sans-serif';
+      g.fillText('DDR5  32GB  1Rx8  PC5-48000', 40, 34);
+      g.fillText('PMIC', 640, 34);
+      // złocone styki z wycięciem kluczującym (poza środkiem – modułu nie da się włożyć odwrotnie)
+      g.fillStyle = '#d8b04a';
+      for (let k = 0; k < 144; k++) {
+        const x = 18 + k * 8.9;
+        if (x > 575 && x < 605) continue;
+        g.fillRect(x, 262, 5.5, 46);
+      }
+      g.fillStyle = '#0f1a14';
+      g.fillRect(578, 255, 24, 55);
+    },
+    { roughness: 0.5, metalness: 0.15 },
+  );
+/** Kość DRAM z oznaczeniem. */
+const dramChipMat = () =>
+  texMat(
+    'dramchip',
+    160,
+    140,
+    (g, W, H) => {
+      g.fillStyle = '#1d1f23';
+      g.fillRect(0, 0, W, H);
+      g.fillStyle = '#9aa1aa';
+      g.font = 'bold 20px monospace';
+      ['D5 16Gb', 'X8 6000', '2347 KR'].forEach((l, k) => g.fillText(l, 12, 36 + k * 34));
+      g.beginPath();
+      g.arc(16, H - 14, 5, 0, Math.PI * 2);
+      g.fill();
+    },
+    { roughness: 0.45 },
+  );
+/** Radiator modułu: grafitowe aluminium z frezowanymi liniami i naklejką. */
+const ramSpreaderMat = () =>
+  texMat(
+    'ramhs',
+    1340,
+    340,
+    (g, W, H) => {
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, '#3a3f47');
+      bg.addColorStop(1, '#23272d');
+      g.fillStyle = bg;
+      g.fillRect(0, 0, W, H);
+      const r = rng(8);
+      for (let k = 0; k < 400; k++) {
+        g.fillStyle = `rgba(255,255,255,${0.02 + r() * 0.04})`;
+        g.fillRect(0, r() * H, W, 1);
+      }
+      g.strokeStyle = 'rgba(200,206,214,0.6)';
+      g.lineWidth = 3;
+      for (const x of [380, 420, 920, 960]) {
+        g.beginPath();
+        g.moveTo(x, 40);
+        g.lineTo(x + 80, H - 30);
+        g.stroke();
+      }
+      g.fillStyle = '#c9ced5';
+      g.fillRect(480, 120, 380, 110);
+      g.fillStyle = '#1d2025';
+      g.font = 'bold 44px sans-serif';
+      g.textAlign = 'center';
+      g.fillText('DDR5-6000', 670, 172);
+      g.font = '28px sans-serif';
+      g.fillText('32 GB  ·  CL30', 670, 212);
+    },
+    { metalness: 0.55, roughness: 0.4 },
+  );
+
+/**
+ * Moduł RAM DDR5: laminat ze ścieżkami i 288 złoconymi stykami, 8 kości DRAM, układ zasilania PMIC i układ SPD,
+ * radiator z naklejką i pasek podświetlenia. Układ lokalny: długość wzdłuż y (13,3 cm), wysokość wzdłuż z,
+ * grubość wzdłuż x. Punkt (0,0,0) – środek dolnej krawędzi styków. `heatspreader={false}` – goły laminat.
  */
 export function RamStick({ heatspreader = true }: { heatspreader?: boolean }) {
   const n = MAT();
-  const chip = useMemo(() => labelMat('dram', ['DDR5'], '#16181b', '#80868f'), []);
-  const label = useMemo(() => labelMat('ram', ['32 GB', 'DDR5-6000'], '#25282d', '#f2f2f2'), []);
+  const pcb = ramPcbMat();
   return (
     <group>
       <Box p={[0, 0, 1.55]} s={[0.12, 13.3, 3.1]} m={n.greenBoard} />
-      {/* złocone styki: 2 × 144 */}
-      {[-1, 1].map((s) => (
-        <Box key={s} p={[s * 0.065, 0, 0.35]} s={[0.01, 13, 0.6]} m={n.gold} />
+      {[1, -1].map((d) => (
+        <SidePlane key={d} p={[d * 0.061, 0, 1.55]} w={13.3} h={3.1} m={pcb} dir={d as 1 | -1} />
       ))}
-      <Box p={[0, 0.9, 0.2]} s={[0.14, 0.2, 0.4]} m={n.slot} />
-      {/* kości DRAM: po 4 na stronę */}
-      {[-1, 1].map((s) =>
-        [-4.6, -1.6, 1.8, 4.8].map((y) => <Box key={`${s}${y}`} p={[s * 0.12, y, 1.8]} s={[0.1, 1.1, 1.3]} m={chip} />),
+      {/* 8 kości DRAM (po jednej stronie), PMIC i SPD na środku */}
+      {[-5.6, -4.1, -2.6, -1.1, 1.3, 2.8, 4.3, 5.8].map((y) => (
+        <group key={y}>
+          <Box p={[0.12, y, 1.75]} s={[0.12, 1.15, 1.0]} m={n.chip} />
+          <SidePlane p={[0.181, y, 1.75]} w={1.15} h={1.0} m={dramChipMat()} dir={1} />
+        </group>
+      ))}
+      <Box p={[0.11, 0.1, 2.55]} s={[0.1, 0.5, 0.5]} m={n.chip} />
+      <Box p={[0.1, 0.1, 1.25]} s={[0.08, 0.3, 0.25]} m={n.chipGrey} />
+      {Array.from({ length: 18 }, (_, i) => (
+        <Box key={i} p={[0.09, -6 + i * 0.7, 0.95]} s={[0.05, 0.18, 0.09]} m={n.solder} />
+      ))}
+      {heatspreader && (
+        <group>
+          {[1, -1].map((d) => (
+            <group key={d}>
+              <Box p={[d * 0.32, 0, 2.3]} s={[0.1, 13.4, 3.4]} m={n.aluDark} />
+              <SidePlane p={[d * 0.372, 0, 2.3]} w={13.4} h={3.4} m={ramSpreaderMat()} dir={d as 1 | -1} />
+            </group>
+          ))}
+          <Box p={[0, 0, 4.05]} s={[0.74, 13.4, 0.2]} m={n.aluDark} />
+          <Box p={[0, 0, 4.3]} s={[0.5, 13, 0.3]} m={rgbMat()} />
+        </group>
       )}
-      <Box p={[0.12, 0, 2.7]} s={[0.08, 0.6, 0.5]} m={n.chip} />
-      {heatspreader &&
-        [-1, 1].map((s) => (
-          <group key={s}>
-            <Box p={[s * 0.32, 0, 2.3]} s={[0.1, 13.4, 3.4]} m={n.aluDark} />
-            <Box p={[s * 0.38, 0, 2.4]} s={[0.02, 5, 1.2]} m={label} />
-          </group>
-        ))}
-      {heatspreader && <Box p={[0, 0, 4.05]} s={[0.74, 13.4, 0.2]} m={n.aluDark} />}
-      {heatspreader && <Box p={[0, 0, 4.3]} s={[0.5, 13, 0.3]} m={rgbMat()} />}
     </group>
   );
 }
 
-/** Dysk SSD M.2 2280: laminat, kontroler, dwie kości NAND, kość DRAM, złocone styki. Długość wzdłuż x, szerokość y. */
+/** Laminat dysku M.2: czarny, ze ścieżkami, nadrukiem i stykami z wycięciem „klucz M”. */
+const ssdPcbMat = () =>
+  texMat(
+    'ssdpcb',
+    800,
+    220,
+    (g, W, H) => {
+      g.fillStyle = '#121417';
+      g.fillRect(0, 0, W, H);
+      const r = rng(71);
+      g.strokeStyle = 'rgba(80,90,104,0.9)';
+      g.lineWidth = 1.4;
+      // wiązki: złącze → kontroler, kontroler → kości NAND (4 kanały)
+      for (let k = 0; k < 10; k++) {
+        g.beginPath();
+        g.moveTo(40, 40 + k * 14);
+        g.lineTo(80, 50 + k * 12);
+        g.stroke();
+      }
+      for (let ch = 0; ch < 4; ch++)
+        for (let k = 0; k < 5; k++) {
+          const y = 30 + ch * 42 + k * 5;
+          g.beginPath();
+          g.moveTo(205, y);
+          g.lineTo(380 + (ch % 2) * 190, y);
+          g.stroke();
+        }
+      g.fillStyle = 'rgba(210,190,110,0.8)';
+      for (let k = 0; k < 120; k++) g.fillRect(r() * W, r() * H, 5, 3);
+      // styki z kluczem M (wycięcie bliżej prawej krawędzi złącza)
+      g.fillStyle = '#d8b04a';
+      for (let k = 0; k < 30; k++) {
+        const y = 8 + k * 7;
+        if (y > 150 && y < 172) continue;
+        g.fillRect(0, y, 28, 4.5);
+      }
+      g.fillStyle = '#e8eaee';
+      g.font = 'bold 14px sans-serif';
+      g.fillText('M.2 2280  NVMe  PCIe 4.0 x4', 360, 210);
+      // półkole na śrubę
+      g.fillStyle = '#d8b04a';
+      g.beginPath();
+      g.arc(W, H / 2, 16, 0, Math.PI * 2);
+      g.fill();
+    },
+    { roughness: 0.5 },
+  );
+const ssdChip = (key: string, lines: string[], bg = '#1b1d21') =>
+  texMat(
+    key,
+    200,
+    200,
+    (g, W, H) => {
+      g.fillStyle = bg;
+      g.fillRect(0, 0, W, H);
+      g.fillStyle = '#a7aeb7';
+      g.font = 'bold 24px monospace';
+      lines.forEach((l, k) => g.fillText(l, 14, 50 + k * 36));
+      g.beginPath();
+      g.arc(18, H - 18, 6, 0, Math.PI * 2);
+      g.fill();
+    },
+    { roughness: 0.45 },
+  );
+
+/**
+ * Dysk SSD M.2 2280: laminat ze stykami (klucz M), kontroler, kość DRAM, dwie kości 3D NAND, układ zasilania
+ * i półokrągłe wycięcie na śrubę. Długość wzdłuż x (8 cm), szerokość wzdłuż y, grubość wzdłuż z.
+ */
+export const SSD_PARTS = { ctrl: -2.5, dram: -1.0, nand: [0.75, 2.75] as number[], pmic: 3.85 };
 export function M2Ssd() {
   const n = MAT();
-  const ctrl = useMemo(() => labelMat('ctrl', ['CONTROLLER'], '#1c1e22', '#9ba1a9'), []);
-  const nand = useMemo(() => labelMat('nand', ['NAND', '1 TB'], '#16181b', '#9ba1a9'), []);
+  const top = useMemo(() => ssdPcbMat(), []);
   return (
     <group>
-      <Box p={[0, 0, 0.04]} s={[8, 2.2, 0.08]} m={n.board} />
-      <Box p={[-3.85, 0, 0.04]} s={[0.3, 2.2, 0.085]} m={n.gold} />
-      <Box p={[-2.6, 0, 0.17]} s={[1.3, 1.3, 0.18]} m={ctrl} />
-      <Box p={[-1.1, 0, 0.13]} s={[0.8, 1, 0.1]} m={n.chip} />
-      {[0.7, 2.6].map((x) => (
-        <Box key={x} p={[x, 0, 0.17]} s={[1.5, 1.6, 0.16]} m={nand} />
+      <Box p={[0, 0, 0.04]} s={[8, 2.2, 0.08]} m={n.boardEdge} />
+      <mesh position={[0, 0, 0.081]} material={top}>
+        <planeGeometry args={[8, 2.2]} />
+      </mesh>
+      <group position={[SSD_PARTS.ctrl, 0, 0.17]}>
+        <Box p={[0, 0, 0]} s={[1.3, 1.3, 0.18]} m={n.chip} />
+        <mesh position={[0, 0, 0.091]} material={ssdChip('ssdctrl', ['NVMe', 'CTRL', '8ch'], '#22252a')}>
+          <planeGeometry args={[1.3, 1.3]} />
+        </mesh>
+        <Box p={[0, 0, 0.1]} s={[0.9, 0.9, 0.02]} m={n.nickel} />
+      </group>
+      <group position={[SSD_PARTS.dram, 0, 0.14]}>
+        <Box p={[0, 0, 0]} s={[0.8, 1.0, 0.12]} m={n.chip} />
+        <mesh position={[0, 0, 0.061]} material={ssdChip('ssddram', ['LPDDR4', '1GB'])}>
+          <planeGeometry args={[0.8, 1.0]} />
+        </mesh>
+      </group>
+      {SSD_PARTS.nand.map((x) => (
+        <group key={x} position={[x, 0, 0.17]}>
+          <Box p={[0, 0, 0]} s={[1.5, 1.6, 0.16]} m={n.chip} />
+          <mesh position={[0, 0, 0.081]} material={ssdChip('ssdnand', ['3D NAND', '176L TLC', '1 TB'])}>
+            <planeGeometry args={[1.5, 1.6]} />
+          </mesh>
+        </group>
       ))}
-      <Cyl p={[3.9, 0, 0.1]} r={0.25} h={0.1} m={n.gold} axis="z" />
+      <Box p={[SSD_PARTS.pmic - 0.3, 0.55, 0.13]} s={[0.45, 0.45, 0.1]} m={n.chip} />
+      {Array.from({ length: 12 }, (_, i) => (
+        <Box key={i} p={[-1.7 + (i % 6) * 0.3, i < 6 ? 0.85 : -0.85, 0.11]} s={[0.12, 0.07, 0.06]} m={n.solder} />
+      ))}
     </group>
   );
 }

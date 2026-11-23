@@ -57,7 +57,7 @@ import { Computer, tickRgb } from './pcParts';
 import { Shadow } from './pcMats';
 import { Keyboard, KeyboardCable, Monitor, Mouse, Room, type ScreenState } from './pcDesk';
 import { CoolLab, CpuCutLab, DieLab, FinLab, PcbLab, PipeLab, PsuLab } from './pcLabs';
-import { CoresLab, DramLab, GpuLab, HddLab, KeyLab, LcdLab, MemLab, MouseLab, NandLab, PortsLab, PyrLab, RasterLab } from './pcLabs2';
+import { CoresLab, DramLab, GpuLab, HddLab, KeyLab, LcdLab, MemLab, MouseLab, NandLab, PortsLab, PyrLab, RasterLab, SsdLab } from './pcLabs2';
 import { CrtLab, MediaLab, MooreLab, Museum, TubeLab } from './pcHistory';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
@@ -94,6 +94,7 @@ const CFG: Record<string, Partial<Cfg>> = {
   'cpu-cool': { lab: 'cool' },
   'mem-home': { lab: 'mem' },
   'mem-dram': { lab: 'dram' },
+  'mem-ssd': { lab: 'ssd' },
   'mem-nand': { lab: 'nand' },
   'mem-hdd': { lab: 'hdd' },
   'mem-pyr': { lab: 'pyr' },
@@ -201,10 +202,10 @@ function homeParts(mode: string): Record<string, PartInfo> | null {
       };
     case 'mem-home':
       return {
-        ram: { name: 'moduł RAM', desc: 'Pamięć operacyjna DDR5: osiem kości DRAM po 4 GB. Trzyma dane programów, które są właśnie używane. Po wyłączeniu prądu wszystko z niej znika.', pos: L('mem', -46, -14, 14) },
-        spd: { name: 'radiator i styki', desc: 'Aluminiowy radiator odprowadza ciepło z kości. Na dole złocone styki – po 144 z każdej strony – i wycięcie, które nie pozwala włożyć modułu odwrotnie.', pos: L('mem', -62, -34, 6) },
-        ssd: { name: 'dysk SSD M.2', desc: 'Pamięć trwała bez ruchomych części. Kontroler zarządza zapisem, w kościach NAND dane zostają po wyłączeniu prądu, a mała pamięć DRAM przyspiesza wyszukiwanie.', pos: L('mem', 0, -30, 26) },
-        hdd: { name: 'dysk twardy', desc: 'Pod pokrywą wirują talerze pokryte magnetykiem. Głowica na ramieniu unosi się nad nimi na poduszce powietrza cieńszej niż odcisk palca.', pos: L('mem', 44, -42, 10) },
+        ram: { name: 'moduł RAM', desc: 'Pamięć operacyjna DDR5: osiem kości DRAM po 4 GB. Trzyma dane programów, które są właśnie używane. Po wyłączeniu prądu wszystko z niej znika.', pos: L('mem', -30, -58, -14) },
+        spd: { name: 'radiator i styki', desc: 'Aluminiowy radiator odprowadza ciepło z kości. Na dole złocone styki – po 144 z każdej strony – i wycięcie, które nie pozwala włożyć modułu odwrotnie.', pos: L('mem', -56, -84, -4) },
+        ssd: { name: 'dysk SSD M.2', desc: 'Pamięć trwała bez ruchomych części. Kontroler zarządza zapisem, w kościach NAND dane zostają po wyłączeniu prądu, a mała pamięć DRAM przyspiesza wyszukiwanie.', pos: L('mem', -26, -70, 34) },
+        hdd: { name: 'dysk twardy', desc: 'Pod pokrywą wirują talerze pokryte magnetykiem. Głowica na ramieniu unosi się nad nimi na poduszce powietrza cieńszej niż odcisk palca.', pos: L('mem', 30, -68, 12) },
       };
     case 'gpu-home':
       return {
@@ -494,6 +495,21 @@ export function PcScene({ params }: SceneProps) {
         />
       </>
     );
+  else if (mode === 'mem-ssd')
+    info = (
+      <>
+        <div style={{ fontWeight: 700, color: PART_C }}>Dysk SSD w liczbach</div>
+        <Rows
+          list={[
+            ['odczyt', 'ok. 7 000 MB/s'],
+            ['zapis', 'ok. 6 000 MB/s'],
+            ['czas dostępu', 'ok. 0,06 ms'],
+            ['kanały kontrolera', '8 (po 4 na kość)'],
+            ['trwałość', 'ok. 1 200 TB zapisu'],
+          ]}
+        />
+      </>
+    );
   else if (mode === 'mem-pyr')
     info = (
       <>
@@ -698,6 +714,7 @@ export function PcScene({ params }: SceneProps) {
       {lab === 'mem' && <MemLab p={LAB.mem} spin={() => 4} />}
       {lab === 'dram' && <DramLab p={LAB.dram} t={() => tAll.current % 16} />}
       {lab === 'nand' && <NandLab p={LAB.nand} />}
+      {lab === 'ssd' && <SsdLab p={LAB.ssd} />}
       {lab === 'hdd' && <HddLab p={LAB.hdd} spin={() => 9} />}
       {lab === 'pyr' && <PyrLab p={LAB.pyr} />}
       {lab === 'gpu' && <GpuLab p={LAB.gpu} spin={spin} ex={() => st.current.gex} />}
