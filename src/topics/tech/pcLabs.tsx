@@ -657,7 +657,7 @@ export function PipeLab({ p, tick }: { p: V3; tick: () => number }) {
  */
 export function CoolLab({ p, fan }: { p: V3; fan: () => number }) {
   const n = MAT();
-  const S = 3;
+  const S = 4.6;
   const heat: V3[][] = [-1.8, -0.6, 0.6, 1.8].map((x, i) => [
     [0, 0.2, 0],
     [x * 0.5, 0.75, 0],
@@ -675,7 +675,7 @@ export function CoolLab({ p, fan }: { p: V3; fan: () => number }) {
   ]);
   return (
     <LabStage p={p}>
-      <group position={[0, -60, 0]}>
+      <group position={[-6, -62, 0]}>
         <group scale={S}>
           {/* kawałek płyty, procesor */}
           <Slab x0={-6} x1={6} y0={-0.6} y1={-0.4} d={6} m={n.board} cut={n.cutBoard} />

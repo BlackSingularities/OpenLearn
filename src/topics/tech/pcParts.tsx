@@ -168,8 +168,23 @@ export function Hdd({ lid = true }: { lid?: boolean }) {
   const { x0, x1, y0, y1, z0, z1 } = HDD;
   return (
     <group>
-      <Box p={[(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]} s={[x1 - x0, y1 - y0, z1 - z0]} m={n.hdd} />
-      {lid && <Box p={[(x0 + x1) / 2 + 1, y1 + 0.01, (z0 + z1) / 2]} s={[9, 0.02, 7]} m={sticker} />}
+      {lid ? (
+        <>
+          <Box p={[(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2]} s={[x1 - x0, y1 - y0, z1 - z0]} m={n.hdd} />
+          <Box p={[(x0 + x1) / 2 + 1, y1 + 0.01, (z0 + z1) / 2]} s={[9, 0.02, 7]} m={sticker} />
+        </>
+      ) : (
+        <>
+          {/* odlewana wanna z aluminium: dno i ścianki */}
+          <Box p={[(x0 + x1) / 2, y0 + 0.25, (z0 + z1) / 2]} s={[x1 - x0, 0.5, z1 - z0]} m={n.hdd} />
+          {[z0 + 0.2, z1 - 0.2].map((z) => (
+            <Box key={z} p={[(x0 + x1) / 2, (y0 + y1) / 2, z]} s={[x1 - x0, y1 - y0, 0.4]} m={n.hdd} />
+          ))}
+          {[x0 + 0.2, x1 - 0.2].map((x) => (
+            <Box key={x} p={[x, (y0 + y1) / 2, (z0 + z1) / 2]} s={[0.4, y1 - y0, z1 - z0]} m={n.hdd} />
+          ))}
+        </>
+      )}
       <Box p={[x0 - 0.1, 1.8, 7]} s={[0.2, 0.6, 2.2]} m={n.slot} />
       <Box p={[x0 - 0.1, 1.8, 10.5]} s={[0.2, 0.6, 1.4]} m={n.slot} />
     </group>
@@ -177,6 +192,31 @@ export function Hdd({ lid = true }: { lid?: boolean }) {
 }
 
 /* ================= pamięć RAM i dysk M.2 ================= */
+
+/** Mleczny pasek podświetlenia z tęczowym gradientem, który powoli przesuwa się wzdłuż modułu. */
+let RGB: THREE.MeshBasicMaterial | null = null;
+function rgbMat() {
+  if (RGB) return RGB;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 4;
+  const g = c.getContext('2d')!;
+  const gr = g.createLinearGradient(0, 0, 256, 0);
+  ['#ff3d6e', '#ffb43d', '#4dff8a', '#3dc8ff', '#a63dff', '#ff3d6e'].forEach((col, i, arr) => gr.addColorStop(i / (arr.length - 1), col));
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 256, 4);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.center.set(0.5, 0.5);
+  t.rotation = Math.PI / 2;
+  RGB = new THREE.MeshBasicMaterial({ map: t, toneMapped: false });
+  return RGB;
+}
+/** Przesuwa gradient podświetlenia (wywoływane co klatkę ze sceny). */
+export function tickRgb(dt: number) {
+  if (RGB?.map) RGB.map.offset.x = (RGB.map.offset.x + dt * 0.15) % 1;
+}
 
 /**
  * Moduł RAM DDR5: laminat z kośćmi pamięci po obu stronach, złocone styki, radiator. Układ lokalny: długość wzdłuż
@@ -207,6 +247,7 @@ export function RamStick({ heatspreader = true }: { heatspreader?: boolean }) {
           </group>
         ))}
       {heatspreader && <Box p={[0, 0, 4.05]} s={[0.74, 13.4, 0.2]} m={n.aluDark} />}
+      {heatspreader && <Box p={[0, 0, 4.3]} s={[0.5, 13, 0.3]} m={rgbMat()} />}
     </group>
   );
 }
@@ -317,6 +358,100 @@ export function TowerCooler({ spin, fins = true }: { spin: () => number; fins?: 
 
 /* ================= płyta główna ================= */
 
+/**
+ * Laminat płyty głównej narysowany w skali: czarna maska, wiązki ścieżek (procesor → pamięć, procesor → slot PCIe,
+ * procesor → chipset), białe nadruki – obrysy złączy i ich nazwy, jak na prawdziwej płycie.
+ */
+let MB_MAT: THREE.MeshStandardMaterial | null = null;
+function mbMat() {
+  if (MB_MAT) return MB_MAT;
+  const W = 1024;
+  const H = Math.round((W * (MB.y1 - MB.y0)) / (MB.x1 - MB.x0));
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const k = W / (MB.x1 - MB.x0);
+  const u = (x: number) => (x - MB.x0) * k;
+  const v = (y: number) => (MB.y1 - y) * k;
+  g.fillStyle = '#131518';
+  g.fillRect(0, 0, W, H);
+  // wiązki ścieżek: kilkanaście równoległych linii z załamaniami
+  const bundle = (pts: [number, number][], n: number, gap: number, col: string) => {
+    g.strokeStyle = col;
+    g.lineWidth = 1.3;
+    for (let i = 0; i < n; i++) {
+      const o = (i - (n - 1) / 2) * gap;
+      g.beginPath();
+      pts.forEach(([x, y], j) => {
+        const px = u(x);
+        const py = v(y) + o;
+        if (j) g.lineTo(px, py);
+        else g.moveTo(px, py);
+      });
+      g.stroke();
+    }
+  };
+  const tr = 'rgba(78,88,100,0.9)';
+  bundle([[SOCKET.x + 2.6, SOCKET.y + 1.2], [-4.5, SOCKET.y + 1.2], [-3.4, 35.5], [DIMMS[3] + 0.4, 35.5]], 14, 2.2, tr);
+  bundle([[SOCKET.x + 2.6, SOCKET.y - 1.4], [-4.5, SOCKET.y - 1.4], [-3.4, 29.6], [DIMMS[3] + 0.4, 29.6]], 14, 2.2, tr);
+  bundle([[SOCKET.x - 1, SOCKET.y - 3.4], [SOCKET.x - 1, 27.6], [-14.5, 24.2], [-14.5, PCIE.y + 0.5]], 16, 2.4, tr);
+  bundle([[SOCKET.x + 1.6, SOCKET.y - 3.4], [SOCKET.x + 1.6, 26], [-4.2, 22.6], [CHIPSET.x, CHIPSET.y + 2.3]], 8, 2.2, tr);
+  bundle([[CHIPSET.x + 2.4, CHIPSET.y], [SATA.x - 0.8, SATA.y]], 8, 2.2, tr);
+  bundle([[CHIPSET.x - 2.4, CHIPSET.y - 0.6], [-12, 16.8], [CODEC.x + 1, CODEC.y]], 6, 2.2, tr);
+  bundle([[-15, 30], [-20.5, 30]], 10, 2.4, tr);
+  // pola lutownicze drobnych elementów (rezystory, kondensatory)
+  const r = rng(91);
+  g.fillStyle = 'rgba(200,180,110,0.75)';
+  for (let i = 0; i < 260; i++) {
+    const x = MB.x0 + r() * (MB.x1 - MB.x0);
+    const y = MB.y0 + r() * (MB.y1 - MB.y0);
+    g.fillRect(u(x), v(y), 4, 2);
+    g.fillRect(u(x) + 7, v(y), 4, 2);
+  }
+  // nadruki: obrysy i nazwy
+  g.strokeStyle = '#e8eaee';
+  g.fillStyle = '#e8eaee';
+  g.lineWidth = 2;
+  const box = (x: number, y: number, w: number, h: number) => g.strokeRect(u(x - w / 2), v(y + h / 2), w * k, h * k);
+  const txt = (str: string, x: number, y: number, size = 16, rot = 0) => {
+    g.save();
+    g.translate(u(x), v(y));
+    g.rotate(rot);
+    g.font = `bold ${size}px sans-serif`;
+    g.textAlign = 'center';
+    g.fillText(str, 0, size / 3);
+    g.restore();
+  };
+  box(SOCKET.x, SOCKET.y, 6, 7);
+  txt('LGA1700', SOCKET.x, SOCKET.y - 3.95, 15);
+  DIMMS.forEach((x, i) => txt(['DDR5_A1', 'DDR5_A2', 'DDR5_B1', 'DDR5_B2'][i], x, DIMM.y0 - 1.3, 11, -Math.PI / 2));
+  txt('PCIE_1  x16', -15, PCIE.y - 0.95, 15);
+  txt('PCIE_2', -18.2, 19.95, 13);
+  txt('PCIE_3', -15, 16.3, 13);
+  txt('M2_1', M2.x0 - 1.3, M2.y + 1.6, 14);
+  txt('ATX_PWR', ATX24.x - 1.1, ATX24.y, 13, -Math.PI / 2);
+  txt('CPU_PWR1', EPS.x + 0.9, EPS.y - 0.9, 13);
+  txt('SATA', SATA.x - 1, SATA.y + 2.4, 13);
+  txt('BAT1', CMOS.x, CMOS.y + 1.5, 13);
+  txt('BIOS', BIOS.x, BIOS.y + 0.6, 12);
+  txt('AUDIO', CODEC.x, CODEC.y + 1, 13);
+  txt('CPU_FAN', -12, 44.75, 12);
+  txt('SYS_FAN1', -2, 44.75, 12);
+  txt('JFP1', -8, 15.05, 12);
+  txt('USB3_F', 1.3, 24.2, 12, -Math.PI / 2);
+  txt('Z790 GAMING', -2, 21.6, 22);
+  // granica części dźwiękowej (odizolowana)
+  g.setLineDash([8, 6]);
+  g.strokeRect(u(-21.3), v(19), 5.3 * k, 4.8 * k);
+  g.setLineDash([]);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  MB_MAT = new THREE.MeshStandardMaterial({ map: t, roughness: 0.5, metalness: 0.1 });
+  return MB_MAT;
+}
+
 function Caps({ list, r = 0.3, h = 0.8 }: { list: [number, number][]; r?: number; h?: number }) {
   const n = MAT();
   return (
@@ -380,7 +515,7 @@ export function Motherboard({ ram = true, cpu = true, m2 = true }: { ram?: boole
   return (
     <group>
       {/* laminat i kołki dystansowe */}
-      <Box p={[(x0 + x1) / 2, (y0 + y1) / 2, z + th / 2]} s={[x1 - x0, y1 - y0, th]} m={n.board} />
+      <Box p={[(x0 + x1) / 2, (y0 + y1) / 2, z + th / 2]} s={[x1 - x0, y1 - y0, th]} m={mbMat()} />
       {holes.map(([x, y], i) => (
         <group key={i}>
           <Cyl p={[x, y, z / 2]} r={0.3} h={z} m={n.gold} axis="z" seg={6} />
@@ -631,14 +766,16 @@ export function GpuChips() {
 
 export function Cables() {
   const n = MAT();
+  // 24-pin: z zasilacza przez przepust w osłonie, płasko przy ścianie obok płyty, do złącza z boku
   const p24 = useMemo<V3[]>(
     () => [
-      [-7.2, 5, 10],
-      [-3, 8, 12],
-      [1.5, 11.5, 15],
-      [4, 16, 12],
-      [4.2, 28, 6],
-      [ATX24.x + 0.5, ATX24.y, MBZ + 1.7],
+      [-7.2, 5, 9],
+      [-3.5, 8, 4],
+      [-1.5, 10.6, 2.2],
+      [4.3, 13.5, 1.4],
+      [4.3, 27, 1.4],
+      [ATX24.x + 1.6, ATX24.y, 1.6],
+      [ATX24.x + 0.5, ATX24.y, MBZ + 0.65],
     ],
     [],
   );
@@ -653,12 +790,14 @@ export function Cables() {
     ],
     [],
   );
+  // 16-pin karty: z przepustu przy przodzie osłony w górę do złącza na górnej krawędzi karty
   const pcie = useMemo<V3[]>(
     () => [
-      [-7.2, 7.5, 16],
-      [-2, 11, 18],
-      [GPU.x1 - 9, 14, 17.5],
-      [GPU.x1 - 9, GPU.y - 1.2, GPU.z1 + 1.2],
+      [-7.2, 7.5, 15],
+      [-1, 10.7, 16],
+      [2, 14, 16.5],
+      [GPU.x1 - 9, GPU.y - 0.6, GPU.z1 + 1.6],
+      [GPU.x1 - 9, GPU.y - 0.6, GPU.z1 + 0.5],
     ],
     [],
   );
@@ -672,9 +811,9 @@ export function Cables() {
   );
   return (
     <group>
-      <Bundle pts={p24} n={8} r={0.17} m={n.sleeve} spread={0.36} axis="x" />
+      <Bundle pts={p24} n={12} r={0.16} m={n.sleeve} spread={0.34} axis="y" />
       <Bundle pts={eps} n={4} r={0.15} m={n.sleeve} spread={0.32} axis="z" />
-      <Bundle pts={pcie} n={4} r={0.15} m={n.sleeve} spread={0.32} axis="x" />
+      <Bundle pts={pcie} n={6} r={0.15} m={n.sleeve} spread={0.32} axis="x" />
       <Tube pts={sata} r={0.25} m={n.cable} />
       <Tube
         pts={[
@@ -742,7 +881,7 @@ export function Computer({ glass, cooler, cables, gpu, explode, spin }: PcOpts) 
       <Ex off={[-42, 0, 0]} explode={explode}>
         <Psu spin={spin} />
       </Ex>
-      <Ex off={[0, 0, 0]} explode={explode}>
+      <Ex off={[0, -1, 34]} explode={explode}>
         <Hdd />
       </Ex>
       <Ex off={[0, 0, 6]} explode={explode}>
@@ -777,7 +916,7 @@ export function Computer({ glass, cooler, cables, gpu, explode, spin }: PcOpts) 
           <Gpu spin={spin} />
         </Ex>
       )}
-      <Ex off={[34, 0, 0]} explode={explode}>
+      <Ex off={[24, 0, 26]} explode={explode}>
         <group>
           {FANS_FRONT.map((y) => (
             <Fan key={y} p={[CASE.x1 - 1.6, y, CASE.z1 / 2]} d={12} axis="x" spin={spin} />

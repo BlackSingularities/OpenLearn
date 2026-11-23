@@ -68,8 +68,8 @@ const overview: Step[] = [
   }),
   pcs({
     title: 'Komputer rozłożony',
-    camera: [105, 185, 175],
-    target: [26, 112, 8],
+    camera: [118, 150, 92],
+    target: [22, 106, 14],
     preset: { mode: 'explode' },
     controls: [{ type: 'button', key: 'ex', label: 'Rozłóż komputer', labelOn: 'Złóż komputer', default: false }],
     body: (
@@ -322,7 +322,7 @@ const cpuModule: PartModule = {
     pcs({
       title: 'Chłodzenie',
       spot: pc(SOCKET.x + 2, SOCKET.y + 2, MBZ + 1),
-      ...labCam('cool', 150, 130, 50),
+      ...labCam('cool', 175, 115, 70),
       preset: { mode: 'cpu-cool' },
       controls: [FAN],
       body: (

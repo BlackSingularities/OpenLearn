@@ -144,9 +144,9 @@ function meshTex() {
     64,
     64,
     (g) => {
-      g.fillStyle = '#26292e';
+      g.fillStyle = '#e4e6e9';
       g.fillRect(0, 0, 64, 64);
-      g.fillStyle = '#0b0c0e';
+      g.fillStyle = '#5b6068';
       for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
         g.beginPath();
         g.arc(8 + x * 16 + (y % 2) * 8, 8 + y * 16, 5, 0, Math.PI * 2);
@@ -169,8 +169,9 @@ function makeMats() {
   board.repeat.set(1, 1);
   const gboard = boardTex('#1f5a35', 'rgba(140,190,120,0.55)', 4);
   return {
-    case: std('#1d2024', { metalness: 0.4, roughness: 0.45 }),
-    caseIn: std('#2a2e33', { metalness: 0.3, roughness: 0.6, side: THREE.DoubleSide }),
+    case: std('#eceef1', { metalness: 0.15, roughness: 0.45 }),
+    caseIn: std('#f1f2f4', { metalness: 0.1, roughness: 0.6, side: THREE.DoubleSide }),
+    caseEdge: std('#d5d8dd', { metalness: 0.2, roughness: 0.5 }),
     frontMesh: std('#ffffff', { map: mesh, roughness: 0.8 }),
     glass: new THREE.MeshBasicMaterial({ color: '#b9cde0', transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false }),
     board: std('#ffffff', { map: board, roughness: 0.55 }),
@@ -330,43 +331,107 @@ function bladeGeo(r0: number, r1: number, sweep: number, pitch: number) {
  * Wentylator o średnicy `d` (cm), oś wzdłuż `axis`. `spin()` – prędkość obrotu (obr/s na ekranie), `frame` – kwadratowa
  * ramka. Łopatki się kręcą.
  */
+/** Ramka wentylatora: kwadrat d × d z okrągłym otworem i otworami na śruby, grubość t (oś y). */
+const FRAME_GEO = new Map<string, THREE.BufferGeometry>();
+function fanFrameGeo(d: number, t: number) {
+  const key = `${d}:${t}`;
+  const hit = FRAME_GEO.get(key);
+  if (hit) return hit;
+  const h = d / 2;
+  const r = 0.9;
+  const s = new THREE.Shape();
+  s.moveTo(-h + r, -h);
+  s.lineTo(h - r, -h);
+  s.quadraticCurveTo(h, -h, h, -h + r);
+  s.lineTo(h, h - r);
+  s.quadraticCurveTo(h, h, h - r, h);
+  s.lineTo(-h + r, h);
+  s.quadraticCurveTo(-h, h, -h, h - r);
+  s.lineTo(-h, -h + r);
+  s.quadraticCurveTo(-h, -h, -h + r, -h);
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, h - 0.35, 0, Math.PI * 2, true);
+  s.holes.push(hole);
+  for (const [x, y] of [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ]) {
+    const sh = new THREE.Path();
+    sh.absarc(x * (h - 0.75), y * (h - 0.75), 0.22, 0, Math.PI * 2, true);
+    s.holes.push(sh);
+  }
+  const g = new THREE.ExtrudeGeometry(s, { depth: t, bevelEnabled: false, curveSegments: 24 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, -t / 2, 0);
+  g.computeVertexNormals();
+  FRAME_GEO.set(key, g);
+  return g;
+}
+
+/**
+ * Wentylator o średnicy `d` (cm), oś wzdłuż `axis`. `spin()` – prędkość obrotu (obr/s na ekranie), `frame` – kwadratowa
+ * ramka z czterema ramionami trzymającymi silnik. Łopatki się kręcą.
+ */
 export function Fan({ p, d, axis = 'x', spin, frame = true, blades = 7, m }: { p: V3; d: number; axis?: 'x' | 'y' | 'z'; spin: () => number; frame?: boolean; blades?: number; m?: Mats }) {
   const n = m ?? MAT();
   const rot = useRef<THREE.Group>(null);
   useFrame((_, dt) => {
     if (rot.current) rot.current.rotation.y += Math.min(dt, 0.05) * spin() * Math.PI * 2;
   });
-  const R = d / 2 - 0.4;
-  const geo = bladeGeo(R * 0.36, R, (Math.PI * 2) / blades * 0.75, d * 0.12);
+  const R = d / 2 - 0.55;
+  const geo = bladeGeo(R * 0.36, R, ((Math.PI * 2) / blades) * 0.78, d * 0.11);
   const orient: V3 = axis === 'x' ? [0, 0, Math.PI / 2] : axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, 0];
   const t = d * 0.21;
   return (
     <group position={p} rotation={orient}>
       {frame && (
         <>
-          {[-1, 1].map((sx) =>
-            [-1, 1].map((sz) => <Box key={`${sx}${sz}`} p={[(sx * d) / 2 - (sx * 0.5), 0, (sz * d) / 2 - sz * 0.5]} s={[1, t, 1]} m={n.fanFrame} />),
-          )}
-          <mesh material={n.fanFrame}>
-            <cylinderGeometry args={[d / 2, d / 2, t, 40, 1, true]} />
-          </mesh>
+          <mesh geometry={fanFrameGeo(d, t)} material={n.fanFrame} />
           {[0, 1, 2, 3].map((i) => (
-            <Box key={i} p={[0, -t / 2 + 0.2, 0]} s={[d * 0.98, 0.35, 0.5]} r={[0, (i * Math.PI) / 2 + Math.PI / 4, 0]} m={n.fanFrame} />
+            <Box key={i} p={[0, -t / 2 + 0.25, 0]} s={[d * 0.92, 0.35, 0.35]} r={[0, (i * Math.PI) / 2 + Math.PI / 4, 0]} m={n.fanFrame} />
           ))}
+          <mesh position={[0, -t / 2 + 0.25, 0]} material={n.fanFrame}>
+            <cylinderGeometry args={[R * 0.38, R * 0.38, 0.4, 24]} />
+          </mesh>
         </>
       )}
       <group ref={rot}>
         <mesh material={n.fanFrame}>
-          <cylinderGeometry args={[R * 0.36, R * 0.36, t * 0.8, 24]} />
+          <cylinderGeometry args={[R * 0.36, R * 0.36, t * 0.8, 28]} />
         </mesh>
         <mesh position={[0, t * 0.41, 0]} rotation={[-Math.PI / 2, 0, 0]} material={n.plasticGrey}>
-          <circleGeometry args={[R * 0.3, 24]} />
+          <circleGeometry args={[R * 0.3, 28]} />
         </mesh>
         {Array.from({ length: blades }, (_, i) => (
           <mesh key={i} geometry={geo} rotation={[0, (i / blades) * Math.PI * 2, 0]} material={n.fanBlade} />
         ))}
       </group>
     </group>
+  );
+}
+
+/** Miękki cień pod przedmiotem (zamiast liczenia cieni): ciemna plama gasnąca ku brzegom. */
+let SHADOW: THREE.MeshBasicMaterial | null = null;
+export function shadowMat() {
+  if (SHADOW) return SHADOW;
+  const t = canvasTex(128, 128, (g) => {
+    const gr = g.createRadialGradient(64, 64, 6, 64, 64, 64);
+    gr.addColorStop(0, 'rgba(0,0,0,0.55)');
+    gr.addColorStop(0.55, 'rgba(0,0,0,0.3)');
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr;
+    g.fillRect(0, 0, 128, 128);
+  });
+  SHADOW = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false });
+  return SHADOW;
+}
+export function Shadow({ p, w, d, o = 1 }: { p: V3; w: number; d: number; o?: number }) {
+  return (
+    <mesh position={p} rotation={[-Math.PI / 2, 0, 0]} material={shadowMat()} scale={[w, d, 1]} renderOrder={o}>
+      <planeGeometry args={[1, 1]} />
+    </mesh>
   );
 }
 

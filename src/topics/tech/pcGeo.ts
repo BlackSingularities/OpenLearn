@@ -104,9 +104,9 @@ export const LAB_Y = 95;
 export const MUSEUM_Z = -900;
 export const MUSEUM = {
   eniac: [0, 0, MUSEUM_Z - 170] as V3,
-  ibm: [-175, 0, MUSEUM_Z] as V3,
-  beige: [5, 0, MUSEUM_Z] as V3,
-  today: [195, 0, MUSEUM_Z] as V3,
+  ibm: [-150, 0, MUSEUM_Z] as V3,
+  beige: [0, 0, MUSEUM_Z] as V3,
+  today: [152, 0, MUSEUM_Z] as V3,
 };
 
 /* ================= drogi przepływów (w układzie pokoju) ================= */

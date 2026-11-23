@@ -167,6 +167,7 @@ export function Room() {
         })}
       </group>
       <Desk />
+      <DeskProps />
       <Chair />
       <Lamp />
       {/* listwa zasilająca na podłodze i kabel komputera */}
@@ -228,6 +229,33 @@ function Desk() {
       <Box p={[(x0 + x1) / 2, top - th - 4, z0 + 5]} s={[x1 - x0 - 8, 6, 2]} m={n.steelDark} />
       {/* podkładka pod mysz */}
       <Box p={[-12, top + 0.15, 17]} s={[90, 0.3, 32]} m={n.plastic} />
+    </group>
+  );
+}
+
+/** Słuchawki leżące na biurku i kubek – żeby stanowisko wyglądało na używane. */
+function DeskProps() {
+  const n = MAT();
+  return (
+    <group>
+      <group position={[70, DESK.top, 16]} rotation={[0, -0.5, 0]}>
+        <mesh position={[0, 2, 0]} rotation={[Math.PI / 2, 0, 0]} material={n.plastic}>
+          <torusGeometry args={[8, 0.8, 10, 32, Math.PI]} />
+        </mesh>
+        {[-8, 8].map((x) => (
+          <group key={x} position={[x, 2.2, 0]}>
+            <Cyl p={[0, 0, 0]} r={4} h={2.6} m={n.plastic} seg={28} />
+            <Cyl p={[0, 1.4, 0]} r={3.4} h={0.3} m={n.rubber} seg={28} />
+          </group>
+        ))}
+      </group>
+      <group position={[-72, DESK.top, 12]}>
+        <Cyl p={[0, 5, 0]} r={4} h={10} m={n.white} seg={28} />
+        <Cyl p={[0, 9.8, 0]} r={3.6} h={0.3} m={n.chip} seg={28} />
+        <mesh position={[4.6, 5, 0]} rotation={[0, 0, 0]} material={n.white}>
+          <torusGeometry args={[2.4, 0.6, 8, 20, Math.PI]} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -356,20 +384,65 @@ export function keyLayout() {
   return keys;
 }
 
-export function Keyboard({ pressed }: { pressed?: () => number }) {
+/** Opisy klawiszy w kolejności `keyLayout()`. */
+const LEGENDS: string[] = [
+  ...'Esc F1 F2 F3 F4 F5 F6 F7 F8 F9 F10 F11 F12'.split(' '),
+  ...'~ 1 2 3 4 5 6 7 8 9 0 - = ⌫'.split(' '),
+  ...'Tab Q W E R T Y U I O P [ ] \\'.split(' '),
+  ...'Caps A S D F G H J K L ; \' Enter'.split(' '),
+  ...'Shift Z X C V B N M , . / Shift'.split(' '),
+  ...'Ctrl Win Alt _ AltGr Fn ☰ Ctrl'.split(' '),
+  '↑',
+  '←',
+  '↓',
+  '→',
+  ...'Ins Home PgUp Del End PgDn'.split(' '),
+];
+let LEG: THREE.MeshBasicMaterial | null = null;
+/** Przezroczysta warstwa z białymi opisami, leżąca tuż nad nasadkami (układ: x −22…22, z −7…7). */
+function legendMat(keys: { x: number; z: number; w: number }[]) {
+  if (LEG) return LEG;
+  const W = 1024;
+  const H = Math.round((W * 14) / 44);
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const k = W / 44;
+  g.fillStyle = '#f1f3f6';
+  g.textAlign = 'center';
+  keys.forEach((key, i) => {
+    const t = LEGENDS[i] ?? '';
+    if (!t || t === '_') return;
+    g.font = `${t.length > 2 ? 11 : 17}px sans-serif`;
+    g.fillText(t, (key.x + 22) * k - (t.length > 2 ? 0 : 0), (key.z + 7) * k + 6);
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  LEG = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
+  return LEG;
+}
+
+export function Keyboard() {
   const n = MAT();
   const keys = useMemo(keyLayout, []);
-  void pressed;
   return (
     <group position={[KEYBOARD.x, DESK.top + 0.3, KEYBOARD.z]} rotation={[0.05, 0, 0]}>
-      <Box p={[0, 0.9, 0]} s={[44, 1.8, 14]} m={n.plasticGrey} />
+      <Box p={[0, 0.9, 0]} s={[44, 1.8, 14]} m={n.plastic} />
+      <Box p={[0, 1.81, 0]} s={[43, 0.02, 13]} m={n.slot} />
       {keys.map((k, i) => (
         <group key={i}>
           <Box p={[k.x, 2.15, k.z]} s={[k.w, 0.7, 1.7]} m={n.keycap} />
           <Box p={[k.x, 2.52, k.z]} s={[Math.max(0.3, k.w - 0.5), 0.02, 1.2]} m={n.keycap} />
         </group>
       ))}
-      <Box p={[19, 1.81, -6.2]} s={[2.5, 0.02, 0.3]} m={n.ledWhite} />
+      <mesh position={[0, 2.545, 0]} rotation={[-Math.PI / 2, 0, 0]} material={legendMat(keys)}>
+        <planeGeometry args={[44, 14]} />
+      </mesh>
+      {[17.4, 18.6, 19.8].map((x) => (
+        <Box key={x} p={[x, 1.82, -6.2]} s={[0.5, 0.02, 0.25]} m={n.ledWhite} />
+      ))}
     </group>
   );
 }
@@ -379,12 +452,15 @@ export function Mouse() {
   const n = MAT();
   return (
     <group position={[MOUSE.x, DESK.top + 0.3, MOUSE.z]}>
-      <mesh position={[0, 1.6, 0]} scale={[3.2, 1.9, 6]} material={n.plastic}>
-        <sphereGeometry args={[1, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+      <mesh position={[0, 0.3, 0]} scale={[3.1, 1, 5.8]} material={n.plastic}>
+        <cylinderGeometry args={[1, 1, 0.6, 32]} />
       </mesh>
-      <Box p={[0, 0.3, 0]} s={[6, 0.6, 11]} m={n.plastic} />
-      <Box p={[0, 3.1, -3.4]} s={[0.1, 0.6, 4]} m={n.slot} />
-      <Cyl p={[0, 3.25, -3.6]} r={0.6} h={0.4} m={n.rubber} axis="x" seg={16} />
+      <mesh position={[0, 0.6, 0.3]} scale={[3.1, 3, 5.8]} material={n.plastic}>
+        <sphereGeometry args={[1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+      </mesh>
+      <Box p={[0, 2.9, -3.3]} s={[0.08, 0.9, 4.6]} m={n.slot} />
+      <Cyl p={[0, 3.25, -3.4]} r={0.6} h={0.45} m={n.rubber} axis="x" seg={16} />
+      <Box p={[-3.05, 1.2, 0]} s={[0.1, 0.5, 2.4]} m={n.plasticGrey} />
       <Tube
         pts={[
           [0, 1, -5.8],

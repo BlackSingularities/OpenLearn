@@ -53,7 +53,8 @@ import {
   sm,
   type V3,
 } from './pcGeo';
-import { Computer } from './pcParts';
+import { Computer, tickRgb } from './pcParts';
+import { Shadow } from './pcMats';
 import { Keyboard, KeyboardCable, Monitor, Mouse, Room, type ScreenState } from './pcDesk';
 import { CoolLab, CpuCutLab, DieLab, FinLab, PcbLab, PipeLab, PsuLab } from './pcLabs';
 import { CoresLab, DramLab, GpuLab, HddLab, KeyLab, LcdLab, MemLab, MouseLab, NandLab, PortsLab, PyrLab, RasterLab } from './pcLabs2';
@@ -243,7 +244,7 @@ function homeLinks(): Record<string, PartInfo> {
     mem: { name: 'pamięć i dyski', desc: '', pos: pc(1, 37, 23), link: 'pamiec' },
     gpu: { name: 'karta graficzna', desc: '', pos: pc(-6, 16, 23), link: 'grafika' },
     io: { name: 'monitor, klawiatura i mysz', desc: '', pos: [MONITOR.x, MONITOR.y0 + MONITOR.h + 6, MONITOR.z], link: 'urzadzenia' },
-    hi: { name: 'komputer kiedyś', desc: '', pos: [-110, 175, -45], link: 'historia' },
+    hi: { name: 'komputer kiedyś', desc: '', pos: [-60, 180, -46], link: 'historia' },
   };
 }
 
@@ -352,6 +353,7 @@ export function PcScene({ params }: SceneProps) {
   useFrame((_, dt0) => {
     const dt = paused ? 0 : Math.min(dt0, 0.05);
     tAll.current += dt;
+    tickRgb(dt);
     if (tRun.current >= 0) tRun.current += dt;
     const S = st.current;
     const k = Math.min(1, dt * 2.2);
@@ -541,10 +543,10 @@ export function PcScene({ params }: SceneProps) {
     [pc(-0.5, 42, 1.6 + 22 + 4), 'pamięć RAM'],
     [pc(-11.5, 25, 1.6 + 16), 'dysk M.2'],
     [pc(-14.5 - 42, 11, 10), 'zasilacz'],
-    [pc(22 + 34, 48, 11), 'wentylatory przednie'],
+    [pc(22 + 24, 49, 11 + 26), 'wentylatory przednie'],
     [pc(-22 - 26, 45, 11), 'wentylator tylny'],
     [pc(-9, 18, 1.6 + 6), 'płyta główna'],
-    [pc(11, 6, 15), 'dysk HDD'],
+    [pc(11, 6, 10 + 34), 'dysk HDD'],
   ];
 
   return (
@@ -555,6 +557,14 @@ export function PcScene({ params }: SceneProps) {
       <directionalLight position={[-150, 120, 200]} intensity={0.45} color="#cfe0ff" />
 
       <Room />
+      {/* miękkie cienie pod przedmiotami */}
+      <Shadow p={[0, 0.06, 0]} w={210} d={110} />
+      <Shadow p={[-75, 0.07, 85]} w={85} d={85} />
+      <Shadow p={[pc(0, 0, 0)[0], 77.04, pc(0, 0, 11)[2]]} w={64} d={38} o={2} />
+      <Shadow p={[MONITOR.x, 77.04, MONITOR.z - 2]} w={36} d={28} o={2} />
+      <Shadow p={[KEYBOARD.x, 77.33, KEYBOARD.z]} w={54} d={22} o={3} />
+      <Shadow p={[MOUSE.x, 77.33, MOUSE.z]} w={10} d={15} o={3} />
+      <Shadow p={[-78, 77.04, -26]} w={22} d={22} o={2} />
       <Monitor screen={screen} />
       <Keyboard />
       <KeyboardCable />

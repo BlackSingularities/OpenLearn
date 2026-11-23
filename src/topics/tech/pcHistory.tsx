@@ -102,7 +102,7 @@ function IbmPc() {
   const n = MAT();
   return (
     <group>
-      <Box p={[0, 40, 0]} s={[120, 80, 70]} m={n.wood} />
+      <Box p={[0, 40, 0]} s={[108, 80, 66]} m={n.wood} />
       <group position={[0, 80, 0]}>
         <Box p={[0, 7.5, 0]} s={[50, 14, 41]} m={n.beige} />
         {[-11, 11].map((x) => (
@@ -138,7 +138,7 @@ function BeigePc() {
   const n = MAT();
   return (
     <group>
-      <Box p={[0, 40, 0]} s={[150, 80, 70]} m={n.wood} />
+      <Box p={[0, 40, 0]} s={[130, 80, 66]} m={n.wood} />
       <group position={[50, 80, 0]}>
         <Box p={[0, 22, 0]} s={[19, 44, 43]} m={n.beige} />
         <Box p={[0, 37, 21.6]} s={[15, 4, 0.4]} m={n.beigeDark} />
@@ -174,7 +174,7 @@ function TodayPc({ spin }: { spin: () => number }) {
   const n = MAT();
   return (
     <group>
-      <Box p={[0, 40, 0]} s={[150, 80, 70]} m={n.wood} />
+      <Box p={[0, 40, 0]} s={[130, 80, 66]} m={n.wood} />
       <group position={[45, 80, -10]}>
         <Computer glass cooler cables gpu explode={() => 0} spin={spin} />
       </group>
@@ -416,7 +416,7 @@ export function MediaLab({ p }: { p: V3 }) {
     return new THREE.MeshStandardMaterial({ map: t, metalness: 0.8, roughness: 0.15 });
   }, []);
   const S = 2;
-  const X = [-100, -60, -22, 16, 54, 84];
+  const X = [-80, -38, -6, 24, 48, 66];
   return (
     <LabStage p={p} r={115}>
       <group position={[0, -60, 0]} rotation={[-0.35, 0, 0]}>
@@ -483,15 +483,15 @@ export function MooreLab({ p }: { p: V3 }) {
     <LabStage p={p} r={115}>
       <group position={[0, -86, 0]}>
         {[3, 4, 5, 6, 7, 8, 9, 10, 11].map((e) => (
-          <Box key={e} p={[0, (e - 3) * 14 + 4, -13]} s={[200, 0.25, 0.25]} m={e % 3 === 0 ? n.steel : n.steelDark} />
+          <Box key={e} p={[0, (e - 3) * 14 + 4, -13]} s={[170, 0.25, 0.25]} m={e % 3 === 0 ? n.steel : n.steelDark} />
         ))}
         {MOORE.map(([year, count, chip], i) => {
-          const x = -90 + i * 20;
+          const x = -72 + i * 16;
           const hh = h(count);
           return (
             <group key={year} position={[x, 0, 0]}>
               <mesh position={[0, hh / 2, 0]} material={mats[i]}>
-                <boxGeometry args={[12, hh, 12]} />
+                <boxGeometry args={[11, hh, 11]} />
               </mesh>
               <Lbl pos={[0, hh + 6, 0]} sub color={LC.part}>
                 {chip}
@@ -502,13 +502,13 @@ export function MooreLab({ p }: { p: V3 }) {
             </group>
           );
         })}
-        <Lbl pos={[-110, 4, -13]} sub color={LC.cold}>
+        <Lbl pos={[-92, 4, -13]} sub color={LC.cold}>
           tysiąc
         </Lbl>
-        <Lbl pos={[-110, 46, -13]} sub color={LC.cold}>
+        <Lbl pos={[-92, 46, -13]} sub color={LC.cold}>
           milion
         </Lbl>
-        <Lbl pos={[-110, 88, -13]} sub color={LC.cold}>
+        <Lbl pos={[-92, 88, -13]} sub color={LC.cold}>
           miliard
         </Lbl>
       </group>

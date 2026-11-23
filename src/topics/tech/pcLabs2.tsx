@@ -33,7 +33,7 @@ export function MemLab({ p, spin }: { p: V3; spin: () => number }) {
         <group position={[-(HDD.x0 + HDD.x1) / 2, -HDD.y0, -(HDD.z0 + HDD.z1) / 2]}>
           <Hdd lid={false} />
         </group>
-        <HddInside spin={spin} arm={() => 0.5 + 0.4 * Math.sin(performance.now() / 700)} y={HDD.y1 - HDD.y0} />
+        <HddInside spin={spin} arm={() => 0.5 + 0.4 * Math.sin(performance.now() / 700)} y={0.75} />
       </group>
     </LabStage>
   );
@@ -85,8 +85,8 @@ export function HddInside({ spin, arm, y }: { spin: () => number; arm: () => num
       <group position={[4.6, 0.25, 3.4]}>
         <Cyl p={[0, 0, 0]} r={0.55} h={0.6} m={n.steel} seg={20} />
         <group ref={ar}>
-          <Box p={[-3.2, 0.05, -1.6]} s={[7, 0.06, 0.6]} r={[0, -0.45, 0]} m={n.steel} />
-          <Box p={[-6.35, 0, -3.1]} s={[0.4, 0.08, 0.25]} r={[0, -0.45, 0]} m={n.chipGrey} />
+          <Box p={[-3.2, 0.25, -1.6]} s={[7, 0.14, 0.7]} r={[0, -0.45, 0]} m={n.steelDark} />
+          <Box p={[-6.35, 0.2, -3.1]} s={[0.5, 0.16, 0.35]} r={[0, -0.45, 0]} m={n.gold} />
           <Box p={[1.4, 0.05, 0.7]} s={[1.8, 0.2, 1.6]} r={[0, -0.45, 0]} m={n.copper} />
         </group>
       </group>
@@ -293,7 +293,7 @@ export function HddLab({ p, spin }: { p: V3; spin: () => number }) {
         <group position={[-(HDD.x0 + HDD.x1) / 2, -HDD.y0, -(HDD.z0 + HDD.z1) / 2]}>
           <Hdd lid={false} />
         </group>
-        <HddInside spin={spin} arm={() => cur.current} y={HDD.y1 - HDD.y0} />
+        <HddInside spin={spin} arm={() => cur.current} y={0.75} />
       </group>
       <Lbl pos={[-8, -26, 0]} sub color={LC.part}>
         talerz (szkło pokryte magnetykiem)
