@@ -2,8 +2,6 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { catalog, type CatalogModel } from '../lib/catalog';
-import { allSteps } from '../lib/types';
-import { topics } from '../topics';
 import { BrandMark } from './Cover';
 import { Icon, ThemeToggle } from './ui';
 
@@ -136,9 +134,6 @@ function PcSketch() {
 }
 
 function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
-  const topic = topics.find((t) => t.id === m.topic);
-  const modules = topic?.modules ?? [];
-  const steps = topic ? allSteps(topic).length : 0;
   return (
     <motion.li
       initial={{ opacity: 0, y: 8 }}
@@ -148,16 +143,10 @@ function ModelRow({ m, i }: { m: CatalogModel; i: number }) {
       <Link to={`/temat/${m.topic}/1`} className="tile" style={{ '--accent': m.color } as CSSProperties}>
         <span className="tile-cover">
           {m.cover === 'samolot' ? <AirlinerSketch /> : m.cover === 'wiatrak' ? <WindSketch /> : m.cover === 'wegiel' ? <CoalSketch /> : m.cover === 'atom' ? <NuclearSketch /> : m.cover === 'woda' ? <HydroSketch /> : m.cover === 'komputer' ? <PcSketch /> : <VolcanoSketch />}
-          <span className="tile-go" aria-hidden>
-            <Icon name="arrow-up-right" size={18} />
-          </span>
         </span>
         <span className="tile-body">
           <span className="tile-title">{m.title}</span>
           <span className="tile-sum">{m.summary}</span>
-          <span className="tile-meta">
-            {modules.length} rozdz. · {steps} kroków
-          </span>
         </span>
       </Link>
     </motion.li>
