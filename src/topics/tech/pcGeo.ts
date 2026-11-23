@@ -97,6 +97,7 @@ export const LAB = {
   media: LX(21),
   moore: LX(22),
   ssd: LX(23),
+  kbd: LX(24),
 };
 /** Wysokość eksponatu nad podestem. */
 export const LAB_Y = 95;

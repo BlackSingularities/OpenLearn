@@ -512,7 +512,7 @@ const gpuModule: PartModule = {
 const ioModule: PartModule = {
   id: 'urzadzenia',
   title: 'Monitor, klawiatura i mysz',
-  summary: 'Urządzenia wejścia i wyjścia, przełącznik klawisza, mysz optyczna, złącza',
+  summary: 'Urządzenia wejścia i wyjścia, klawiatura warstwa po warstwie, przełącznik klawisza, mysz optyczna, złącza',
   steps: [
     pcs({
       title: 'Urządzenia wejścia i wyjścia',
@@ -524,22 +524,42 @@ const ioModule: PartModule = {
           <p>
             Komputer rozmawia ze światem przez <b>urządzenia wejścia</b> (klawiatura, mysz, mikrofon, kamera) i <b>wyjścia</b> (monitor, głośniki, drukarka). Każde z nich zamienia coś z naszego świata – naciśnięcie, ruch dłoni, światło – na liczby albo odwrotnie.
           </p>
-          <p>Kliknij podpis części. Numery prowadzą do zakładek: klawisz, mysz i złącza.</p>
+          <p>Kliknij podpis części. Numery prowadzą do zakładek: klawiatura, klawisz, mysz i złącza.</p>
+        </>
+      ),
+    }),
+    pcs({
+      title: 'Klawiatura warstwa po warstwie',
+      spot: [KEYBOARD.x - 12, 82, KEYBOARD.z],
+      ...labCam('kbd', 205, 170, 36),
+      preset: { mode: 'io-kbd' },
+      body: (
+        <>
+          <p>
+            Klawiatura rozłożona na warstwy, od góry: <b>nasadki</b> z opisami, <b>przełączniki</b> wpięte w stalową płytkę, <b>płytka drukowana</b>, pianka, która tłumi stukanie, i obudowa.
+          </p>
+          <p>
+            Na płytce ścieżki tworzą siatkę: <b>wiersze</b> (poziomo) i <b>kolumny</b> (pionowo). Każdy przełącznik łączy jeden wiersz z jedną kolumną. <b>Mikrokontroler</b> – mały komputer w klawiaturze – zasila po kolei każdy wiersz (żółty) i sprawdza, w której kolumnie pojawił się prąd (zielona). Wiersz i kolumna wskazują wciśnięty klawisz.
+          </p>
+          <p>Przy każdym przełączniku jest dioda. Przepuszcza prąd tylko w jedną stronę, więc gdy wciśniesz kilka klawiszy naraz, prąd nie popłynie okrężną drogą i klawiatura nie pomyli klawiszy. Kod klawisza wychodzi kablem przez złącze USB-C.</p>
         </>
       ),
     }),
     pcs({
       title: 'Klawisz od środka',
       spot: [KEYBOARD.x + 4, 82, KEYBOARD.z],
-      ...labCam('key', 150, 120, 50),
+      ...labCam('key', 270, 135, 60),
       preset: { mode: 'io-key' },
       body: (
         <>
           <p>
-            Przełącznik klawiatury mechanicznej w przekroju, powiększony 30 razy. Nasadka siedzi na czerwonym <b>trzpieniu</b>, który sprężyna wypycha do góry. Gdy klawisz zjedzie ok. 2 mm, trzpień przestaje odpychać giętką blaszkę i ta styka się z drugą – płynie prąd.
+            Przełącznik klawiatury mechanicznej w przekroju, powiększony ok. 3 razy. <b>Nasadka</b> wciśnięta jest na krzyżak czerwonego <b>trzpienia</b>, a obudowa przełącznika jest wpięta w stalową płytkę i przylutowana do płytki drukowanej.
           </p>
           <p>
-            Klawisze połączone są w siatkę rzędów i kolumn. Układ w klawiaturze kilkaset razy na sekundę zasila po kolei każdy rząd i sprawdza, w której kolumnie pojawił się prąd. Tak wie, który klawisz naciśnięto, i wysyła jego kod do komputera.
+            Sprężyna wypycha trzpień do góry. Nóżka trzpienia trzyma dwie złote <b>blaszki styku</b> z dala od siebie. Gdy klawisz zjedzie o 2 mm (linijka z lewej), nóżka puszcza giętką blaszkę, ta dotyka drugiej i płynie prąd. Klawisz może zjechać jeszcze do 4 mm, ale to już tylko zapas.
+          </p>
+          <p>
+            Obok – siatka klawiszy. Układ w klawiaturze ok. 1000 razy na sekundę zasila po kolei każdy wiersz (tu zwolniony) i sprawdza, w której kolumnie pojawił się prąd. Gdy zasilony jest wiersz wciśniętego klawisza „A”, jego kolumna świeci na zielono – tak klawiatura wie, który klawisz naciśnięto.
           </p>
         </>
       ),
@@ -547,14 +567,17 @@ const ioModule: PartModule = {
     pcs({
       title: 'Mysz optyczna',
       spot: [MOUSE.x, 83, MOUSE.z],
-      ...labCam('mouse', 105, 85, 50),
+      ...labCam('mouse', 145, 105, 55),
       preset: { mode: 'io-mouse' },
       body: (
         <>
           <p>
-            Mysz przecięta wzdłuż. Pod spodem <b>dioda</b> oświetla blat pod ostrym kątem, żeby było widać każdą nierówność. Soczewka rzuca obraz na <b>czujnik</b> – maleńką kamerę o rozdzielczości ok. 30 × 30 pikseli.
+            Mysz przecięta wzdłuż. Czerwona <b>dioda</b> świeci przez przezroczystą prowadnicę i pada na blat bardzo płasko, więc każde ziarenko i nierówność rzuca cień. Odbite światło przechodzi przez <b>soczewkę</b> w spodzie i trafia do <b>czujnika</b> – maleńkiej kamery o rozdzielczości ok. 30 × 30 pikseli.
           </p>
-          <p>Czujnik robi nawet 10 000 zdjęć na sekundę i porównuje kolejne. Jeśli wzór przesunął się w lewo, mysz pojechała w prawo. Przyciski to mikroprzełączniki, a kółko obraca tarczę z otworami, które liczy czujnik światła.</p>
+          <p>Czujnik robi nawet 10 000 zdjęć na sekundę i porównuje dwa kolejne (u góry). Jeśli wzór przesunął się w lewo, mysz pojechała w prawo. Wynik – o ile przesunąć kursor – mikrokontroler wysyła kablem USB do komputera.</p>
+          <p>
+            Przycisk to kawałek skorupy z popychaczem, który wciska <b>mikroprzełącznik</b> – stąd wyraźne „klik”. Kółko obraca <b>tarczę z otworami</b>: z jednej strony świeci dioda, z drugiej fotokomórka liczy błyski. Kolejność błysków z dwóch czujników mówi, w którą stronę kręcisz. Spód ma gładkie <b>ślizgacze</b> z teflonu, żeby mysz lekko sunęła.
+          </p>
         </>
       ),
     }),

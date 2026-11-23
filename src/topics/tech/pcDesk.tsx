@@ -2,10 +2,11 @@
  * Komputer osobisty – pokój i stanowisko: podłoga, ściany z oknem, biurko, krzesło, lampa, roślina, monitor
  * z obrazem (pulpit, ekran startowy, test pamięci, gra), klawiatura i mysz z kablami.
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { DESK, KEYBOARD, MONITOR, MOUSE, PC_O, WALL_X, WALL_Z, rng, type V3 } from './pcGeo';
 import { Box, Cyl, MAT, Tube } from './pcMats';
+import { MB, MH, MW, SE_Y, SE_Z, keycapGeo, mouseBaseGeo, mouseShellGeo } from './pcInputGeo';
 
 /* ================= obraz na monitorze ================= */
 
@@ -400,7 +401,7 @@ const LEGENDS: string[] = [
 ];
 let LEG: THREE.MeshBasicMaterial | null = null;
 /** Przezroczysta warstwa z białymi opisami, leżąca tuż nad nasadkami (układ: x −22…22, z −7…7). */
-function legendMat(keys: { x: number; z: number; w: number }[]) {
+export function legendMat(keys: { x: number; z: number; w: number }[]) {
   if (LEG) return LEG;
   const W = 1024;
   const H = Math.round((W * 14) / 44);
@@ -424,51 +425,134 @@ function legendMat(keys: { x: number; z: number; w: number }[]) {
   return LEG;
 }
 
+/** Klawisze z kolorem modyfikatora (ciemnoszare): wszystko, co nie jest literą, cyfrą ani spacją. */
+const MOD = new Set(['Tab', 'Caps', 'Shift', 'Ctrl', 'Win', 'Alt', 'AltGr', 'Fn', '☰', 'Enter', '⌫', '\\', '~', '↑', '←', '↓', '→', 'Ins', 'Home', 'PgUp', 'Del', 'End', 'PgDn']);
+
+/** Obudowa klawiatury: zaokrąglony prostokąt z fazowanymi krawędziami, wysokość 1,8 cm. */
+function kbCaseGeo() {
+  const w = 43.5;
+  const d = 13.5;
+  const r = 0.9;
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2 + r, -d / 2);
+  s.lineTo(w / 2 - r, -d / 2);
+  s.absarc(w / 2 - r, -d / 2 + r, r, -Math.PI / 2, 0, false);
+  s.lineTo(w / 2, d / 2 - r);
+  s.absarc(w / 2 - r, d / 2 - r, r, 0, Math.PI / 2, false);
+  s.lineTo(-w / 2 + r, d / 2);
+  s.absarc(-w / 2 + r, d / 2 - r, r, Math.PI / 2, Math.PI, false);
+  s.lineTo(-w / 2, -d / 2 + r);
+  s.absarc(-w / 2 + r, -d / 2 + r, r, Math.PI, Math.PI * 1.5, false);
+  const g = new THREE.ExtrudeGeometry(s, { depth: 1.3, bevelEnabled: true, bevelThickness: 0.25, bevelSize: 0.25, bevelSegments: 3, curveSegments: 8 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, 0.25, 0);
+  return g;
+}
+
 export function Keyboard() {
   const n = MAT();
   const keys = useMemo(keyLayout, []);
+  const caseGeo = useMemo(kbCaseGeo, []);
+  const capMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.62 }), []);
+  const caps = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    const im = caps.current;
+    if (!im) return;
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    keys.forEach((k, i) => {
+      im.setMatrixAt(i, m.compose(new THREE.Vector3(k.x, 1.86, k.z), new THREE.Quaternion(), new THREE.Vector3(k.w, 0.67, 1.7)));
+      const t = LEGENDS[i] ?? '';
+      im.setColorAt(i, c.set(i === 0 ? '#d9583a' : MOD.has(t) || /^F\d/.test(t) ? '#3b3f46' : '#25272c'));
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }, [keys]);
   return (
     <group position={[KEYBOARD.x, DESK.top + 0.3, KEYBOARD.z]} rotation={[0.05, 0, 0]}>
-      <Box p={[0, 0.9, 0]} s={[44, 1.8, 14]} m={n.plastic} />
-      <Box p={[0, 1.81, 0]} s={[43, 0.02, 13]} m={n.slot} />
-      {keys.map((k, i) => (
-        <group key={i}>
-          <Box p={[k.x, 2.15, k.z]} s={[k.w, 0.7, 1.7]} m={n.keycap} />
-          <Box p={[k.x, 2.52, k.z]} s={[Math.max(0.3, k.w - 0.5), 0.02, 1.2]} m={n.keycap} />
-        </group>
-      ))}
+      <mesh geometry={caseGeo} material={n.plastic} />
+      <Box p={[0, 1.81, 0]} s={[42.6, 0.04, 12.8]} m={n.aluDark} />
+      <instancedMesh ref={caps} args={[keycapGeo(), capMat, keys.length]} />
       <mesh position={[0, 2.545, 0]} rotation={[-Math.PI / 2, 0, 0]} material={legendMat(keys)}>
         <planeGeometry args={[44, 14]} />
       </mesh>
       {[17.4, 18.6, 19.8].map((x) => (
-        <Box key={x} p={[x, 1.82, -6.2]} s={[0.5, 0.02, 0.25]} m={n.ledWhite} />
+        <Box key={x} p={[x, 1.84, -6.2]} s={[0.5, 0.02, 0.25]} m={n.ledWhite} />
+      ))}
+      {/* gniazdo USB-C z tyłu i nóżki */}
+      <Box p={[14, 0.9, -7.05]} s={[1.0, 0.4, 0.2]} m={n.slot} />
+      {[-19, 19].map((x) => (
+        <Box key={x} p={[x, -0.15, -5.6]} s={[3, 0.3, 1.2]} m={n.rubber} />
       ))}
     </group>
   );
 }
 
-/** Mysz: obudowa, przyciski, kółko. */
+/** Odległość boku myszy od środka na wysokości y (mm). */
+function sideZ(x: number, y: number) {
+  const c = Math.min(1, Math.max(0, (y - MB) / MH(x))) ** (1 / SE_Y);
+  return MW(x) * Math.sqrt(1 - c * c) ** SE_Z;
+}
+
+/** Mysz: skorupa z profilu (jak prawdziwa, wyższa pod dłonią), podział przycisków, kółko, boczne przyciski. */
 export function Mouse() {
   const n = MAT();
+  const shell = useMemo(() => mouseShellGeo(false), []);
+  const base = useMemo(() => mouseBaseGeo(false), []);
+  const shellMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#2d3036', roughness: 0.38, metalness: 0.15, side: THREE.DoubleSide }), []);
+  const k = 0.1;
+  const wheelMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#5a5f67', roughness: 0.8 }), []);
+  // linia podziału przycisków i poprzeczna szczelina
+  const split = useMemo<V3[]>(() => Array.from({ length: 12 }, (_, i) => -58 + i * 4.4).map((x) => [x, MB + MH(x) + 0.25, 0] as V3), []);
+  const cross = useMemo<V3[]>(
+    () =>
+      Array.from({ length: 13 }, (_, i) => {
+        const t = -1.0 + (i / 12) * 2.0;
+        const x = -8;
+        const s = Math.sin(t);
+        return [x, MB + MH(x) * Math.abs(Math.cos(t)) ** SE_Y + 0.25, -MW(x) * Math.sign(s) * Math.abs(s) ** SE_Z * 1.01] as V3;
+      }),
+    [],
+  );
+  const wx = -30;
   return (
-    <group position={[MOUSE.x, DESK.top + 0.3, MOUSE.z]}>
-      <mesh position={[0, 0.3, 0]} scale={[3.1, 1, 5.8]} material={n.plastic}>
-        <cylinderGeometry args={[1, 1, 0.6, 32]} />
+    <group position={[MOUSE.x, DESK.top, MOUSE.z]} rotation={[0, -Math.PI / 2, 0]} scale={k}>
+      <mesh geometry={shell} material={shellMat} />
+      <mesh geometry={base} material={n.plastic} />
+      <Tube pts={split} r={0.4} m={n.rubber} seg={6} />
+      <Tube pts={cross} r={0.4} m={n.rubber} seg={6} />
+      {/* kółko w szczelinie */}
+      <Box p={[wx, MB + MH(wx) - 1.6, 0]} s={[17, 4, 8.4]} m={n.rubber} />
+      <Cyl p={[wx, MB + MH(wx) - 5.2, 0]} r={8} h={6.4} m={wheelMat} axis="z" seg={28} />
+      {Array.from({ length: 9 }, (_, i) => {
+        const a = Math.PI / 2 + (i - 4) * 0.2;
+        return <Box key={i} p={[wx + Math.cos(a) * 8.1, MB + MH(wx) - 5.2 + Math.sin(a) * 8.1, 0]} s={[0.6, 0.6, 6.6]} r={[0, 0, a]} m={n.rubber} />;
+      })}
+      {/* boczne przyciski pod kciukiem (lewa strona) */}
+      {[-6, 8].map((x) => (
+        <mesh key={x} position={[x, 15, sideZ(x, 15) - 0.7]}>
+          <boxGeometry args={[11, 4.5, 2.4]} />
+          <meshStandardMaterial color="#34373d" roughness={0.45} />
+        </mesh>
+      ))}
+      {/* podświetlone logo pod dłonią */}
+      <mesh position={[30, MB + MH(30) + 0.15, 0]} rotation={[-Math.PI / 2, 0, -0.35]}>
+        <circleGeometry args={[3.2, 24]} />
+        <meshBasicMaterial color="#7cc7ff" toneMapped={false} />
       </mesh>
-      <mesh position={[0, 0.6, 0.3]} scale={[3.1, 3, 5.8]} material={n.plastic}>
-        <sphereGeometry args={[1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-      </mesh>
-      <Box p={[0, 2.9, -3.3]} s={[0.08, 0.9, 4.6]} m={n.slot} />
-      <Cyl p={[0, 3.25, -3.4]} r={0.6} h={0.45} m={n.rubber} axis="x" seg={16} />
-      <Box p={[-3.05, 1.2, 0]} s={[0.1, 0.5, 2.4]} m={n.plasticGrey} />
+      {/* ślizgacze */}
+      {[-46, 46].map((x) => (
+        <Box key={x} p={[x, 0.45, 0]} s={[8, 0.9, 34]} m={n.plasticWhite} />
+      ))}
       <Tube
         pts={[
-          [0, 1, -5.8],
-          [0, 0.2, -12],
-          [6, 0.2, -24],
-          [PC_O[0] - MOUSE.x - 30, 0.2, PC_O[2] - MOUSE.z + 6],
+          [-58, 12, 0],
+          [-68, 3, 0],
+          [-120, 3, 0],
+          [-240, 3, -60],
+          [(PC_O[2] - MOUSE.z + 6) * 10, 3, -(PC_O[0] - MOUSE.x - 30) * 10],
         ]}
-        r={0.2}
+        r={2}
         m={n.cable}
       />
     </group>

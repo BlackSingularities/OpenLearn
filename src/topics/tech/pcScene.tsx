@@ -57,7 +57,8 @@ import { Computer, tickRgb } from './pcParts';
 import { Shadow } from './pcMats';
 import { Keyboard, KeyboardCable, Monitor, Mouse, Room, type ScreenState } from './pcDesk';
 import { CoolLab, CpuCutLab, DieLab, FinLab, PcbLab, PipeLab, PsuLab } from './pcLabs';
-import { CoresLab, DramLab, GpuLab, HddLab, KeyLab, LcdLab, MemLab, MouseLab, NandLab, PortsLab, PyrLab, RasterLab, SsdLab } from './pcLabs2';
+import { CoresLab, DramLab, GpuLab, HddLab, LcdLab, MemLab, NandLab, PortsLab, PyrLab, RasterLab, SsdLab } from './pcLabs2';
+import { KbdLab, KeyLab, MouseLab } from './pcInput';
 import { CrtLab, MediaLab, MooreLab, Museum, TubeLab } from './pcHistory';
 
 const str = (v: unknown, d: string) => (typeof v === 'string' && v ? v : d);
@@ -103,6 +104,7 @@ const CFG: Record<string, Partial<Cfg>> = {
   'gpu-cores': { lab: 'cores' },
   'gpu-lcd': { lab: 'lcd' },
   'io-home': {},
+  'io-kbd': { lab: 'kbd' },
   'io-key': { lab: 'key' },
   'io-mouse': { lab: 'mouse' },
   'io-ports': { lab: 'ports' },
@@ -721,6 +723,7 @@ export function PcScene({ params }: SceneProps) {
       {lab === 'raster' && <RasterLab p={LAB.raster} />}
       {lab === 'cores' && <CoresLab p={LAB.cores} />}
       {lab === 'lcd' && <LcdLab p={LAB.lcd} />}
+      {lab === 'kbd' && <KbdLab p={LAB.kbd} />}
       {lab === 'key' && <KeyLab p={LAB.key} press={() => st.current.press} />}
       {lab === 'mouse' && <MouseLab p={LAB.mouse} />}
       {lab === 'ports' && <PortsLab p={LAB.ports} />}
