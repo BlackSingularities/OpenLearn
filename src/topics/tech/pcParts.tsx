@@ -273,85 +273,339 @@ export function M2Ssd() {
 
 /* ================= procesor i chłodzenie ================= */
 
-/** Procesor w obudowie LGA: laminat z kondensatorami, metalowa osłona (IHS) z napisem. */
-export function CpuPackage() {
-  const n = MAT();
-  const top = useMemo(() => labelMat('cpu', ['CORE i7', '14700K'], '#c9cdd2', '#40454c'), []);
-  const w = 3.75;
-  const h = 4.5;
-  return (
-    <group>
-      <Box p={[0, 0, 0.06]} s={[w, h, 0.12]} m={n.greenBoard} />
-      <Box p={[0, 0, 0.27]} s={[3.2, 3.9, 0.3]} m={n.nickel} />
-      <Box p={[0, 0, 0.425]} s={[2.4, 2.4, 0.01]} m={top} />
-      {/* wycięcia osłony i kondensatory przy krawędzi */}
-      {[-1, 1].map((s) => (
-        <Box key={s} p={[s * 1.7, 0, 0.18]} s={[0.25, 1.2, 0.1]} m={n.greenBoard} />
-      ))}
-      {Array.from({ length: 10 }, (_, i) => (
-        <Box key={i} p={[-1.55 + (i % 5) * 0.75, i < 5 ? -2.05 : 2.05, 0.14]} s={[0.12, 0.08, 0.05]} m={n.solder} />
-      ))}
-    </group>
-  );
+/** Kształt zaokrąglonego prostokąta w×h (środek w 0,0), opcjonalnie z prostokątnymi wycięciami w krótszych bokach. */
+function roundRect(w: number, h: number, r: number, notch?: { w: number; d: number }) {
+  const s = new THREE.Shape();
+  const x = w / 2;
+  const y = h / 2;
+  s.moveTo(-x + r, -y);
+  if (notch) {
+    s.lineTo(-notch.w / 2, -y);
+    s.lineTo(-notch.w / 2, -y + notch.d);
+    s.lineTo(notch.w / 2, -y + notch.d);
+    s.lineTo(notch.w / 2, -y);
+  }
+  s.lineTo(x - r, -y);
+  s.quadraticCurveTo(x, -y, x, -y + r);
+  s.lineTo(x, y - r);
+  s.quadraticCurveTo(x, y, x - r, y);
+  if (notch) {
+    s.lineTo(notch.w / 2, y);
+    s.lineTo(notch.w / 2, y - notch.d);
+    s.lineTo(-notch.w / 2, y - notch.d);
+    s.lineTo(-notch.w / 2, y);
+  }
+  s.lineTo(-x + r, y);
+  s.quadraticCurveTo(-x, y, -x, y - r);
+  s.lineTo(-x, -y + r);
+  s.quadraticCurveTo(-x, -y, -x + r, -y);
+  return s;
+}
+const SLAB = new Map<string, THREE.BufferGeometry>();
+/** Płytka o kształcie `shape` i grubości t, od z = 0 do t (płaszczyzna x–y). Z cache po kluczu. */
+function slabGeo(key: string, make: () => THREE.Shape | THREE.Shape[], t: number) {
+  const hit = SLAB.get(key);
+  if (hit) return hit;
+  const g = new THREE.ExtrudeGeometry(make(), { depth: t, bevelEnabled: false, curveSegments: 10 });
+  // ściany boczne bez tekstury – UV góry rozciągamy na cały kształt
+  const pos = g.getAttribute('position');
+  const uv = g.getAttribute('uv');
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  for (let k = 0; k < pos.count; k++) uv.setXY(k, (pos.getX(k) - bb.min.x) / (bb.max.x - bb.min.x), (pos.getY(k) - bb.min.y) / (bb.max.y - bb.min.y));
+  g.computeVertexNormals();
+  SLAB.set(key, g);
+  return g;
 }
 
-/** Gniazdo LGA1700: plastikowa podstawa, metalowa ramka dociskowa i dźwignia. `open` – podniesiona ramka. */
-export function Socket({ open = false }: { open?: boolean }) {
+const CPU_TEX = new Map<string, THREE.Material>();
+function texMat(key: string, w: number, h: number, draw: (g: CanvasRenderingContext2D, w: number, h: number) => void, o: THREE.MeshStandardMaterialParameters = {}) {
+  let m = CPU_TEX.get(key);
+  if (m) return m;
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d')!, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  m = new THREE.MeshStandardMaterial({ map: t, ...o });
+  CPU_TEX.set(key, m);
+  return m;
+}
+
+/** Osłona IHS: szczotkowany nikiel z wypalonym laserem napisem, kodem 2D i trójkątem w rogu. */
+const ihsMat = () =>
+  texMat(
+    'ihs',
+    512,
+    606,
+    (g, W, H) => {
+      const bg = g.createLinearGradient(0, 0, W, H);
+      bg.addColorStop(0, '#d9dde2');
+      bg.addColorStop(0.5, '#c4c9cf');
+      bg.addColorStop(1, '#d3d7dc');
+      g.fillStyle = bg;
+      g.fillRect(0, 0, W, H);
+      const r = rng(5);
+      for (let i = 0; i < 900; i++) {
+        g.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '90,96,104'},${0.05 + r() * 0.08})`;
+        g.fillRect(0, r() * H, W, 1);
+      }
+      g.fillStyle = '#5a6068';
+      g.textAlign = 'left';
+      g.font = 'bold 64px sans-serif';
+      g.fillText('intel.', 60, 150);
+      g.font = 'bold 42px sans-serif';
+      g.fillText('CORE i7', 60, 225);
+      g.font = '30px monospace';
+      ['i7-14700K', 'SRN3X 3.40GHZ', 'X337M519', '(e3)'].forEach((l, k) => g.fillText(l, 60, 300 + k * 44));
+      // kod 2D
+      for (let y = 0; y < 14; y++)
+        for (let x = 0; x < 14; x++) if (x === 0 || y === 13 || r() < 0.45) g.fillRect(360 + x * 8, 430 + y * 8, 8, 8);
+      g.beginPath();
+      g.moveTo(24, 24);
+      g.lineTo(70, 24);
+      g.lineTo(24, 70);
+      g.fill();
+    },
+    { metalness: 0.75, roughness: 0.28 },
+  );
+/** Laminat procesora: zielony, z drobnymi ścieżkami i złotym trójkątem. */
+const subMat = () =>
+  texMat(
+    'cpusub',
+    256,
+    308,
+    (g, W, H) => {
+      g.fillStyle = '#1f6a3a';
+      g.fillRect(0, 0, W, H);
+      const r = rng(17);
+      g.strokeStyle = 'rgba(120,200,120,0.35)';
+      for (let i = 0; i < 60; i++) {
+        g.beginPath();
+        const x = r() * W;
+        const y = r() * H;
+        g.moveTo(x, y);
+        g.lineTo(x + (r() - 0.5) * 60, y + (r() - 0.5) * 60);
+        g.stroke();
+      }
+      g.fillStyle = '#e2b84a';
+      g.beginPath();
+      g.moveTo(6, H - 6);
+      g.lineTo(26, H - 6);
+      g.lineTo(6, H - 26);
+      g.fill();
+    },
+    { roughness: 0.5 },
+  );
+/** Spód procesora: 1700 złotych pól stykowych. */
+const padMat = () =>
+  texMat(
+    'cpupad',
+    256,
+    308,
+    (g, W, H) => {
+      g.fillStyle = '#1d5a33';
+      g.fillRect(0, 0, W, H);
+      g.fillStyle = '#e4bb4c';
+      for (let y = 6; y < H - 4; y += 6.5) for (let x = 6; x < W - 4; x += 6.5) if (!(x > 90 && x < 166 && y > 110 && y < 198)) g.fillRect(x, y, 3.6, 3.6);
+    },
+    { metalness: 0.6, roughness: 0.35 },
+  );
+/** Pole sprężynek w gnieździe. */
+const pinMat = () =>
+  texMat(
+    'pins',
+    256,
+    308,
+    (g, W, H) => {
+      g.fillStyle = '#141518';
+      g.fillRect(0, 0, W, H);
+      g.fillStyle = '#c9a24a';
+      for (let y = 5; y < H - 3; y += 6.5) for (let x = 5; x < W - 3; x += 6.5) if (!(x > 90 && x < 166 && y > 110 && y < 198)) g.fillRect(x, y, 2.4, 3.2);
+    },
+    { metalness: 0.5, roughness: 0.4 },
+  );
+
+/**
+ * Procesor w obudowie LGA (z = 0 – spód laminatu): zielony laminat z polami stykowymi pod spodem, kondensatory
+ * w wycięciach osłony, osłona IHS z niklowanej miedzi: niższy kołnierz z wycięciami i wyższy płaskowyż z napisem.
+ */
+export function CpuPackage() {
   const n = MAT();
+  const w = 3.75;
+  const h = 4.5;
+  const flange = slabGeo('ihsF', () => roundRect(3.35, 4.1, 0.2, { w: 1.5, d: 0.32 }), 0.12);
+  const plate = slabGeo('ihsP', () => roundRect(3.0, 3.56, 0.25), 0.22);
   return (
     <group>
-      <Box p={[0, 0, 0.17]} s={[5.4, 6.4, 0.34]} m={n.slot} />
-      {!open &&
-        [
-          [0, 3, 5.6, 0.5],
-          [0, -3, 5.6, 0.5],
-          [2.6, 0, 0.45, 6],
-          [-2.6, 0, 0.45, 6],
-        ].map(([x, y, sx, sy], i) => <Box key={i} p={[x, y, 0.38]} s={[sx, sy, 0.08]} m={n.steel} />)}
-      {/* dźwignia */}
-      <Box p={[3.1, -0.2, 0.42]} s={[0.12, 6.2, 0.12]} m={n.steel} />
-      <Box p={[3.1, 3.05, 0.42]} s={[0.6, 0.12, 0.12]} m={n.steel} />
-      {/* pola styków (1700 sprężynek) */}
-      <Box p={[0, 0, 0.345]} s={[3.6, 4.3, 0.01]} m={n.gold} />
+      <Box p={[0, 0, 0.06]} s={[w, h, 0.12]} m={subMat()} />
+      <mesh position={[0, 0, -0.001]} rotation={[Math.PI, 0, 0]} material={padMat()}>
+        <planeGeometry args={[w - 0.05, h - 0.05]} />
+      </mesh>
+      <mesh geometry={flange} position={[0, 0, 0.12]} material={n.nickel} />
+      <mesh geometry={plate} position={[0, 0, 0.24]} material={ihsMat()} />
+      {/* kondensatory w wycięciach osłony (po obu krótszych bokach) */}
+      {[-1, 1].map((sy) =>
+        Array.from({ length: 12 }, (_, i) => (
+          <Box key={`${sy}${i}`} p={[-0.62 + (i % 6) * 0.25, sy * (1.9 + Math.floor(i / 6) * 0.14), 0.15]} s={[0.12, 0.07, 0.06]} m={i % 3 ? n.solder : n.chipGrey} />
+        )),
+      )}
+      {/* rzędy kondensatorów na dłuższych brzegach laminatu */}
+      {[-1, 1].map((sx) =>
+        Array.from({ length: 10 }, (_, i) => <Box key={`x${sx}${i}`} p={[sx * 1.78, -1.7 + i * 0.38, 0.14]} s={[0.07, 0.12, 0.05]} m={n.solder} />),
+      )}
     </group>
   );
 }
 
 /**
- * Chłodzenie wieżowe: miedziana podstawa, 4 rurki cieplne w kształcie litery U, pakiet 42 aluminiowych żeber
- * i wentylator 12 cm z przodu. Układ: środek podstawy na (0,0,0), wieża rośnie w +z, powietrze płynie w −x.
+ * Gniazdo LGA1700 (z = 0 – wierzch płyty): plastikowa podstawa z polem sprężynek, stalowa rama na czterech
+ * śrubach, płyta dociskowa z oknem (opiera się na kołnierzu osłony procesora) i wygięta dźwignia z hakiem.
+ * `open` – płyta podniesiona na zawiasie, widać sprężynki.
+ */
+export function Socket({ open = false }: { open?: boolean }) {
+  const n = MAT();
+  const frame = slabGeo(
+    'ilmFrame',
+    () => {
+      const s = roundRect(6.4, 7.4, 0.35);
+      s.holes.push(new THREE.Path(roundRect(5.0, 6.0, 0.2).getPoints(8)));
+      return s;
+    },
+    0.12,
+  );
+  const plateGeo = slabGeo(
+    'ilmPlate',
+    () => {
+      const s = roundRect(4.5, 5.3, 0.3);
+      s.holes.push(new THREE.Path(roundRect(3.1, 3.7, 0.25).getPoints(8)));
+      return s;
+    },
+    0.07,
+  );
+  return (
+    <group>
+      <Box p={[0, 0, 0.17]} s={[5.0, 6.0, 0.34]} m={n.slot} />
+      <mesh position={[0, 0, 0.345]} material={pinMat()}>
+        <planeGeometry args={[3.7, 4.4]} />
+      </mesh>
+      <mesh geometry={frame} position={[0, 0, 0]} material={n.steel} />
+      {[-1, 1].map((sx) =>
+        [-1, 1].map((sy) => (
+          <group key={`${sx}${sy}`}>
+            <Cyl p={[sx * 2.85, sy * 3.35, 0.2]} r={0.22} h={0.2} m={n.steelDark} axis="z" seg={12} />
+            <Cyl p={[sx * 2.85, sy * 3.35, 0.31]} r={0.08} h={0.03} m={n.slot} axis="z" seg={6} />
+          </group>
+        )),
+      )}
+      {/* płyta dociskowa: zawias przy górnej krawędzi, język z przodu pod hakiem dźwigni */}
+      <group position={[0, 2.65, 0.59]} rotation={[open ? -1.6 : 0, 0, 0]}>
+        <mesh geometry={plateGeo} position={[0, -2.65, 0]} material={n.steel} />
+        <Box p={[0, -5.45, 0.04]} s={[1.2, 0.5, 0.07]} m={n.steel} />
+        {[-1.6, 1.6].map((x) => (
+          <Box key={x} p={[x, 0.05, -0.15]} s={[0.6, 0.3, 0.35]} m={n.steel} />
+        ))}
+      </group>
+      {/* dźwignia: pręt wzdłuż boku, wygięty uchwyt i hak dociskający język płyty */}
+      <Tube
+        pts={[
+          [3.0, 3.2, 0.3],
+          [3.0, -2.9, 0.3],
+          [3.0, -3.3, 0.45],
+          [3.6, -3.45, 0.5],
+        ]}
+        r={0.07}
+        m={n.steel}
+        seg={8}
+        smooth={false}
+      />
+      <Box p={[3.75, -3.45, 0.5]} s={[0.5, 0.35, 0.2]} m={n.plastic} />
+      <Tube
+        pts={[
+          [3.0, -2.1, 0.3],
+          [1.4, -2.85, 0.68],
+          [0.7, -2.85, 0.68],
+        ]}
+        r={0.06}
+        m={n.steel}
+        seg={6}
+        smooth={false}
+      />
+    </group>
+  );
+}
+
+/**
+ * Chłodzenie wieżowe: miedziana podstawa z niklowaną płytą, belka montażowa ze sprężynującymi śrubami, 4 rurki
+ * cieplne w kształcie litery U, pakiet 42 aluminiowych żeber z pokrywą i wentylator 12 cm na klipsach.
+ * Układ: środek podstawy na (0,0,0), wieża rośnie w +z, powietrze płynie w −x.
  */
 export function TowerCooler({ spin, fins = true }: { spin: () => number; fins?: boolean }) {
   const n = MAT();
   const { w, d, h } = COOLER;
   const finZ = useMemo(() => Array.from({ length: 42 }, (_, i) => 3.6 + (i * (h - 3.8)) / 41), [h]);
   const pipes = [-1.8, -0.6, 0.6, 1.8];
+  const cap = useMemo(() => labelMat('coolcap', ['FROZN 620'], '#1d2025', '#d7dbe0'), []);
   return (
     <group>
       <Box p={[0, 0, 0.3]} s={[4, 4, 0.6]} m={n.copper} />
       <Box p={[0, 0, 0.9]} s={[4.4, 4.2, 0.6]} m={n.nickel} />
+      {/* belka montażowa ze śrubami na sprężynach */}
+      <Box p={[0, 0, 1.35]} s={[7.6, 1.1, 0.18]} m={n.steelDark} />
+      {[-3.4, 3.4].map((x) => (
+        <group key={x}>
+          <Cyl p={[x, 0, 1.75]} r={0.28} h={0.6} m={n.steel} axis="z" seg={12} />
+          <mesh position={[x, 0, 1.1]} rotation={[Math.PI / 2, 0, 0]} material={n.steel}>
+            <torusGeometry args={[0.32, 0.04, 6, 16]} />
+          </mesh>
+        </group>
+      ))}
       {pipes.map((y, i) => (
-        <Tube
-          key={y}
-          pts={[
-            [-1.7 - (i % 2) * 0.5, y, h + 0.2],
-            [-1.7 - (i % 2) * 0.5, y, 2.4],
-            [-1.2, y, 0.75],
-            [1.2, y, 0.75],
-            [1.7 + (i % 2) * 0.5, y, 2.4],
-            [1.7 + (i % 2) * 0.5, y, h + 0.2],
-          ]}
-          r={0.3}
-          m={n.copper}
-          seg={10}
-        />
+        <group key={y}>
+          <Tube
+            pts={[
+              [-1.7 - (i % 2) * 0.5, y, h + 0.2],
+              [-1.7 - (i % 2) * 0.5, y, 2.4],
+              [-1.2, y, 0.75],
+              [1.2, y, 0.75],
+              [1.7 + (i % 2) * 0.5, y, 2.4],
+              [1.7 + (i % 2) * 0.5, y, h + 0.2],
+            ]}
+            r={0.3}
+            m={n.nickel}
+            seg={12}
+          />
+          {[-1, 1].map((sx) => (
+            <Cyl key={sx} p={[sx * (1.7 + (i % 2) * 0.5), y, h + 0.45]} r={0.31} h={0.3} m={n.steel} axis="z" seg={12} />
+          ))}
+        </group>
       ))}
       {fins &&
         finZ.map((z) => (
           <Box key={z} p={[0, 0, z]} s={[d, w, 0.05]} m={n.alu} />
         ))}
-      <Box p={[0, 0, h + 0.15]} s={[d + 0.1, w + 0.1, 0.3]} m={n.aluDark} />
+      {/* pokrywa z logo */}
+      <Box p={[0, 0, h + 0.3]} s={[d + 0.2, w + 0.2, 0.35]} m={n.plastic} />
+      <Box p={[0, 0, h + 0.49]} s={[d - 1, 6, 0.02]} m={cap} r={[0, 0, Math.PI / 2]} />
+      {/* wentylator na drucianych klipsach */}
       <Fan p={[d / 2 + 1.4, 0, 3.6 + (h - 3.6) / 2]} d={12} axis="x" spin={spin} />
+      {[3.6 + 0.6, h - 0.4].map((z) => (
+        <Tube
+          key={z}
+          pts={[
+            [d / 2 + 2.5, -5.7, z],
+            [d / 2 + 0.1, -6.3, z],
+            [d / 2 + 0.1, 6.3, z],
+            [d / 2 + 2.5, 5.7, z],
+          ]}
+          r={0.05}
+          m={n.steel}
+          seg={5}
+          smooth={false}
+        />
+      ))}
     </group>
   );
 }
@@ -662,101 +916,216 @@ function RearIo() {
 
 /* ================= karta graficzna ================= */
 
+/** Koniec krótkiego laminatu karty (dalej radiator jest przewiewny – powietrze przechodzi na wylot). */
+export const GPU_PCB_END = GPU.x1 - 10;
+/** Złącze zasilania 16-pin na górnej krawędzi laminatu. */
+export const GPU_PWR_X = GPU_PCB_END - 3;
+
+/** Bok osłony karty widoczny przez szybę: grafitowe płaszczyzny, srebrne listwy, napis. */
+const gpuSideMat = () =>
+  texMat(
+    'gpuside',
+    1024,
+    176,
+    (g, W, H) => {
+      const bg = g.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, '#2c3036');
+      bg.addColorStop(0.5, '#1b1e22');
+      bg.addColorStop(1, '#25292e');
+      g.fillStyle = bg;
+      g.fillRect(0, 0, W, H);
+      // ukośne płaszczyzny
+      g.fillStyle = 'rgba(255,255,255,0.05)';
+      for (let x = -200; x < W; x += 170) {
+        g.beginPath();
+        g.moveTo(x, H);
+        g.lineTo(x + 90, 0);
+        g.lineTo(x + 150, 0);
+        g.lineTo(x + 60, H);
+        g.fill();
+      }
+      g.fillStyle = '#aab2bc';
+      g.fillRect(0, 18, W, 4);
+      g.fillRect(W * 0.38, H - 22, W * 0.62, 4);
+      g.fillStyle = '#eef1f4';
+      g.font = 'bold 58px sans-serif';
+      g.textAlign = 'left';
+      g.fillText('GEFORCE RTX', 70, 112);
+      g.fillStyle = '#76b900';
+      g.fillRect(70, 128, 400, 6);
+    },
+    { metalness: 0.5, roughness: 0.4 },
+  );
+
 /**
- * Karta graficzna (układ komputera, leży poziomo pod slotem PCIe): laminat z układem GPU i pamięciami, tylna
- * płytka, radiator z żebrami i rurkami, osłona z trzema wentylatorami skierowanymi w dół, śledź ze złączami.
+ * Karta graficzna (układ komputera, leży poziomo pod slotem PCIe, wentylatorami w dół). `part`:
+ * `all` – cała karta; `cooler` – sam radiator z komorą parową, rurkami i śledziem; `pcb` – laminat z układami
+ * i złączami; `back` – tylna płytka; `shroud` – osłona z wentylatorami (do widoku rozłożonego).
  */
-export function Gpu({ spin, shroud = true }: { spin: () => number; shroud?: boolean }) {
+export function Gpu({ spin, part = 'all' }: { spin: () => number; part?: 'all' | 'cooler' | 'pcb' | 'back' | 'shroud' }) {
   const n = MAT();
-  const logo = useMemo(() => labelMat('gpu', ['GEFORCE RTX'], '#1d1f23', '#7ee08a'), []);
+  const logo = useMemo(() => labelMat('gpu', ['GEFORCE RTX'], '#2a2e34', '#e6e9ed'), []);
+  const hub = useMemo(() => labelMat('gpuhub', ['RTX'], '#15171a', '#76b900'), []);
   const { x0, x1, y, z0, z1, cool } = GPU;
   const L = x1 - x0;
   const cx = (x0 + x1) / 2;
   const cz = (z0 + z1) / 2;
-  const fins = useMemo(() => Array.from({ length: 70 }, (_, i) => x0 + 1.5 + (i * (L - 3)) / 69), [x0, L]);
+  const fins = useMemo(() => Array.from({ length: 74 }, (_, i) => x0 + 1.2 + (i * (L - 2.4)) / 73), [x0, L]);
   const fanX = [x0 + 6.3, cx + 0.4, x1 - 5.2];
-  // osłona: płyta z trzema okrągłymi otworami na wentylatory (kształt w płaszczyźnie x–z)
   const shroudGeo = useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(x0, z0);
-    s.lineTo(x1, z0);
-    s.lineTo(x1, z1);
-    s.lineTo(x0, z1);
-    s.closePath();
+    const sh = new THREE.Shape();
+    sh.moveTo(x0, z0);
+    sh.lineTo(x1, z0);
+    sh.lineTo(x1, z1);
+    sh.lineTo(x0, z1);
+    sh.closePath();
     for (const x of fanX) {
       const h = new THREE.Path();
-      h.absarc(x, (z0 + z1) / 2, 4.5, 0, Math.PI * 2, true);
-      s.holes.push(h);
+      h.absarc(x, cz, 4.5, 0, Math.PI * 2, true);
+      sh.holes.push(h);
     }
-    return new THREE.ExtrudeGeometry(s, { depth: 0.35, bevelEnabled: false, curveSegments: 32 });
+    return new THREE.ExtrudeGeometry(sh, { depth: 0.35, bevelEnabled: false, curveSegments: 40 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const show = (k: string) => part === 'all' || part === k;
+  const pipeZ = [4.2, 6.2, 8.2, 10.2, 12.2];
   return (
     <group>
-      {/* laminat ze złączem krawędziowym */}
-      <Box p={[cx, y - 0.08, cz]} s={[L, 0.16, z1 - z0]} m={n.board} />
-      <Box p={[(PCIE.x0 + PCIE.x1) / 2, y - 0.08, z0 - 0.5]} s={[PCIE.x1 - PCIE.x0 - 0.4, 0.16, 1]} m={n.board} />
-      <Box p={[(PCIE.x0 + PCIE.x1) / 2, y - 0.08, z0 - 0.75]} s={[PCIE.x1 - PCIE.x0 - 0.4, 0.17, 0.5]} m={n.gold} />
-      {/* tylna płytka */}
-      <Box p={[cx, y + 0.2, cz]} s={[L, 0.3, z1 - z0]} m={n.aluDark} />
-      <Box p={[cx + 6, y + 0.36, cz]} s={[8, 0.02, 2.5]} m={logo} />
-      {/* radiator: żebra i rurki cieplne */}
-      {fins.map((x) => (
-        <Box key={x} p={[x, y - 0.4 - (cool - 1.2) / 2, cz]} s={[0.05, cool - 1.2, z1 - z0 - 0.6]} m={n.alu} />
-      ))}
-      {[4.5, 6.5, 8.5, 10.5].map((z) => (
-        <Cyl key={z} p={[cx, y - 1.3, z]} r={0.3} h={L - 1.5} m={n.copper} axis="x" seg={10} />
-      ))}
-      {/* osłona i wentylatory */}
-      {shroud && (
+      {show('pcb') && (
+        <group>
+          {/* krótki laminat ze złączem krawędziowym */}
+          <Box p={[(x0 + GPU_PCB_END) / 2, y - 0.08, cz]} s={[GPU_PCB_END - x0, 0.16, z1 - z0]} m={n.board} />
+          <Box p={[(PCIE.x0 + PCIE.x1) / 2, y - 0.08, z0 - 0.5]} s={[PCIE.x1 - PCIE.x0 - 0.4, 0.16, 1]} m={n.board} />
+          <Box p={[(PCIE.x0 + PCIE.x1) / 2, y - 0.08, z0 - 0.75]} s={[PCIE.x1 - PCIE.x0 - 0.4, 0.17, 0.5]} m={n.gold} />
+          {/* złącze zasilania 16-pin */}
+          <Box p={[GPU_PWR_X, y - 0.55, z1 - 0.3]} s={[2.1, 0.9, 1.1]} m={n.slot} />
+          {part === 'pcb' && <GpuChips />}
+        </group>
+      )}
+      {show('back') && (
+        <group>
+          {/* tylna płytka z przewiewnym wycięciem nad końcem radiatora */}
+          <Box p={[(x0 + x1 - 9) / 2, y + 0.2, cz]} s={[L - 9, 0.3, z1 - z0]} m={n.aluDark} />
+          <Box p={[x1 - 1, y + 0.2, cz]} s={[2, 0.3, z1 - z0]} m={n.aluDark} />
+          {[z0 + 0.6, z1 - 0.6].map((z) => (
+            <Box key={z} p={[x1 - 5.5, y + 0.2, z]} s={[7, 0.3, 1.2]} m={n.aluDark} />
+          ))}
+          <Box p={[cx - 4, y + 0.36, cz]} s={[9, 0.02, 2.6]} m={logo} />
+          {Array.from({ length: 8 }, (_, i) => (
+            <Cyl key={i} p={[-14 + (i % 4) * 4.5, y + 0.37, i < 4 ? 4 : 11]} r={0.15} h={0.04} m={n.steel} seg={8} />
+          ))}
+        </group>
+      )}
+      {show('cooler') && (
+        <group>
+          {/* komora parowa pod układem GPU */}
+          <Box p={[-7, y - 0.6, cz]} s={[6.5, 0.3, 6.5]} m={n.copper} />
+          {fins.map((x) => (
+            <Box key={x} p={[x, y - 0.75 - (cool - 1.5) / 2, cz]} s={[0.05, cool - 1.5, z1 - z0 - 0.4]} m={n.alu} />
+          ))}
+          {/* rurki cieplne: wzdłuż karty, zawracają przy końcu (widać kolana z boku) */}
+          {pipeZ.map((z, k) => (
+            <Tube
+              key={z}
+              pts={[
+                [-12 + k, y - 0.95, z],
+                [x1 - 2.6, y - 0.95, z],
+                [x1 - 1.4, y - 1.9, z],
+                [x1 - 2.6, y - 2.9, z],
+                [x0 + 4 + k * 2, y - 2.9, z],
+              ]}
+              r={0.3}
+              m={n.nickel}
+              seg={10}
+            />
+          ))}
+          {/* śledź z otworami wentylacyjnymi i złączami monitora */}
+          <Box p={[x0 - 0.1, y - 2.8, 6.5]} s={[0.15, 6.2, 12]} m={n.steel} />
+          <Box p={[x0 - 0.1, y + 0.6, 6.5]} s={[0.8, 0.15, 12]} m={n.steel} />
+          {[3, 5.4, 7.8].map((z) => (
+            <Box key={z} p={[x0 - 0.3, y - 1.3, z]} s={[0.3, 0.6, 1.8]} m={n.slot} />
+          ))}
+          <Box p={[x0 - 0.3, y - 1.3, 10.2]} s={[0.3, 0.6, 1.5]} m={n.slot} />
+          {Array.from({ length: 18 }, (_, i) => (
+            <Cyl key={i} p={[x0 - 0.19, y - 3.3 - (i % 2) * 1.1, 1.6 + Math.floor(i / 2) * 1.25]} r={0.38} h={0.05} m={n.slot} axis="x" seg={6} />
+          ))}
+        </group>
+      )}
+      {show('shroud') && (
         <group>
           <mesh geometry={shroudGeo} position={[0, y - cool + 0.4, 0]} rotation={[Math.PI / 2, 0, 0]} material={n.plastic} />
           {fanX.map((x) => (
-            <Fan key={x} p={[x, y - cool + 0.75, cz]} d={8.8} axis="y" spin={spin} frame={false} blades={11} />
+            <group key={x}>
+              <Fan p={[x, y - cool + 0.75, cz]} d={8.8} axis="y" spin={spin} frame={false} blades={11} />
+              <mesh position={[x, y - cool + 0.04, cz]} rotation={[Math.PI / 2, 0, 0]} material={n.steel}>
+                <ringGeometry args={[4.5, 4.85, 48]} />
+              </mesh>
+              <mesh position={[x, y - cool - 0.2, cz]} rotation={[Math.PI / 2, 0, 0]} material={hub}>
+                <circleGeometry args={[1.1, 24]} />
+              </mesh>
+            </group>
           ))}
-          <Box p={[cx, y - cool + 0.2, z1 - 0.1]} s={[L, cool - 0.4, 0.25]} m={n.plastic} />
-          <Box p={[cx, y - cool + 1.4, z1 + 0.02]} s={[L - 4, 0.15, 0.05]} m={n.ledGreen} />
+          {/* bok osłony z napisem i podświetleniem, czoło z kratką */}
+          <mesh position={[cx, y - cool / 2 - 0.05, z1 + 0.06]} material={gpuSideMat()}>
+            <planeGeometry args={[L, cool - 0.5]} />
+          </mesh>
+          <Box p={[cx, y - cool / 2 - 0.05, z1 - 0.06]} s={[L, cool - 0.5, 0.12]} m={n.plastic} />
+          <Box p={[cx - 4, y - cool + 0.7, z1 + 0.08]} s={[L - 10, 0.12, 0.03]} m={n.ledGreen} />
+          <Box p={[cx, y - cool / 2 - 0.05, z0 + 0.06]} s={[L, cool - 0.5, 0.12]} m={n.plastic} />
+          <Box p={[x1 + 0.06, y - cool / 2 - 0.05, cz]} s={[0.12, cool - 0.5, z1 - z0]} m={n.plastic} />
+          {Array.from({ length: 6 }, (_, i) => (
+            <Box key={i} p={[x1 + 0.14, y - cool + 1 + i * 0.7, cz]} s={[0.04, 0.3, z1 - z0 - 2]} m={n.slot} />
+          ))}
         </group>
       )}
-      {/* złącze zasilania 16-pin na górnej krawędzi */}
-      <Box p={[x1 - 9, y - 0.6, z1 + 0.25]} s={[2, 0.9, 0.5]} m={n.slot} />
-      {/* śledź ze złączami monitora */}
-      <Box p={[x0 - 0.1, y - 2.8, 6.5]} s={[0.15, 6.2, 12]} m={n.steel} />
-      {[3, 5.4, 7.8].map((z) => (
-        <Box key={z} p={[x0 - 0.3, y - 1.3, z]} s={[0.3, 0.6, 1.8]} m={n.slot} />
-      ))}
-      <Box p={[x0 - 0.3, y - 1.3, 10.2]} s={[0.3, 0.6, 1.5]} m={n.slot} />
-      {Array.from({ length: 8 }, (_, i) => (
-        <Box key={i} p={[x0 - 0.2, y - 3.6, 2 + i * 1.3]} s={[0.1, 2.2, 0.7]} m={n.slot} />
-      ))}
     </group>
   );
 }
 
-/** Układ GPU z pamięciami na odsłoniętym laminacie (widok z dołu, bez radiatora). */
+/**
+ * Laminat karty od strony radiatora: układ GPU na własnym laminacie z błyszczącym krzemem, sześć kości
+ * GDDR6X dookoła, sekcja zasilania (dławiki, tranzystory, kondensatory) i drobne elementy.
+ */
 export function GpuChips() {
   const n = MAT();
-  const vram = useMemo(() => labelMat('vram', ['GDDR6X'], '#16181b', '#9ba1a9'), []);
-  const gpu = useMemo(() => labelMat('gpudie', ['AD104'], '#3a3550', '#c7c3e6'), []);
+  const vram = useMemo(() => labelMat('vram', ['GDDR6X'], '#34373d', '#d0d4da'), []);
   const { y } = GPU;
   const cx = -7;
   const cz = 7.5;
+  const mem: [number, number][] = [
+    [-3.6, -1.6],
+    [-3.6, 1.6],
+    [3.6, -1.6],
+    [3.6, 1.6],
+    [-1.4, -3.7],
+    [1.4, -3.7],
+  ];
   return (
     <group>
-      <Box p={[cx, y - 0.2, cz]} s={[4.2, 0.08, 4.2]} m={n.greenBoard} />
-      <Box p={[cx, y - 0.3, cz]} s={[2.6, 0.12, 2.6]} m={gpu} />
-      {[
-        [-3.4, 0],
-        [3.4, 0],
-        [0, -3.4],
-        [0, 3.4],
-        [-3.4, 2.6],
-        [3.4, 2.6],
-      ].map(([dx, dz], i) => (
-        <Box key={i} p={[cx + dx, y - 0.22, cz + dz]} s={[1.4, 0.1, 1.2]} m={vram} />
+      {/* układ GPU: laminat, krzem, ramka usztywniająca */}
+      <Box p={[cx, y - 0.2, cz]} s={[4.4, 0.1, 4.4]} m={n.greenBoard} />
+      <Box p={[cx, y - 0.3, cz]} s={[2.5, 0.1, 2.1]} m={n.dieShine} />
+      {[-1, 1].map((s) => (
+        <group key={s}>
+          <Box p={[cx + s * 1.95, y - 0.29, cz]} s={[0.25, 0.08, 4.1]} m={n.steel} />
+          <Box p={[cx, y - 0.29, cz + s * 1.95]} s={[4.1, 0.08, 0.25]} m={n.steel} />
+        </group>
       ))}
-      {Array.from({ length: 10 }, (_, i) => (
-        <Box key={i} p={[2 + (i % 5) * 1.3, y - 0.45, 4 + Math.floor(i / 5) * 1.4]} s={[1, 0.6, 1]} m={n.choke} />
+      {mem.map(([dx, dz], i) => (
+        <Box key={i} p={[cx + dx, y - 0.23, cz + dz]} s={[1.4, 0.12, 1.2]} m={vram} />
+      ))}
+      {/* sekcja zasilania: dławiki w rzędzie, tranzystory, kondensatory polimerowe */}
+      {Array.from({ length: 11 }, (_, i) => (
+        <group key={i}>
+          <Box p={[-1.6 + (i % 1) + i * 0.0, y - 0.45, 3.2 + i * 0.85]} s={[0.75, 0.6, 0.75]} m={n.choke} />
+          <Box p={[-2.6, y - 0.25, 3.2 + i * 0.85]} s={[0.5, 0.2, 0.5]} m={n.chip} />
+        </group>
+      ))}
+      {Array.from({ length: 8 }, (_, i) => (
+        <Cyl key={i} p={[-0.4 + (i % 2) * 0.7, y - 0.45, 4 + Math.floor(i / 2) * 2]} r={0.28} h={0.6} m={n.capacitor} seg={12} />
+      ))}
+      {Array.from({ length: 40 }, (_, i) => (
+        <Box key={i} p={[-15 + (i % 10) * 0.8, y - 0.2, 3.5 + Math.floor(i / 10) * 2.6]} s={[0.2, 0.08, 0.12]} m={n.solder} />
       ))}
     </group>
   );
@@ -796,8 +1165,8 @@ export function Cables() {
       [-7.2, 7.5, 15],
       [-1, 10.7, 16],
       [2, 14, 16.5],
-      [GPU.x1 - 9, GPU.y - 0.6, GPU.z1 + 1.6],
-      [GPU.x1 - 9, GPU.y - 0.6, GPU.z1 + 0.5],
+      [GPU_PWR_X, GPU.y - 0.55, GPU.z1 + 1.8],
+      [GPU_PWR_X, GPU.y - 0.55, GPU.z1 + 0.3],
     ],
     [],
   );
@@ -906,7 +1275,7 @@ export function Computer({ glass, cooler, cables, gpu, explode, spin }: PcOpts) 
       </Ex>
       {cooler && (
         <Ex off={[0, 4, 40]} explode={explode}>
-          <group position={[SOCKET.x, SOCKET.y, MBZ + 0.78]}>
+          <group position={[SOCKET.x, SOCKET.y, MBZ + 0.82]}>
             <TowerCooler spin={spin} />
           </group>
         </Ex>

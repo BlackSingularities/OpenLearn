@@ -10,7 +10,18 @@ import * as THREE from 'three';
 import { Lbl } from '../aviation/airliner';
 import { GPU, HDD, MEM_LEVELS, clamp, rng, sm, type V3 } from './pcGeo';
 import { Box, Cyl, Fan, MAT, Tube } from './pcMats';
-import { Gpu, GpuChips, Hdd, M2Ssd, RamStick } from './pcParts';
+import { EnergyFlow } from '../energy/windExtras';
+
+/** Położenia kości pamięci względem układu GPU (jak w GpuChips). */
+const VRAM_AT: [number, number][] = [
+  [-3.6, -1.6],
+  [-3.6, 1.6],
+  [3.6, -1.6],
+  [3.6, 1.6],
+  [-1.4, -3.7],
+  [1.4, -3.7],
+];
+import { Gpu, Hdd, M2Ssd, RamStick } from './pcParts';
 import { LC, LabStage, Slab } from './pcLabs';
 
 /* ================= wystawa pamięci ================= */
@@ -371,17 +382,27 @@ export function GpuLab({ p, spin, ex }: { p: V3; spin: () => number; ex: () => n
         <group rotation={[Math.PI, 0, 0]} position={[-cx, 0, 0]}>
           <group position={[0, -GPU.y, -cz]}>
             <group ref={(g) => (parts.current[0] = g)}>
-              <GpuShroudOnly spin={spin} />
+              <Gpu spin={spin} part="shroud" />
             </group>
             <group ref={(g) => (parts.current[1] = g)}>
-              <Gpu spin={spin} shroud={false} />
+              <Gpu spin={spin} part="cooler" />
             </group>
             <group ref={(g) => (parts.current[2] = g)}>
-              <GpuChips />
-              <Box p={[cx, GPU.y - 0.08, cz]} s={[GPU.x1 - GPU.x0, 0.16, GPU.z1 - GPU.z0]} m={n.board} />
+              <Gpu spin={spin} part="pcb" />
+              {/* dane między pamięciami a układem GPU (w obie strony) */}
+              {VRAM_AT.map(([dx, dz], i) => {
+                const a: V3 = [-7 + dx, GPU.y - 0.4, 7.5 + dz];
+                const b: V3 = [-7, GPU.y - 0.4, 7.5];
+                return (
+                  <group key={i}>
+                    <EnergyFlow path={[a, b]} count={6} speed={4} size={0.16} color="#c4b5fd" />
+                    <EnergyFlow path={[b, a]} count={6} speed={4} size={0.16} color="#86efac" />
+                  </group>
+                );
+              })}
             </group>
             <group ref={(g) => (parts.current[3] = g)}>
-              <Box p={[cx, GPU.y + 0.25, cz]} s={[GPU.x1 - GPU.x0, 0.3, GPU.z1 - GPU.z0]} m={n.aluDark} />
+              <Gpu spin={spin} part="back" />
             </group>
           </group>
         </group>
@@ -389,28 +410,6 @@ export function GpuLab({ p, spin, ex }: { p: V3; spin: () => number; ex: () => n
     </LabStage>
   );
 }
-/** Sama osłona z wentylatorami (do widoku rozłożonego). */
-function GpuShroudOnly({ spin }: { spin: () => number }) {
-  const n = MAT();
-  const { x0, x1, y, z0, z1, cool } = GPU;
-  const cx = (x0 + x1) / 2;
-  const cz = (z0 + z1) / 2;
-  return (
-    <group>
-      <Box p={[cx, y - cool + 0.2, z0 + 0.15]} s={[x1 - x0, 0.4, 0.3]} m={n.plastic} />
-      <Box p={[cx, y - cool + 0.2, z1 - 0.15]} s={[x1 - x0, 0.4, 0.3]} m={n.plastic} />
-      {[x0 + 6.3, cx + 0.4, x1 - 5.2].map((x) => (
-        <group key={x}>
-          <mesh position={[x, y - cool + 0.2, cz]} rotation={[Math.PI / 2, 0, 0]} material={n.plastic}>
-            <ringGeometry args={[4.5, 5.3, 40]} />
-          </mesh>
-          <Fan p={[x, y - cool + 0.75, cz]} d={8.8} axis="y" spin={spin} frame={false} blades={11} />
-        </group>
-      ))}
-    </group>
-  );
-}
-
 /* ================= od trójkątów do pikseli ================= */
 
 /** Rzut kuli o promieniu 1 na siatkę R × R: jasność piksela z oświetlenia (lub −1 – tło). */

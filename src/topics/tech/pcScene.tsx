@@ -672,7 +672,7 @@ export function PcScene({ params }: SceneProps) {
           <Lbl pos={pc(EPS.x, EPS.y + 2.5, 4)} sub color="#fde68a">
             8-pin do procesora
           </Lbl>
-          <Lbl pos={pc(GPU.x1 - 6, GPU.y + 1, GPU.z1 + 2)} sub color="#fde68a">
+          <Lbl pos={pc(GPU.x1 - 13, GPU.y + 1.5, GPU.z1 + 2.5)} sub color="#fde68a">
             16-pin do karty
           </Lbl>
           <Lbl pos={pc(HDD.x0 + 4, HDD.y1 + 2, 6)} sub color="#fde68a">

@@ -280,7 +280,7 @@ const cpuModule: PartModule = {
             Rdzeń z góry, powiększony ok. 50 razy. Niebieskie bloki to <b>8 rdzeni wydajnych</b> – szybkich, do trudnych zadań. Zielone to <b>rdzenie oszczędne</b> – mniejsze i zużywające mniej prądu, do zadań w tle. Każdy rdzeń to jakby osobny procesor.
           </p>
           <p>
-            Fioletowe pasy to <b>pamięć podręczna L3</b> – szybka pamięć tuż obok rdzeni, żeby nie czekały na wolniejszy RAM. Złota szyna w kształcie pierścienia łączy wszystkie bloki. Na bokach: kontroler pamięci RAM, układ graficzny i złącza PCIe.
+            Fioletowe pasy to <b>pamięć podręczna L3</b> – szybka pamięć tuż obok rdzeni, żeby nie czekały na wolniejszy RAM. Złota szyna w kształcie pierścienia łączy wszystkie bloki – kolorowe kropki to pakiety danych, które krążą po niej w obie strony. Na bokach: kontroler pamięci RAM, układ graficzny i złącza PCIe.
           </p>
         </>
       ),
@@ -436,7 +436,7 @@ const gpuModule: PartModule = {
       body: (
         <>
           <p>
-            <b>Karta graficzna</b> rozsunięta na warstwy i odwrócona wentylatorami do góry. To osobny komputer w komputerze: ma własny procesor (GPU), własną pamięć, zasilanie i chłodzenie. Rysuje obraz – w grze nawet 144 razy na sekundę – i liczy zadania sztucznej inteligencji.
+            <b>Karta graficzna</b> rozsunięta na warstwy i odwrócona wentylatorami do góry. Kulki między pamięciami a układem GPU to dane – przepływa ich ponad 500 GB na sekundę. To osobny komputer w komputerze: ma własny procesor (GPU), własną pamięć, zasilanie i chłodzenie. Rysuje obraz – w grze nawet 144 razy na sekundę – i liczy zadania sztucznej inteligencji.
           </p>
           <p>Kliknij podpis części. Numery prowadzą do zakładek: od trójkątów do pikseli, rdzenie i matryca monitora.</p>
         </>

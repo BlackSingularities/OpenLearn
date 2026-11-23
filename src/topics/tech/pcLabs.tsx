@@ -447,42 +447,151 @@ export const DIE_BLOCKS: { name: string; c: string; blocks: Blk[] }[] = [
 ];
 
 /**
- * Rdzeń procesora z góry, powiększony ok. 50×: rdzenie wydajne i oszczędne, pamięć podręczna, układ graficzny,
- * kontroler pamięci. Bloki migają, gdy „pracują”.
+ * Rysunek rdzenia jak na zdjęciu prawdziwego układu (1 jednostka = 10 px): w rdzeniach wydajnych pasy jednostek
+ * (pobieranie i dekodowanie, wykonawcze, pamięć L1/L2 o regularnym wzorze komórek), rdzenie oszczędne w grupach
+ * po cztery ze wspólną L2, plasterki L3, siatka jednostek układu graficznego, pasy złączy kontrolera i PCIe.
+ */
+let DIE_TEX: THREE.CanvasTexture | null = null;
+function dieTex() {
+  if (DIE_TEX) return DIE_TEX;
+  const S = 10;
+  const W = 120 * S;
+  const H = 52 * S;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d')!;
+  const r = rng(29);
+  const X = (x: number) => (x + 60) * S;
+  const Z = (z: number) => (z + 26) * S;
+  g.fillStyle = '#231d3a';
+  g.fillRect(0, 0, W, H);
+  for (let k = 0; k < 4000; k++) {
+    g.fillStyle = `rgba(${120 + r() * 80},${100 + r() * 60},${160 + r() * 80},${0.05 + r() * 0.08})`;
+    g.fillRect(r() * W, r() * H, 2 + r() * 6, 1 + r() * 3);
+  }
+  /** Regularny wzór komórek pamięci SRAM. */
+  const sram = (x0: number, y0: number, w: number, h: number, a: string, b: string) => {
+    g.fillStyle = a;
+    g.fillRect(x0, y0, w, h);
+    g.fillStyle = b;
+    for (let y = y0 + 2; y < y0 + h - 2; y += 4) for (let x = x0 + 2; x < x0 + w - 2; x += 4) g.fillRect(x, y, 2, 2);
+    g.strokeStyle = 'rgba(255,255,255,0.25)';
+    g.lineWidth = 1;
+    for (let x = x0; x < x0 + w; x += 24) g.strokeRect(x + 0.5, y0 + 0.5, 24, h - 1);
+  };
+  /** Blok „logiki” – nieregularne prostokąty w kilku odcieniach. */
+  const logic = (x0: number, y0: number, w: number, h: number, cols: string[]) => {
+    for (let k = 0; k < (w * h) / 60; k++) {
+      g.fillStyle = cols[Math.floor(r() * cols.length)];
+      const ww = 3 + r() * 14;
+      const hh = 2 + r() * 8;
+      g.fillRect(x0 + r() * (w - ww), y0 + r() * (h - hh), ww, hh);
+    }
+  };
+  DIE_BLOCKS.forEach((grp, gi) =>
+    grp.blocks.forEach((b) => {
+      const x0 = X(b.x - b.w / 2);
+      const y0 = Z(b.z - b.d / 2);
+      const w = b.w * S;
+      const h = b.d * S;
+      g.fillStyle = '#17132a';
+      g.fillRect(x0, y0, w, h);
+      if (gi === 0) {
+        // rdzeń wydajny: dekodowanie, jednostki wykonawcze, L1 i L2
+        logic(x0 + 3, y0 + 3, w - 6, h * 0.3, ['#7b5a3a', '#9a7b4f', '#5d4a63', '#b08860']);
+        logic(x0 + 3, y0 + h * 0.33, w * 0.62, h * 0.4, ['#3f6b5a', '#5c8a6c', '#2f4f55', '#6aa080']);
+        sram(x0 + w * 0.67, y0 + h * 0.33, w * 0.3, h * 0.4, '#2c3d66', '#5a78b8');
+        sram(x0 + 3, y0 + h * 0.76, w - 6, h * 0.21, '#33356e', '#6c70c6');
+      } else if (gi === 1) {
+        logic(x0 + 2, y0 + 2, w - 4, h * 0.55, ['#3d6b46', '#5d9064', '#2a4b39']);
+        sram(x0 + 2, y0 + h * 0.6, w - 4, h * 0.37, '#2d4a3d', '#5f9a78');
+      } else if (gi === 2) {
+        sram(x0 + 2, y0 + 2, w - 4, h - 4, '#3a2c5e', '#7a62b8');
+      } else if (gi === 3) {
+        for (let yy = 0; yy < 8; yy++)
+          for (let xx = 0; xx < 3; xx++) {
+            const ex = x0 + 6 + xx * ((w - 12) / 3);
+            const ey = y0 + 6 + yy * ((h - 12) / 8);
+            logic(ex, ey, (w - 12) / 3 - 4, (h - 12) / 8 - 4, ['#7a3a3a', '#a65555', '#5a2d3d']);
+          }
+      } else if (gi === 4) {
+        for (let yy = y0 + 4; yy < y0 + h - 4; yy += 7) {
+          g.fillStyle = yy % 14 ? '#8a6a2a' : '#b89040';
+          g.fillRect(x0 + 4, yy, w - 8, 4);
+        }
+      } else {
+        for (let xx = x0 + 4; xx < x0 + w - 4; xx += 9) {
+          g.fillStyle = '#7c8594';
+          g.fillRect(xx, y0 + 6, 5, h - 12);
+        }
+      }
+      g.strokeStyle = 'rgba(255,255,255,0.35)';
+      g.lineWidth = 2;
+      g.strokeRect(x0 + 1, y0 + 1, w - 2, h - 2);
+    }),
+  );
+  // szyna pierścieniowa
+  g.strokeStyle = '#d8b04a';
+  g.lineWidth = 6;
+  g.strokeRect(X(-52), Z(-8.5), 90 * S, 17 * S);
+  DIE_TEX = new THREE.CanvasTexture(c);
+  DIE_TEX.colorSpace = THREE.SRGBColorSpace;
+  DIE_TEX.anisotropy = 8;
+  return DIE_TEX;
+}
+
+/**
+ * Rdzeń procesora z góry, powiększony ok. 50×: rysunek jak na zdjęciu prawdziwego układu, nad nim półprzezroczyste
+ * kolorowe ramki bloków, które rozjaśniają się, gdy blok „pracuje”, i pakiety danych krążące po szynie
+ * pierścieniowej między rdzeniami, pamięcią podręczną, układem graficznym i kontrolerem pamięci.
  */
 export function DieLab({ p }: { p: V3 }) {
   const n = MAT();
-  const mats = useMemo(() => DIE_BLOCKS.map((g) => new THREE.MeshStandardMaterial({ color: g.c, emissive: g.c, emissiveIntensity: 0.2, roughness: 0.4, metalness: 0.3 })), []);
-  const refs = useRef<(THREE.Mesh | null)[]>([]);
+  const mats = useMemo(
+    () =>
+      DIE_BLOCKS.flatMap((g) => g.blocks.map(() => new THREE.MeshBasicMaterial({ color: g.c, transparent: true, opacity: 0.15, depthWrite: false, toneMapped: false }))),
+    [],
+  );
   const flat = useMemo(() => DIE_BLOCKS.flatMap((g, gi) => g.blocks.map((b) => ({ ...b, gi }))), []);
   const ph = useMemo(() => {
     const r = rng(3);
     return flat.map(() => r() * 10);
   }, [flat]);
+  const top = useMemo(() => new THREE.MeshStandardMaterial({ map: dieTex(), roughness: 0.3, metalness: 0.35, emissive: '#ffffff', emissiveMap: dieTex(), emissiveIntensity: 0.25 }), []);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    refs.current.forEach((m, i) => {
-      if (!m) return;
-      const a = 0.5 + 0.5 * Math.sin(t * (1.5 + (i % 5) * 0.7) + ph[i]);
-      m.scale.y = 0.6 + a * 0.8;
+    mats.forEach((m, i) => {
+      const a = Math.max(0, Math.sin(t * (1.2 + (i % 5) * 0.55) + ph[i]));
+      m.opacity = 0.08 + 0.4 * a * a;
     });
   });
+  // pętla szyny pierścieniowej (prostokąt) – dwa kierunki ruchu
+  const ring: V3[] = [
+    [-52, 0.6, -8.5],
+    [38, 0.6, -8.5],
+    [38, 0.6, 8.5],
+    [-52, 0.6, 8.5],
+    [-52, 0.6, -8.5],
+  ];
   return (
     <LabStage p={p}>
-      <group position={[0, -30, 0]} rotation={[0.5, 0, 0]}>
-        <Box p={[0, -1, 0]} s={[124, 2, 56]} m={n.die} />
-        <Box p={[0, 0.02, 0]} s={[120, 0.05, 52]} m={n.dieShine} />
-        {/* szyna pierścieniowa łącząca bloki */}
-        <Box p={[-8, 0.3, 0]} s={[100, 0.4, 1]} m={n.gold} />
+      <group position={[0, -30, 0]} rotation={[0.55, 0, 0]}>
+        <Box p={[0, -1.2, 0]} s={[124, 2.4, 56]} m={n.die} />
+        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} material={top}>
+          <planeGeometry args={[120, 52]} />
+        </mesh>
         {flat.map((b, i) => (
-          <mesh key={i} ref={(m) => (refs.current[i] = m)} position={[b.x, 0, b.z]} material={mats[b.gi]}>
-            <boxGeometry args={[b.w, b.h ?? 1.6, b.d]} />
+          <mesh key={i} position={[b.x, 0.35, b.z]} material={mats[i]}>
+            <boxGeometry args={[b.w, 0.6, b.d]} />
           </mesh>
         ))}
+        <EnergyFlow path={ring} count={40} speed={30} size={0.9} color="#fde68a" />
+        <EnergyFlow path={[...ring].reverse()} count={40} speed={30} size={0.9} color="#7dd3fc" />
         <Lbl pos={[-33, 6, -26]} sub color="#93c5fd">
           8 rdzeni wydajnych
         </Lbl>
-        <Lbl pos={[16, 6, 26]} sub color={LC.green}>
+        <Lbl pos={[18, 6, 26]} sub color={LC.green}>
           12 rdzeni oszczędnych
         </Lbl>
         <Lbl pos={[-20, 6, 0]} sub color={LC.violet}>
@@ -496,6 +605,9 @@ export function DieLab({ p }: { p: V3 }) {
         </Lbl>
         <Lbl pos={[0, 4, -30]} sub color={LC.part}>
           złącza PCIe i wejścia/wyjścia
+        </Lbl>
+        <Lbl pos={[-6, 4, 11]} sub color={LC.gold}>
+          szyna pierścieniowa – pakiety danych
         </Lbl>
       </group>
     </LabStage>
